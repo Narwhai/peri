@@ -1,0 +1,10 @@
+[package]
+name = "rune-music"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+lofty = "0.25.5"
+rodio = { version = "0.23.0", features = ["symphonia-all"] }
+rune = { git = "https://github.com/anomalyco/rune", rev = "7ead7d63fcf6f9dd9669385a8b90e2ae80015d7b", version = "0.0.1", features = ["native-file-dialog"] }
+rune-kit = { git = "https://github.com/anomalyco/rune", rev = "7ead7d63fcf6f9dd9669385a8b90e2ae80015d7b", version = "0.0.1" }
