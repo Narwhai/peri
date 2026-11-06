@@ -6,8 +6,8 @@ use rune_kit::{Kit, Placement, Select, TextInput, popover, scrim};
 
 use super::*;
 use crate::app::{App, Panel};
-use crate::base::property::Property;
-use crate::base::view::{Direction, GroupBy, Sort, View};
+use crate::base::property::{Mode, Property};
+use crate::base::view::{Direction, GroupBy, Layout, Sort, View};
 use crate::icons;
 use crate::palette::Palette;
 
@@ -38,7 +38,8 @@ pub(super) fn toolbar(s: &App, p: &Palette, kit: &Kit, layer: &mut Vec<El>) -> E
         tool_button("filter", &icons::FILTER, filter_label, view.filter.condition_count() > 0, filter_open, p).help(if view.filter.children.is_empty() { "Filter songs".to_string() } else { view.filter.summary() }),
         |layer| super::filters::filter_body(s, p, kit, layer),
     );
-    row()
+    let albums = view.mode == Mode::Albums;
+    let mut bar = row()
         .key("toolbar")
         .w_full()
         .h(BAR_H)
@@ -48,7 +49,29 @@ pub(super) fn toolbar(s: &App, p: &Palette, kit: &Kit, layer: &mut Vec<El>) -> E
         .fill(p.bg)
         .border_bottom(p)
         .child(views)
-        .child(el().grow(1.0))
+        .child(el().w(8.0))
+        .child(segmented("mode", &[("songs", "Songs"), ("albums", "Albums")], if albums { "albums" } else { "songs" }, p, |s: &mut App, v: &str| {
+            let mode = if v == "albums" { Mode::Albums } else { Mode::Songs };
+            if s.base.active().mode != mode {
+                s.base.active_mut().set_mode(mode);
+                s.collapsed.clear();
+                s.filter_edits.clear();
+                s.show_library();
+                s.views_changed();
+            }
+        }));
+    if albums {
+        let layout = if view.layout == Layout::Grid { "grid" } else { "list" };
+        bar = bar.child(el().w(4.0)).child(segmented("layout", &[("grid", "Grid"), ("list", "List")], layout, p, |s: &mut App, v: &str| {
+            let layout = if v == "grid" { Layout::Grid } else { Layout::List };
+            if s.base.active().layout != layout {
+                s.base.active_mut().layout = layout;
+                s.show_library();
+                s.views_changed();
+            }
+        }));
+    }
+    bar.child(el().grow(1.0))
         .child(sort)
         .child(group)
         .child(filter)
@@ -102,6 +125,35 @@ fn tool_button(key: &'static str, glyph: &'static rune::Icon, label: String, act
         .label(label.clone())
         .child(icon(glyph, 15.0).color(ink))
         .child(text(label).key("label").font(TITLE).color(ink))
+}
+
+/// A segmented control: one pill per option, the current one filled.
+fn segmented(key: &'static str, options: &[(&'static str, &'static str)], current: &str, p: &Palette, choose: impl Fn(&mut App, &str) + Clone + 'static) -> El {
+    let mut seg = row().key(key).h(28.0).padding(2.0).gap(2.0).radius(8.0).fill(p.ui.alpha(0.45)).role("radiogroup").label(key).focus_group();
+    for &(value, label) in options {
+        let on = value == current;
+        let choose = choose.clone();
+        seg = seg.child(
+            row()
+                .key(value)
+                .h(24.0)
+                .px(10.0)
+                .radius(6.0)
+                .center()
+                .fill(if on { p.bg2 } else { p.bg.alpha(0.0) })
+                .shadow(if on { 1.0 } else { 0.0 }, if on { 2.0 } else { 0.0 }, rune::Color::BLACK.alpha(if on { 0.18 } else { 0.0 }))
+                .hover(p.ui.alpha(0.3))
+                .cursor(Cursor::Pointer)
+                .role("radio")
+                .checked(on)
+                .focusable(true)
+                .label(label)
+                .motion(SNAPPY)
+                .on_press(move |s: &mut App| choose(s, value))
+                .child(text(label).font(TITLE).color(if on { p.tx } else { p.tx2 })),
+        );
+    }
+    seg
 }
 
 // Views
@@ -271,7 +323,7 @@ fn sort_body<'a>(s: &'a App, p: &'a Palette, kit: &'a Kit) -> impl FnOnce(&mut V
         let view = s.base.active();
         let mut body = col().key("sort-body").w(360.0).padding(8.0).gap(4.0);
         if view.sorts.is_empty() {
-            body = body.child(hint("Songs are in library order: artist, album, then track.", p));
+            body = body.child(hint(if view.mode == Mode::Albums { "Albums are in library order: artist, then album." } else { "Songs are in library order: artist, album, then track." }, p));
         }
         for (n, sort) in view.sorts.iter().enumerate() {
             let key = format!("sort{n}");
@@ -298,7 +350,7 @@ fn sort_body<'a>(s: &'a App, p: &'a Palette, kit: &'a Kit) -> impl FnOnce(&mut V
             }));
             body = body.child(r);
         }
-        let unused = Property::ALL.into_iter().find(|p| !view.sorts.iter().any(|s| s.property == *p));
+        let unused = Property::for_mode(view.mode).iter().copied().find(|p| !view.sorts.iter().any(|s| s.property == *p));
         if let Some(next) = unused {
             body = body.child(menu_row("add-sort", &icons::PLUS, "Add sort", p).on_press(move |s: &mut App| {
                 s.base.active_mut().sorts.push(Sort { property: next, direction: Direction::Asc });
@@ -317,9 +369,11 @@ fn group_body<'a>(s: &'a App, p: &'a Palette, kit: &'a Kit) -> impl FnOnce(&mut 
         let mut body = col().key("group-body").w(360.0).padding(8.0).gap(4.0);
         match view.group_by {
             None => {
-                body = body.child(hint("Group songs into sections by one property. A song with several artists or genres shows under each.", p));
+                let what = if view.mode == Mode::Albums { "albums" } else { "songs" };
+                body = body.child(hint(&format!("Group {what} into sections by one property. One with several artists or genres shows under each."), p));
                 body = body.child(menu_row("add-group", &icons::PLUS, "Group by…", p).on_press(|s: &mut App| {
-                    s.base.active_mut().group_by = Some(GroupBy { property: Property::Album, direction: Direction::Asc });
+                    let property = if s.mode() == Mode::Albums { Property::AlbumArtist } else { Property::Album };
+                    s.base.active_mut().group_by = Some(GroupBy { property, direction: Direction::Asc });
                     s.collapsed.clear();
                     s.views_changed();
                 }));
@@ -370,7 +424,7 @@ fn group_body<'a>(s: &'a App, p: &'a Palette, kit: &'a Kit) -> impl FnOnce(&mut 
 
 /// A select over every property; `set` applies the choice before the views save.
 pub(super) fn property_select(s: &App, kit: &Kit, layer: &mut Vec<El>, key: String, current: Property, set: impl Fn(&mut App, Property) + Clone + 'static) -> El {
-    let labels: Vec<&str> = Property::ALL.iter().map(|p| p.label()).collect();
+    let labels: Vec<&str> = Property::for_mode(s.mode()).iter().map(|p| p.label()).collect();
     select(s, kit, layer, key, &labels, current.label(), 128.0, move |s, label| {
         if let Some(prop) = Property::from_label(label) {
             set(s, prop);

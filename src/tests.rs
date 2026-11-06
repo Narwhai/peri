@@ -260,7 +260,7 @@ fn real_library_groups_by_every_property() {
         let started = std::time::Instant::now();
         let e = evaluate(&view, &tracks, "");
         let took = started.elapsed();
-        let sample: Vec<String> = e.sections.iter().take(4).map(|s| format!("{} ({})", s.title, s.tracks.len())).collect();
+        let sample: Vec<String> = e.sections.iter().take(4).map(|s| format!("{} ({})", s.title, s.items.len())).collect();
         println!("{:>13}: {:>4} groups in {took:>9.2?}  {}", property.label(), e.sections.len(), sample.join(", "));
         assert_eq!(e.order.len(), tracks.len(), "every song plays once");
     }

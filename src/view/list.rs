@@ -1,9 +1,12 @@
 //! The track list: song rows, and sticky collapsible group headers in a grouped view.
 
-use rune::{Align, Cursor, El, GrowthSpec, ScrollSpec, Tx, col, el, icon, memo, row, text};
+use rune::{Align, Cursor, Cx, El, GrowthSpec, ScrollSpec, Tx, col, el, icon, memo, row, text};
 
+use super::albums::{columns_for, grid_row, grid_row_h, list_card};
 use super::*;
-use crate::app::{App, Row, header_key, row_key};
+use crate::app::{App, Row, album_key, grid_key, header_key, row_key};
+use crate::base::property::Mode;
+use crate::base::view::Layout;
 use crate::base::view::Section;
 use crate::icons;
 use crate::library::{AUDIO_EXTENSIONS, Track};
@@ -11,14 +14,22 @@ use crate::palette::Palette;
 
 const HEADER_H: f32 = 36.0;
 
-pub(super) fn list(s: &App, p: &Palette) -> El {
+/// The list's horizontal padding, and the grid's inner width from the list's.
+const LIST_PX: f32 = 8.0;
+const GRID_PX: f32 = 16.0;
+
+pub(super) fn list(s: &App, p: &Palette, cx: &mut Cx<App>) -> El {
     if s.tracks.is_empty() {
         return empty_state(s, p);
     }
-    if s.filtered.is_empty() {
+    let albums = s.mode() == Mode::Albums;
+    let grid = albums && s.base.active().layout == Layout::Grid;
+    let empty = if albums { s.shown_albums.is_empty() } else { s.filtered.is_empty() };
+    if empty {
         let search = s.search.text.trim();
+        let what = if albums { "albums" } else { "songs" };
         let detail = if search.is_empty() {
-            format!("No songs match the filters of “{}”.", s.base.active().name)
+            format!("No {what} match the filters of “{}”.", s.base.active().name)
         } else {
             format!("Nothing in “{}” matches “{search}”.", s.base.active().name)
         };
@@ -34,21 +45,43 @@ pub(super) fn list(s: &App, p: &Palette) -> El {
     }
     let p = *p;
     let count = s.rows.len();
+    // The grid's width, read from layout; the column count follows it (see `set_columns`).
+    let pad = if grid { GRID_PX } else { LIST_PX };
+    let width = cx.layout_with("tracks", |r| (r[2] / 4.0).round() * 4.0).unwrap_or(960.0) - 2.0 * pad;
+    let estimate = match (albums, grid) {
+        (_, true) => grid_row_h(width, s.columns),
+        (true, false) => 520.0,
+        (false, _) => ROW_H,
+    };
     // Rows are rebuilt from state at layout time, so the closures read the list through `s`.
     let list = col()
         .key("rows")
         .w_full()
-        .px(8.0)
-        .py(6.0)
+        .px(pad)
+        .py(if grid { 12.0 } else { 6.0 })
         .growth(GrowthSpec::default())
         .virtual_rows(
             count,
-            ROW_H,
+            estimate,
             |s: &App, n| match s.rows[n] {
                 Row::Header(g) => header_key(g).into(),
                 Row::Track { track, section } => row_key(track, section).into(),
+                Row::Album { album, section } => album_key(album, section).into(),
+                Row::Grid { start, section } => grid_key(start, section).into(),
             },
             move |s: &App, n| match s.rows[n] {
+                Row::Album { album, section } => {
+                    let current = s.current.filter(|c| s.albums[album].tracks.contains(c));
+                    let covers = s.covers.as_ref().map_or(0, |c| c.generation());
+                    memo(album_key(album, section), (s.list_version, current, s.playing, s.selected, covers, p.dark), || list_card(s, album, section, &p))
+                }
+                Row::Grid { start, section } => {
+                    let playing = s.current.filter(|c| s.grid_albums(start, section).iter().any(|&a| s.albums[a].tracks.contains(c)));
+                    let covers = s.covers.as_ref().map_or(0, |c| c.generation());
+                    memo(grid_key(start, section), (s.list_version, playing, s.playing, covers, width.to_bits(), p.dark), || {
+                        grid_row(s, start, section, width, &p)
+                    })
+                }
                 Row::Header(g) => {
                     let section = &s.sections[g];
                     let open = !s.collapsed.contains(&section.title);
@@ -73,13 +106,18 @@ pub(super) fn list(s: &App, p: &Palette) -> El {
         .min_h(0.0)
         .scroll(ScrollSpec { stick_bottom: false })
         .scroll_margin(HEADER_H)
+        .on_layout(move |s: &mut App, r| {
+            if s.mode() == Mode::Albums && s.base.active().layout == Layout::Grid {
+                s.set_columns(columns_for(r[2] - 2.0 * GRID_PX));
+            }
+        })
         .child(list)
 }
 
 /// A song's number in its group, or in the whole list when ungrouped.
 fn number_in(s: &App, track: usize, section: Option<usize>) -> usize {
     let within = match section {
-        Some(g) => &s.sections[g].tracks,
+        Some(g) => &s.sections[g].items,
         None => &s.filtered,
     };
     within.iter().position(|&i| i == track).map_or(0, |n| n + 1)
@@ -103,7 +141,7 @@ fn group_header(section: &Section, g: usize, open: bool, p: &Palette) -> El {
         .stuck_shadow(rune::Shadow { x: 0.0, y: 1.0, blur: 0.0, spread: 0.0, color: p.ui.alpha(0.8), inset: false })
         .role("button")
         .expanded(open)
-        .label(format!("{title}, {}", super::plural(section.tracks.len(), "song")))
+        .label(format!("{title}, {}", section.items.len()))
         .cursor(Cursor::Pointer)
         .hover(p.ui.alpha(0.25))
         .on_press_tx(move |s: &mut App, tx: &mut Tx| {
@@ -112,7 +150,7 @@ fn group_header(section: &Section, g: usize, open: bool, p: &Palette) -> El {
         })
         .child(el().w(28.0).center().child(chevron))
         .child(text(section.title.clone()).font(GROUP).color(title_color).truncate().shrink())
-        .child(text(format!("{}", section.tracks.len())).key("count").font(NUM).color(p.tx3))
+        .child(text(format!("{}", section.items.len())).key("count").font(NUM).color(p.tx3))
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -6,9 +6,12 @@ use std::time::Duration;
 
 use rune::{FileDialogOptions, Image, ImageCache, Key, KeyEvent, TextEdit, Tx, Waker};
 
+use crate::album::{self, Album, AlbumId};
 use crate::audio::{self, Engine};
+use crate::base::property::Mode;
+use crate::covers::Covers;
 use crate::base::store::{Base, Store};
-use crate::base::view::{Evaluated, Section, evaluate};
+use crate::base::view::{Evaluated, Layout, Section, evaluate};
 use crate::library::{self, ScanMsg, Track};
 use crate::queue::{Queue, Repeat, Rng};
 
@@ -44,14 +47,33 @@ pub enum Panel {
     Filter,
 }
 
+/// What fills the space between the toolbar and the player.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Page {
+    /// The active view.
+    Library,
+    /// One album's page, by identity so it survives a rescan.
+    Album(AlbumId),
+}
+
 pub struct App {
     pub tracks: Vec<Track>,
-    /// Indices into `tracks` the active view and search show, in play order.
+    /// The library gathered into albums, in library order.
+    pub albums: Vec<Album>,
+    pub page: Page,
+    /// Album covers for cards and lists; `None` until setup has a waker.
+    pub covers: Option<Covers>,
+    /// Indices into `tracks` the active view and search show, in play order. In an album view,
+    /// every song of the shown albums, album by album.
     pub filtered: Vec<usize>,
+    /// Album views: indices into `albums` the view shows, in order.
+    pub shown_albums: Vec<usize>,
     /// The active view's groups, empty when it isn't grouped.
     pub sections: Vec<Section>,
     /// What the list shows: group headers and songs, skipping collapsed groups' songs.
     pub rows: Vec<Row>,
+    /// Covers per grid row, from the list's width.
+    pub columns: usize,
     /// Bumped whenever `filtered` or `sections` change, so the list knows its rows did.
     pub list_version: u64,
     /// The saved views; edits save at once.
@@ -91,16 +113,21 @@ pub struct App {
     output: Output,
     rng: Rng,
     waker: Option<Waker>,
-    covers: Option<ImageCache>,
+    images: Option<ImageCache>,
 }
 
 impl App {
     pub fn new(output: Output, store: Store) -> App {
         App {
             tracks: Vec::new(),
+            albums: Vec::new(),
+            page: Page::Library,
+            covers: None,
             filtered: Vec::new(),
+            shown_albums: Vec::new(),
             sections: Vec::new(),
             rows: Vec::new(),
+            columns: 4,
             list_version: 0,
             base: store.load(),
             store,
@@ -128,14 +155,15 @@ impl App {
             output,
             rng: Rng::from_time(),
             waker: None,
-            covers: None,
+            images: None,
         }
     }
 
     /// `AppSpec::setup`: keep the waker for the scan thread and cover decoding, then scan any
     /// folders or files named on the command line.
     pub fn setup(&mut self, waker: Waker) {
-        self.covers = Some(ImageCache::new(waker.clone()));
+        self.images = Some(ImageCache::new(waker.clone()));
+        self.covers = Some(if matches!(self.output, Output::Silent) { Covers::synchronous(waker.clone()) } else { Covers::new(waker.clone()) });
         self.waker = Some(waker);
         let roots: Vec<PathBuf> = rune::extra_args().iter().map(PathBuf::from).collect();
         if !roots.is_empty() {
@@ -224,6 +252,7 @@ impl App {
             tracks = all;
         }
         self.tracks = tracks;
+        self.albums = album::build(&self.tracks);
         let find = |path: &Option<PathBuf>, tracks: &[Track]| path.as_ref().and_then(|p| tracks.iter().position(|t| &t.path == p));
         self.selected = find(&selected_path, &self.tracks);
         let current = find(&playing_path, &self.tracks);
@@ -244,10 +273,84 @@ impl App {
     /// Re-evaluates the active view and search over the library.
     pub fn refilter(&mut self) {
         let query = self.search.text.trim().to_lowercase();
-        let Evaluated { order, sections } = evaluate(self.base.active(), &self.tracks, &query);
-        self.filtered = order;
-        self.sections = sections;
+        let view = self.base.active();
+        match view.mode {
+            Mode::Songs => {
+                let Evaluated { order, sections } = evaluate(view, &self.tracks, &query);
+                self.filtered = order;
+                self.sections = sections;
+                self.shown_albums.clear();
+            }
+            Mode::Albums => {
+                // Search finds albums by title and artist, and albums holding a matching song.
+                let holds_match: Vec<bool> = self.albums.iter().map(|a| !query.is_empty() && a.tracks.iter().any(|&i| self.tracks[i].matches(&query))).collect();
+                let mut unsearched = evaluate(view, &self.albums, "");
+                let keep = |i: usize| query.is_empty() || holds_match[i] || crate::base::property::Record::matches(&self.albums[i], &query);
+                unsearched.order.retain(|&i| keep(i));
+                for section in &mut unsearched.sections {
+                    section.items.retain(|&i| keep(i));
+                }
+                unsearched.sections.retain(|s| !s.items.is_empty());
+                self.filtered = unsearched.order.iter().flat_map(|&a| self.albums[a].tracks.iter().copied()).collect();
+                self.shown_albums = unsearched.order;
+                self.sections = unsearched.sections;
+            }
+        }
         self.rebuild_rows();
+    }
+
+    pub fn mode(&self) -> Mode {
+        self.base.active().mode
+    }
+
+    /// The album shown on the album page, if it's still in the library.
+    pub fn open_album(&self) -> Option<usize> {
+        match &self.page {
+            Page::Album(id) => self.albums.iter().position(|a| &a.id() == id),
+            Page::Library => None,
+        }
+    }
+
+    pub fn show_album(&mut self, a: usize, tx: &mut Tx) {
+        if let Some(album) = self.albums.get(a) {
+            self.page = Page::Album(album.id());
+            self.close_panel();
+            tx.scroll_to_instant("album-page", 0.0, 0.0);
+        }
+    }
+
+    pub fn show_library(&mut self) {
+        self.page = Page::Library;
+    }
+
+    /// The album a song belongs to.
+    pub fn album_of(&self, track: usize) -> Option<usize> {
+        self.albums.iter().position(|a| a.tracks.contains(&track))
+    }
+
+    /// Plays album `a` from its song `from` (else its first), queueing the albums after it
+    /// in the view's order (or just this album when it isn't in the view).
+    pub fn play_album(&mut self, a: usize, from: Option<usize>, tx: &mut Tx) {
+        let Some(album) = self.albums.get(a) else { return };
+        let Some(&first) = from.or(album.tracks.first().copied()).as_ref() else { return };
+        let list = if self.shown_albums.contains(&a) { self.filtered.clone() } else { album.tracks.clone() };
+        self.selected = Some(first);
+        self.queue = Some(Queue::new(list, first, false, &mut self.rng));
+        if self.shuffle {
+            self.shuffle = false;
+        }
+        self.load(first, tx);
+    }
+
+    /// Shuffles album `a` alone.
+    pub fn shuffle_album(&mut self, a: usize, tx: &mut Tx) {
+        let Some(album) = self.albums.get(a) else { return };
+        let list = album.tracks.clone();
+        let start = list[(self.rng.below(list.len() as u64)) as usize];
+        self.shuffle = true;
+        self.queue = Some(Queue::new(list, start, true, &mut self.rng));
+        self.selected = Some(start);
+        self.load(start, tx);
     }
 
     fn rebuild_rows(&mut self) {
@@ -269,17 +372,52 @@ impl App {
     }
 
     fn compute_rows(&self) -> Vec<Row> {
-        if self.sections.is_empty() {
-            return self.filtered.iter().map(|&i| Row::Track { track: i, section: None }).collect();
-        }
+        let grid = self.mode() == Mode::Albums && self.base.active().layout == Layout::Grid;
+        let columns = self.columns.max(1);
+        let items = |list: &[usize], section: Option<usize>, rows: &mut Vec<Row>| {
+            if grid {
+                rows.extend((0..list.len()).step_by(columns).map(|start| Row::Grid { start, section }));
+                return;
+            }
+            rows.extend(list.iter().map(|&i| match self.mode() {
+                Mode::Songs => Row::Track { track: i, section },
+                Mode::Albums => Row::Album { album: i, section },
+            }));
+        };
         let mut rows = Vec::new();
+        if self.sections.is_empty() {
+            let list = match self.mode() {
+                Mode::Songs => &self.filtered,
+                Mode::Albums => &self.shown_albums,
+            };
+            items(list, None, &mut rows);
+            return rows;
+        }
         for (n, section) in self.sections.iter().enumerate() {
             rows.push(Row::Header(n));
             if !self.collapsed.contains(&section.title) {
-                rows.extend(section.tracks.iter().map(|&i| Row::Track { track: i, section: Some(n) }));
+                items(&section.items, Some(n), &mut rows);
             }
         }
         rows
+    }
+
+    /// The grid's column count changed with the window's width.
+    pub fn set_columns(&mut self, columns: usize) {
+        if columns != self.columns {
+            self.columns = columns;
+            self.rebuild_rows();
+        }
+    }
+
+    /// The albums of a grid row.
+    pub fn grid_albums(&self, start: usize, section: Option<usize>) -> &[usize] {
+        let list = match section {
+            Some(n) => &self.sections[n].items,
+            None => &self.shown_albums,
+        };
+        let end = (start + self.columns.max(1)).min(list.len());
+        &list[start.min(end)..end]
     }
 
     pub fn toggle_section(&mut self, title: &str) {
@@ -330,7 +468,7 @@ impl App {
                 self.error = Some(e);
             }
         }
-        self.cover = self.covers.as_ref().and_then(|cache| library::read_cover(&path).map(|bytes| cache.load(bytes)));
+        self.cover = self.images.as_ref().and_then(|cache| library::read_cover(&path).map(|bytes| cache.load(bytes)));
     }
 
     pub fn stop(&mut self) {
@@ -464,7 +602,7 @@ impl App {
     pub fn move_selection(&mut self, delta: isize, tx: &mut Tx) {
         let shown: Vec<(usize, Option<usize>)> = self.rows.iter().filter_map(|r| match *r {
             Row::Track { track, section } => Some((track, section)),
-            Row::Header(_) => None,
+            Row::Header(_) | Row::Album { .. } | Row::Grid { .. } => None,
         }).collect();
         if shown.is_empty() {
             return;
@@ -489,6 +627,11 @@ pub enum Row {
     /// A group's header, by index into `App::sections`.
     Header(usize),
     Track { track: usize, section: Option<usize> },
+    /// Album views: an album card in the list layout.
+    Album { album: usize, section: Option<usize> },
+    /// Album views in the grid layout: a row of up to `App::columns` covers, from `start`
+    /// (an index into the section's albums, or into `shown_albums` when ungrouped).
+    Grid { start: usize, section: Option<usize> },
 }
 
 /// A song row's key: unique per group, since a song can be in several.
@@ -515,6 +658,21 @@ pub fn row_key(i: usize, section: Option<usize>) -> String {
     }
 }
 
+/// An album row's key, unique per group as a song's is.
+pub fn album_key(a: usize, section: Option<usize>) -> String {
+    match section {
+        Some(n) => format!("g{n}a{a}"),
+        None => format!("a{a}"),
+    }
+}
+
+pub fn grid_key(start: usize, section: Option<usize>) -> String {
+    match section {
+        Some(n) => format!("g{n}r{start}"),
+        None => format!("r{start}"),
+    }
+}
+
 pub fn header_key(n: usize) -> String {
     format!("g{n}")
 }
@@ -522,6 +680,9 @@ pub fn header_key(n: usize) -> String {
 /// `AppSpec::poll`: take scan results, follow the playing track, and move on when it ends.
 pub fn poll(s: &mut App, _: f64, tx: &mut Tx) -> bool {
     let mut changed = s.drain_scan();
+    if let Some(covers) = &s.covers {
+        changed |= covers.drain();
+    }
     if s.playing {
         let (finished, position) = s.engine().map_or((false, None), |e| (e.finished(), e.position()));
         if finished {
@@ -548,6 +709,10 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
             return true;
         }
         return false;
+    }
+    if ev.key == Key::Escape && s.page != Page::Library {
+        s.show_library();
+        return true;
     }
     if ev.is_command('f') {
         s.search.focused = true;

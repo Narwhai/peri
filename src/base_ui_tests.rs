@@ -130,7 +130,7 @@ fn grouping_shows_sticky_headers_that_collapse_and_next_follows_the_view() {
     assert!(rt.find(&header_key(0)).is_some());
 
     // Play the first New Age song; Next walks the view's order: the rest of New Age, then K-Pop.
-    let first = rt.state.sections[1].tracks[0];
+    let first = rt.state.sections[1].items[0];
     rt.update(|s, tx| s.play_index(first, tx));
     let mut played = vec![rt.state.tracks[first].title.clone()];
     for _ in 0..3 {

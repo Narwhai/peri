@@ -40,6 +40,11 @@ impl Rng {
         self.0.wrapping_mul(0x2545_f491_4f6c_dd1d)
     }
 
+    /// A number in `0..n` (`n` > 0).
+    pub fn below(&mut self, n: u64) -> u64 {
+        self.next() % n.max(1)
+    }
+
     /// Fisher–Yates.
     fn shuffle<T>(&mut self, v: &mut [T]) {
         for i in (1..v.len()).rev() {

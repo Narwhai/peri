@@ -118,3 +118,4 @@ line_icon!(COPY, "rm-copy", "M8 8 H20 V20 H8 Z", "M16 8 V4 H4 V16 H8");
 line_icon!(ARROW_UP, "rm-arrow-up", "M12 19 V5", "M6 11 L12 5 L18 11");
 line_icon!(COLLAPSE, "rm-collapse", "M7 9 L12 4 L17 9", "M7 15 L12 20 L17 15");
 line_icon!(EXPAND, "rm-expand", "M7 4 L12 9 L17 4", "M7 20 L12 15 L17 20");
+line_icon!(BACK, "rm-back", "M15 5 L8 12 L15 19");

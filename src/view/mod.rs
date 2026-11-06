@@ -1,5 +1,6 @@
 //! The window: a header with search, the track list, and the now-playing bar.
 
+mod albums;
 mod filters;
 mod list;
 mod player;
@@ -35,7 +36,10 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         .fill(p.bg)
         .child(header(s, &p, &kit))
         .child(toolbar)
-        .child(list::list(s, &p))
+        .child(match s.open_album() {
+            Some(a) => albums::album_page(s, a, &p),
+            None => list::list(s, &p, cx),
+        })
         .child(player::now_playing(s, &p))
         .on_drop_files(|s: &mut App, files, _tx| {
             s.drop_hover = false;
@@ -62,6 +66,10 @@ fn header(s: &App, p: &Palette, kit: &Kit) -> El {
         (Some(scan), _) if scan.found > 0 => format!("Scanning… {} files", scan.found),
         (Some(_), _) => "Scanning…".to_string(),
         (None, 0) => String::new(),
+        (None, _) if s.mode() == crate::base::property::Mode::Albums => match (s.shown_albums.len(), s.albums.len()) {
+            (shown, all) if shown == all => plural(all, "album"),
+            (shown, all) => format!("{shown} of {}", plural(all, "album")),
+        },
         (None, n) if s.filtered.len() == n => plural(n, "track"),
         (None, n) => format!("{} of {}", s.filtered.len(), plural(n, "track")),
     };

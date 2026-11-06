@@ -47,6 +47,20 @@ Views save on every change to `prefs.json` in the app's config folder:
 
 Collapsed groups are not saved.
 
+## Albums
+
+Each view lists either **Songs** or **Albums**; switch with the toggle in the toolbar.
+
+- **What counts as one album:** songs with the same album artist (else track artist), album title and year, ignoring case. The same title from two years is two albums, while multi-disc and multi-folder albums merge.
+- **Songs without an album tag:** they gather per artist under "Unknown album".
+- **Layouts:** album views have **Grid** (covers) or **List** (a card per album with its track table).
+- **Filter, sort and group:** these work on album properties: title, album artist, artists, genres, year, composers, label, track count, total duration, formats, folder and date added. For example, sort by album artist to keep each artist's albums together.
+- **Search:** finds albums by title or artist, or albums that contain a matching song.
+- **Album page:** click a grid card, or a list card's cover or title, to open it. It has the cover, details, Play and Shuffle, the tracks grouped by disc, and "More by" the same artist. Esc or Back returns to the list. Clicking the cover in the now-playing bar opens the playing album.
+- **Playback:** a card's play button, Play album, or double-clicking a track plays that album and then continues through the next albums in the view's order.
+- **Covers:** read from the first song of each album (embedded art, else `cover.jpg`/`folder.jpg`). They're shrunk to 480 px on background threads, and at most 160 are kept in memory.
+- **Saved settings:** the mode and layout save with each view. Views saved before this change load as song views.
+
 ## Keys
 
 | Key | Action |
@@ -58,7 +72,7 @@ Collapsed groups are not saved.
 | Ctrl+F | Search (Esc clears it, Enter plays the first match) |
 | Ctrl+O | Open a folder |
 | S / R / M | Shuffle / repeat / mute |
-| Esc | Close a toolbar popover |
+| Esc | Close a toolbar popover, or leave an album page |
 
 Double-click a row to play it. Ctrl is Cmd on macOS.
 
@@ -69,7 +83,7 @@ cargo test                                                   # unit + headless U
 RUNE_MUSIC_DIR=~/Music cargo test --release real_library -- --ignored --nocapture
 RUNE_MUSIC_FILE=song.flac cargo test --release real_output -- --ignored   # plays muted
 RUNE_MUSIC_DIR=~/Music cargo test --release real_library_groups -- --ignored --nocapture
-cargo run -- --snap out.png --scene playing --theme light    # scenes: library playing search error grouped filter views sort
+cargo run -- --snap out.png --scene playing --theme light    # scenes: library playing search error grouped filter views sort albums album-list album
 ```
 
 Headless runs (`--snap`, `--script`, `--tree`) never open the audio device and keep views in memory.

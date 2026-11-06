@@ -3,15 +3,19 @@
 //! `cargo run --release -- ~/Music` opens the window and scans the folders and files given.
 //! `-- --snap out.png --scene library` renders a demo library headless.
 
+mod album;
 mod app;
 mod audio;
 mod base;
+mod covers;
 mod icons;
 mod library;
 mod palette;
 mod queue;
 mod view;
 
+#[cfg(test)]
+mod album_ui_tests;
 #[cfg(test)]
 mod base_ui_tests;
 #[cfg(test)]
@@ -21,7 +25,8 @@ use app::{App, Output, Panel};
 use base::filter::{Condition, Conjunction, Group, Node, Operator};
 use base::property::Property;
 use base::store::Store;
-use base::view::{Direction, GroupBy, Sort, View};
+use base::property::Mode;
+use base::view::{Direction, GroupBy, Layout, Sort, View};
 use library::Track;
 use rune::AppSpec;
 
@@ -131,6 +136,32 @@ fn scene_sort(s: &mut App) {
     s.panel = Some(Panel::Sort);
 }
 
+/// An album view sorted by album artist, so each artist's albums sit together.
+fn album_view(s: &mut App, layout: Layout) {
+    scene_playing(s);
+    let mut view = View::new("Albums");
+    view.set_mode(Mode::Albums);
+    view.layout = layout;
+    view.sorts = vec![Sort { property: Property::AlbumArtist, direction: Direction::Asc }, Sort { property: Property::Year, direction: Direction::Desc }];
+    s.base.views.push(view);
+    s.base.active = s.base.views.len() - 1;
+    s.views_changed();
+}
+
+fn scene_album_grid(s: &mut App) {
+    album_view(s, Layout::Grid);
+}
+
+fn scene_album_list(s: &mut App) {
+    album_view(s, Layout::List);
+}
+
+fn scene_album_page(s: &mut App) {
+    album_view(s, Layout::Grid);
+    let a = s.albums.iter().position(|a| a.title == "Day of Radiance").expect("demo has Day of Radiance");
+    s.page = app::Page::Album(s.albums[a].id());
+}
+
 fn main() {
     rune::run(AppSpec {
         scenes: &[
@@ -142,6 +173,9 @@ fn main() {
             ("filter", scene_filter),
             ("views", scene_views),
             ("sort", scene_sort),
+            ("albums", scene_album_grid),
+            ("album-list", scene_album_list),
+            ("album", scene_album_page),
         ],
         min_size: Some((720.0, 420.0)),
         setup: Some(setup),

@@ -113,7 +113,7 @@ fn grouping_by_a_list_puts_a_song_under_each_value_and_plays_it_once() {
     let mut view = View::new("v");
     view.group_by = Some(GroupBy { property: Property::Genre, direction: Direction::Asc });
     let e = evaluate(&view, &lib, "");
-    let groups: Vec<(String, Vec<String>)> = e.sections.iter().map(|s| (s.title.clone(), titles(&lib, &s.tracks))).collect();
+    let groups: Vec<(String, Vec<String>)> = e.sections.iter().map(|s| (s.title.clone(), titles(&lib, &s.items))).collect();
     assert_eq!(
         groups,
         [
@@ -198,6 +198,6 @@ fn durations_group_by_the_minute() {
     let lib = library();
     let mut view = View::new("v");
     view.group_by = Some(GroupBy { property: Property::Duration, direction: Direction::Asc });
-    let groups: Vec<(String, usize)> = evaluate(&view, &lib, "").sections.iter().map(|s| (s.title.clone(), s.tracks.len())).collect();
+    let groups: Vec<(String, usize)> = evaluate(&view, &lib, "").sections.iter().map(|s| (s.title.clone(), s.items.len())).collect();
     assert_eq!(groups, [("1:00 – 1:59".to_string(), 1), ("3:00 – 3:59".to_string(), 1), ("4:00 – 4:59".to_string(), 1), ("5:00 – 5:59".to_string(), 1)]);
 }

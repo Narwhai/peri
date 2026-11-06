@@ -3,8 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::property::{Kind, Property, Value, parse_date};
-use crate::library::Track;
+use super::property::{Kind, Property, Record, Value, parse_date};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -142,11 +141,11 @@ impl Condition {
         }
     }
 
-    pub fn matches(&self, t: &Track) -> bool {
+    pub fn matches(&self, t: &impl Record) -> bool {
         if !self.is_active() {
             return true;
         }
-        let value = self.property.value(t);
+        let value = t.value(self.property);
         match self.op {
             Operator::IsEmpty => return value.is_none(),
             Operator::IsNotEmpty => return !value.is_none(),
@@ -239,7 +238,7 @@ pub struct Group {
 
 impl Group {
     /// An empty group matches everything, whatever its conjunction, as an empty filter does.
-    pub fn matches(&self, t: &Track) -> bool {
+    pub fn matches(&self, t: &impl Record) -> bool {
         let mut active = self.children.iter().filter(|n| n.is_active()).peekable();
         if active.peek().is_none() {
             return true;
@@ -263,6 +262,17 @@ impl Group {
         }).collect();
         let body = parts.join(join);
         if self.conjunction == Conjunction::Not { format!("not ({body})") } else { body }
+    }
+
+    /// Drops conditions on properties outside `keep`, and groups left empty by it.
+    pub fn retain_properties(&mut self, keep: &[Property]) {
+        self.children.retain_mut(|n| match n {
+            Node::Condition(c) => keep.contains(&c.property),
+            Node::Group(g) => {
+                g.retain_properties(keep);
+                !g.children.is_empty()
+            }
+        });
     }
 
     /// Conditions in this group and every group inside it.
@@ -312,7 +322,7 @@ impl Node {
         }
     }
 
-    fn matches(&self, t: &Track) -> bool {
+    fn matches(&self, t: &impl Record) -> bool {
         match self {
             Node::Condition(c) => c.matches(t),
             Node::Group(g) => g.matches(t),

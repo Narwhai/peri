@@ -1,10 +1,26 @@
-//! Song attributes a view can filter, sort and group on.
+//! Song and album attributes a view can filter, sort and group on.
 
 use std::cmp::Ordering;
 
 use serde::{Deserialize, Serialize};
 
 use crate::library::Track;
+
+/// What a view lists: songs, or albums built from them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Mode {
+    #[default]
+    Songs,
+    Albums,
+}
+
+/// A row a view can filter, sort and group: a song or an album.
+pub trait Record {
+    fn value(&self, p: Property) -> Value;
+    /// Whether every word of `query` (lowercased) appears in the record's searchable text.
+    fn matches(&self, query: &str) -> bool;
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -23,6 +39,8 @@ pub enum Property {
     Format,
     Folder,
     Added,
+    /// Albums only: how many songs.
+    Tracks,
 }
 
 /// How a property's values compare, which decides the operators a filter offers.
@@ -66,6 +84,29 @@ impl Property {
         Property::Added,
     ];
 
+    /// The properties a mode offers. Albums drop the per-song ones and add a track count;
+    /// "Title" is the album's title there.
+    pub fn for_mode(mode: Mode) -> &'static [Property] {
+        const ALBUM: [Property; 12] = [
+            Property::Title,
+            Property::AlbumArtist,
+            Property::Artist,
+            Property::Genre,
+            Property::Year,
+            Property::Composer,
+            Property::Label,
+            Property::Tracks,
+            Property::Duration,
+            Property::Format,
+            Property::Folder,
+            Property::Added,
+        ];
+        match mode {
+            Mode::Songs => &Property::ALL,
+            Mode::Albums => &ALBUM,
+        }
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Property::Title => "Title",
@@ -82,27 +123,30 @@ impl Property {
             Property::Format => "Format",
             Property::Folder => "Folder",
             Property::Added => "Date added",
+            Property::Tracks => "Track count",
         }
     }
 
     pub fn from_label(label: &str) -> Option<Property> {
-        Property::ALL.into_iter().find(|p| p.label() == label)
+        Property::ALL.into_iter().chain([Property::Tracks]).find(|p| p.label() == label)
     }
 
     pub fn kind(self) -> Kind {
         match self {
             Property::Title | Property::AlbumArtist | Property::Album | Property::Label | Property::Format | Property::Folder => Kind::Text,
             Property::Artist | Property::Genre | Property::Composer => Kind::List,
-            Property::Year | Property::Track | Property::Disc => Kind::Number,
+            Property::Year | Property::Track | Property::Disc | Property::Tracks => Kind::Number,
             Property::Duration => Kind::Duration,
             Property::Added => Kind::Date,
         }
     }
 
-    pub fn value(self, t: &Track) -> Value {
-        let text = |s: Option<&str>| s.filter(|s| !s.is_empty()).map_or(Value::None, |s| Value::Text(s.to_string()));
-        let list = |v: &[String]| if v.is_empty() { Value::None } else { Value::List(v.to_vec()) };
-        let number = |n: Option<f64>| n.map_or(Value::None, Value::Number);
+    pub fn value(self, r: &impl Record) -> Value {
+        r.value(self)
+    }
+
+    /// A song's value.
+    pub(crate) fn track_value(self, t: &Track) -> Value {
         match self {
             Property::Title => Value::Text(t.title.clone()),
             Property::Artist => list(&t.artists),
@@ -118,12 +162,13 @@ impl Property {
             Property::Format => text(t.path.extension().and_then(|e| e.to_str()).map(str::to_lowercase).as_deref()),
             Property::Folder => text(t.path.parent().and_then(|p| p.to_str())),
             Property::Added => number(t.added.map(|s| s as f64)),
+            Property::Tracks => Value::None,
         }
     }
 
-    /// The values a song groups under: one per list item, `None` alone when it has none.
-    pub fn group_keys(self, t: &Track) -> Vec<Value> {
-        match self.value(t) {
+    /// The values a record groups under: one per list item, `None` alone when it has none.
+    pub fn group_keys(self, r: &impl Record) -> Vec<Value> {
+        match r.value(self) {
             Value::List(items) => items.into_iter().map(Value::Text).collect(),
             Value::Number(n) if self.kind() == Kind::Date => vec![Value::Number(day_start(n))],
             // Exact durations would make a group per song; group by the minute instead.
@@ -155,6 +200,28 @@ impl Property {
                 _ => format_number(*n),
             },
         }
+    }
+}
+
+pub(crate) fn text(s: Option<&str>) -> Value {
+    s.filter(|s| !s.is_empty()).map_or(Value::None, |s| Value::Text(s.to_string()))
+}
+
+pub(crate) fn list(v: &[String]) -> Value {
+    if v.is_empty() { Value::None } else { Value::List(v.to_vec()) }
+}
+
+pub(crate) fn number(n: Option<f64>) -> Value {
+    n.map_or(Value::None, Value::Number)
+}
+
+impl Record for Track {
+    fn value(&self, p: Property) -> Value {
+        p.track_value(self)
+    }
+
+    fn matches(&self, query: &str) -> bool {
+        Track::matches(self, query)
     }
 }
 
@@ -296,7 +363,7 @@ mod tests {
 
     #[test]
     fn every_property_has_a_unique_label() {
-        for p in Property::ALL {
+        for p in Property::ALL.into_iter().chain([Property::Tracks]) {
             assert_eq!(Property::from_label(p.label()), Some(p));
         }
     }

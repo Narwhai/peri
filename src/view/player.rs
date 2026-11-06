@@ -11,10 +11,18 @@ use crate::queue::Repeat;
 pub(super) fn now_playing(s: &App, p: &Palette) -> El {
     let track = s.current_track();
     let cover = el().key("cover").size(COVER, COVER).radius(8.0).fill(p.ui).center();
-    let cover = match s.cover.as_ref().filter(|c| c.error().is_none()) {
+    let mut cover = match s.cover.as_ref().filter(|c| c.error().is_none()) {
         Some(image) => cover.pixels_fit(image.pixels(), SurfaceFit::Fill),
         None => cover.child(icon(&icons::NOTE, 22.0).color(p.ui2)),
     };
+    if let Some(a) = s.current.and_then(|c| s.album_of(c)) {
+        cover = cover
+            .cursor(Cursor::Pointer)
+            .label("Show album")
+            .help("Show album")
+            .press_scale(0.96)
+            .on_press_tx(move |s: &mut App, tx| s.show_album(a, tx));
+    }
     let (title, artist) = match track {
         Some(t) => (t.title.clone(), t.artist().unwrap_or_else(|| "Unknown artist".into())),
         None => ("Not playing".into(), "Double-click a track to play it".into()),

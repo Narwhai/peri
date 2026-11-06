@@ -7,8 +7,7 @@ use std::collections::hash_map::Entry;
 use serde::{Deserialize, Serialize};
 
 use super::filter::Group;
-use super::property::{Property, Value};
-use crate::library::Track;
+use super::property::{Mode, Property, Record, Value};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -46,9 +45,26 @@ pub struct GroupBy {
     pub direction: Direction,
 }
 
+/// How an album view lays its albums out.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Layout {
+    /// Album cards with their track tables.
+    List,
+    /// A grid of covers.
+    #[default]
+    Grid,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct View {
     pub name: String,
+    /// Views saved before albums existed list songs.
+    #[serde(default)]
+    pub mode: Mode,
+    /// Album views only.
+    #[serde(default)]
+    pub layout: Layout,
     #[serde(default)]
     pub filter: Group,
     /// Applied in order; ties fall back to library order.
@@ -60,7 +76,19 @@ pub struct View {
 
 impl View {
     pub fn new(name: impl Into<String>) -> View {
-        View { name: name.into(), filter: Group::default(), sorts: Vec::new(), group_by: None }
+        View { name: name.into(), mode: Mode::Songs, layout: Layout::Grid, filter: Group::default(), sorts: Vec::new(), group_by: None }
+    }
+
+    /// Switches what the view lists, dropping sorts, grouping and conditions on properties
+    /// the new mode doesn't have.
+    pub fn set_mode(&mut self, mode: Mode) {
+        self.mode = mode;
+        let keep = Property::for_mode(mode);
+        self.sorts.retain(|s| keep.contains(&s.property));
+        if self.group_by.is_some_and(|g| !keep.contains(&g.property)) {
+            self.group_by = None;
+        }
+        self.filter.retain_properties(keep);
     }
 }
 
@@ -70,21 +98,22 @@ pub struct Section {
     /// `None` for the songs that have no value for the grouped property.
     pub value: Value,
     pub title: String,
-    /// Indices into the library, sorted.
-    pub tracks: Vec<usize>,
+    /// Indices into the records (songs or albums), sorted.
+    pub items: Vec<usize>,
 }
 
-/// A view evaluated over the library.
+/// A view evaluated over its records.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Evaluated {
-    /// Every matching song, once, in play order: sorted, and by section when grouped.
+    /// Every matching record, once, in order: sorted, and by section when grouped.
     pub order: Vec<usize>,
     /// Empty when the view isn't grouped.
     pub sections: Vec<Section>,
 }
 
-/// Applies `view` and the search `query` (lowercased) to `tracks`, which are in library order.
-pub fn evaluate(view: &View, tracks: &[Track], query: &str) -> Evaluated {
+/// Applies `view` and the search `query` (lowercased) to `tracks` (songs or albums), which
+/// are in library order.
+pub fn evaluate<R: Record>(view: &View, tracks: &[R], query: &str) -> Evaluated {
     let mut matching: Vec<usize> = (0..tracks.len()).filter(|&i| tracks[i].matches(query) && view.filter.matches(&tracks[i])).collect();
     if !view.sorts.is_empty() {
         let keys: Vec<Vec<Value>> = matching.iter().map(|&i| view.sorts.iter().map(|s| s.property.value(&tracks[i])).collect()).collect();
@@ -105,10 +134,10 @@ pub fn evaluate(view: &View, tracks: &[Track], query: &str) -> Evaluated {
     for &i in &matching {
         for value in group_by.property.group_keys(&tracks[i]) {
             match index.entry(GroupKey::of(&value)) {
-                Entry::Occupied(at) => sections[*at.get()].tracks.push(i),
+                Entry::Occupied(at) => sections[*at.get()].items.push(i),
                 Entry::Vacant(slot) => {
                     slot.insert(sections.len());
-                    sections.push(Section { title: group_by.property.group_title(&value), value, tracks: vec![i] });
+                    sections.push(Section { title: group_by.property.group_title(&value), value, items: vec![i] });
                 }
             }
         }
@@ -116,7 +145,7 @@ pub fn evaluate(view: &View, tracks: &[Track], query: &str) -> Evaluated {
     sections.sort_by(|a, b| compare_with_none_last(&a.value, &b.value, group_by.direction));
     // A song in several groups plays once, in its first group.
     let mut seen = vec![false; tracks.len()];
-    let order = sections.iter().flat_map(|s| s.tracks.iter().copied()).filter(|&i| !std::mem::replace(&mut seen[i], true)).collect();
+    let order = sections.iter().flat_map(|s| s.items.iter().copied()).filter(|&i| !std::mem::replace(&mut seen[i], true)).collect();
     Evaluated { order, sections }
 }
 
