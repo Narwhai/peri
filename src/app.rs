@@ -7,6 +7,8 @@ use std::time::Duration;
 use rune::{FileDialogOptions, Image, ImageCache, Key, KeyEvent, TextEdit, Tx, Waker};
 
 use crate::audio::{self, Engine};
+use crate::base::store::{Base, Store};
+use crate::base::view::{Evaluated, Section, evaluate};
 use crate::library::{self, ScanMsg, Track};
 use crate::queue::{Queue, Repeat, Rng};
 
@@ -33,12 +35,40 @@ pub struct Scan {
     pub found: usize,
 }
 
+/// Which toolbar popover is open.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Panel {
+    Views,
+    Sort,
+    Group,
+    Filter,
+}
+
 pub struct App {
     pub tracks: Vec<Track>,
-    /// Indices into `tracks` the search shows, in library order.
+    /// Indices into `tracks` the active view and search show, in play order.
     pub filtered: Vec<usize>,
-    /// Bumped whenever `filtered` changes, so the list knows its rows' keys did.
+    /// The active view's groups, empty when it isn't grouped.
+    pub sections: Vec<Section>,
+    /// What the list shows: group headers and songs, skipping collapsed groups' songs.
+    pub rows: Vec<Row>,
+    /// Bumped whenever `filtered` or `sections` change, so the list knows its rows did.
     pub list_version: u64,
+    /// The saved views; edits save at once.
+    pub base: Base,
+    store: Store,
+    /// Collapsed group titles in the active view (this run only).
+    pub collapsed: std::collections::HashSet<String>,
+    pub panel: Option<Panel>,
+    /// The popover select that's open, by key.
+    pub open_select: Option<String>,
+    /// The view being renamed in the views popover.
+    pub renaming: Option<usize>,
+    /// The rename field's editor. Always present: the runtime still reaches it to blur the
+    /// field after a rename ends.
+    pub rename: TextEdit,
+    /// One editor per filter condition with a typed value, by path.
+    pub filter_edits: std::collections::HashMap<Vec<usize>, TextEdit>,
     pub search: TextEdit,
     /// Index into `tracks` of the highlighted row.
     pub selected: Option<usize>,
@@ -65,11 +95,21 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(output: Output) -> App {
+    pub fn new(output: Output, store: Store) -> App {
         App {
             tracks: Vec::new(),
             filtered: Vec::new(),
+            sections: Vec::new(),
+            rows: Vec::new(),
             list_version: 0,
+            base: store.load(),
+            store,
+            collapsed: Default::default(),
+            panel: None,
+            open_select: None,
+            renaming: None,
+            rename: TextEdit::new(""),
+            filter_edits: Default::default(),
             search: TextEdit::new(""),
             selected: None,
             current: None,
@@ -201,15 +241,52 @@ impl App {
         }
     }
 
+    /// Re-evaluates the active view and search over the library.
     pub fn refilter(&mut self) {
         let query = self.search.text.trim().to_lowercase();
-        self.filtered = (0..self.tracks.len()).filter(|&i| self.tracks[i].matches(&query)).collect();
+        let Evaluated { order, sections } = evaluate(self.base.active(), &self.tracks, &query);
+        self.filtered = order;
+        self.sections = sections;
+        self.rebuild_rows();
+    }
+
+    fn rebuild_rows(&mut self) {
+        self.rows = self.compute_rows();
         self.list_version += 1;
+    }
+
+    /// Saves the views and re-evaluates the active one.
+    pub fn views_changed(&mut self) {
+        if let Err(e) = self.store.save(&self.base) {
+            self.error = Some(e);
+        }
+        self.refilter();
     }
 
     /// The visible list when it holds `i`, else the whole library.
     fn filtered_or(&self, i: usize) -> Vec<usize> {
         if self.filtered.contains(&i) { self.filtered.clone() } else { (0..self.tracks.len()).collect() }
+    }
+
+    fn compute_rows(&self) -> Vec<Row> {
+        if self.sections.is_empty() {
+            return self.filtered.iter().map(|&i| Row::Track { track: i, section: None }).collect();
+        }
+        let mut rows = Vec::new();
+        for (n, section) in self.sections.iter().enumerate() {
+            rows.push(Row::Header(n));
+            if !self.collapsed.contains(&section.title) {
+                rows.extend(section.tracks.iter().map(|&i| Row::Track { track: i, section: Some(n) }));
+            }
+        }
+        rows
+    }
+
+    pub fn toggle_section(&mut self, title: &str) {
+        if !self.collapsed.remove(title) {
+            self.collapsed.insert(title.to_string());
+        }
+        self.rebuild_rows();
     }
 
     // Playback
@@ -224,7 +301,7 @@ impl App {
     fn load(&mut self, i: usize, tx: &mut Tx) {
         let Some(track) = self.tracks.get(i) else { return };
         let path = track.path.clone();
-        let title = match &track.artist {
+        let title = match track.artist() {
             Some(artist) => format!("{} — {artist}", track.title),
             None => track.title.clone(),
         };
@@ -383,26 +460,63 @@ impl App {
 
     // Selection
 
-    /// Moves the highlighted row by `delta` within the visible list.
+    /// Moves the highlighted row by `delta` among the songs shown (skipping collapsed groups).
     pub fn move_selection(&mut self, delta: isize, tx: &mut Tx) {
-        if self.filtered.is_empty() {
+        let shown: Vec<(usize, Option<usize>)> = self.rows.iter().filter_map(|r| match *r {
+            Row::Track { track, section } => Some((track, section)),
+            Row::Header(_) => None,
+        }).collect();
+        if shown.is_empty() {
             return;
         }
-        let at = self.selected.and_then(|i| self.filtered.iter().position(|&f| f == i));
-        let last = self.filtered.len() as isize - 1;
+        // In a grouped view a song can show twice; start from its first row.
+        let at = self.selected.and_then(|i| shown.iter().position(|&(t, _)| t == i));
+        let last = shown.len() as isize - 1;
         let to = match at {
             Some(at) => (at as isize + delta).clamp(0, last),
             None if delta < 0 => last,
             None => 0,
         } as usize;
-        let i = self.filtered[to];
+        let (i, section) = shown[to];
         self.selected = Some(i);
-        tx.scroll_into_view_in("tracks", row_key(i));
+        tx.scroll_into_view_in("tracks", row_key(i, section));
     }
 }
 
-pub fn row_key(i: usize) -> String {
-    format!("t{i}")
+/// A row of the track list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Row {
+    /// A group's header, by index into `App::sections`.
+    Header(usize),
+    Track { track: usize, section: Option<usize> },
+}
+
+/// A song row's key: unique per group, since a song can be in several.
+impl App {
+    pub fn close_panel(&mut self) {
+        self.panel = None;
+        self.open_select = None;
+        self.renaming = None;
+    }
+
+    pub fn toggle_panel(&mut self, panel: Panel) {
+        let open = self.panel != Some(panel);
+        self.close_panel();
+        if open {
+            self.panel = Some(panel);
+        }
+    }
+}
+
+pub fn row_key(i: usize, section: Option<usize>) -> String {
+    match section {
+        Some(n) => format!("g{n}t{i}"),
+        None => format!("t{i}"),
+    }
+}
+
+pub fn header_key(n: usize) -> String {
+    format!("g{n}")
 }
 
 /// `AppSpec::poll`: take scan results, follow the playing track, and move on when it ends.
@@ -427,6 +541,14 @@ pub fn poll(s: &mut App, _: f64, tx: &mut Tx) -> bool {
 /// `AppSpec::on_key`: keys nothing focused took.
 pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
     let m = ev.mods;
+    if s.panel.is_some() {
+        // Escape closes an open popover; other keys stay with it.
+        if ev.key == Key::Escape {
+            s.close_panel();
+            return true;
+        }
+        return false;
+    }
     if ev.is_command('f') {
         s.search.focused = true;
         return true;

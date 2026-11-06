@@ -7,7 +7,7 @@ use lofty::config::ParseOptions;
 use lofty::file::{AudioFile, TaggedFile, TaggedFileExt};
 use lofty::picture::PictureType;
 use lofty::probe::Probe;
-use lofty::tag::{Accessor, Tag};
+use lofty::tag::{Accessor, ItemKey, Tag};
 
 /// Extensions rodio (through symphonia) can decode.
 pub const AUDIO_EXTENSIONS: &[&str] = &["mp3", "flac", "ogg", "oga", "wav", "m4a", "mp4", "aac", "aif", "aiff", "caf"];
@@ -15,25 +15,40 @@ pub const AUDIO_EXTENSIONS: &[&str] = &["mp3", "flac", "ogg", "oga", "wav", "m4a
 /// File names checked next to a track when it embeds no cover.
 const FOLDER_COVERS: &[&str] = &["cover.jpg", "cover.jpeg", "cover.png", "folder.jpg", "folder.png", "front.jpg", "front.png"];
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Track {
     pub path: PathBuf,
     pub title: String,
-    pub artist: Option<String>,
+    /// Track artists; a tag can hold several (separate items, or `;`-separated).
+    pub artists: Vec<String>,
+    pub album_artist: Option<String>,
     pub album: Option<String>,
+    /// Genres; split on `;` and `,`, and across separate tag items.
+    pub genres: Vec<String>,
+    /// From the recording date, else the year, release date or original release date.
+    pub year: Option<u32>,
+    pub composers: Vec<String>,
+    pub label: Option<String>,
     pub disc: Option<u32>,
     pub number: Option<u32>,
     /// Seconds, when the file's properties could be read.
     pub duration: Option<f64>,
+    /// When the file was created (else last modified), in seconds since the Unix epoch.
+    pub added: Option<i64>,
 }
 
 impl Track {
+    /// The artists as one line, for display.
+    pub fn artist(&self) -> Option<String> {
+        (!self.artists.is_empty()).then(|| self.artists.join(", "))
+    }
+
     /// Whether every word of `query` (already lowercased) appears in the title, artist or album.
     pub fn matches(&self, query: &str) -> bool {
         let haystack = format!(
             "{} {} {}",
             self.title.to_lowercase(),
-            self.artist.as_deref().map(str::to_lowercase).unwrap_or_default(),
+            self.artists.join(" ").to_lowercase(),
             self.album.as_deref().map(str::to_lowercase).unwrap_or_default()
         );
         query.split_whitespace().all(|word| haystack.contains(word))
@@ -42,7 +57,7 @@ impl Track {
     /// Library order: artist, album, disc, track number, then title, ignoring case.
     fn sort_key(&self) -> (String, String, u32, u32, String) {
         (
-            self.artist.as_deref().map(str::to_lowercase).unwrap_or_default(),
+            self.artists.join(", ").to_lowercase(),
             self.album.as_deref().map(str::to_lowercase).unwrap_or_default(),
             self.disc.unwrap_or(0),
             self.number.unwrap_or(0),
@@ -134,23 +149,66 @@ fn collect(path: &Path, files: &mut Vec<PathBuf>, errors: &mut Vec<String>) {
 fn read_track(path: PathBuf) -> Track {
     let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| path.display().to_string());
     let tagged = Probe::open(&path).and_then(|p| p.options(ParseOptions::new().read_cover_art(false)).read());
+    let added = file_added(&path);
     let Ok(tagged) = tagged else {
-        return Track { path, title: stem, artist: None, album: None, disc: None, number: None, duration: None };
+        return Track { path, title: stem, added, ..Track::default() };
     };
     let tag = best_tag(&tagged);
     let text = |f: fn(&Tag) -> Option<std::borrow::Cow<'_, str>>| {
         tag.and_then(f).map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
     };
+    let item = |key: ItemKey| tag.and_then(|t| t.get_string(key)).map(str::trim).filter(|v| !v.is_empty()).map(String::from);
+    let many = |keys: &[ItemKey], separators: &[char]| -> Vec<String> {
+        let values = tag.into_iter().flat_map(|t| keys.iter().flat_map(move |&k| t.get_strings(k)));
+        split_values(values, separators)
+    };
     let duration = tagged.properties().duration().as_secs_f64();
     Track {
         title: text(|t| t.title()).unwrap_or(stem),
-        artist: text(|t| t.artist()),
+        artists: many(&[ItemKey::TrackArtist, ItemKey::TrackArtists], &[';', '\0']),
+        album_artist: item(ItemKey::AlbumArtist),
         album: text(|t| t.album()),
+        genres: many(&[ItemKey::Genre], &[';', ',', '\0']),
+        year: tag.and_then(year),
+        composers: many(&[ItemKey::Composer], &[';', '\0']),
+        label: item(ItemKey::Label).or_else(|| item(ItemKey::Publisher)),
         disc: tag.and_then(|t| t.disk()),
         number: tag.and_then(|t| t.track()),
         duration: (duration > 0.0).then_some(duration),
+        added,
         path,
     }
+}
+
+/// Splits tag values on `separators`, trimming, dropping empties and repeats (ignoring case).
+pub fn split_values<'a>(values: impl Iterator<Item = &'a str>, separators: &[char]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for part in values.flat_map(|v| v.split(separators)) {
+        let part = part.trim();
+        if !part.is_empty() && !out.iter().any(|o| o.eq_ignore_ascii_case(part)) {
+            out.push(part.to_string());
+        }
+    }
+    out
+}
+
+fn year(tag: &Tag) -> Option<u32> {
+    let parsed = |key: ItemKey| {
+        let text = tag.get_string(key)?;
+        // Dates start with the year: "2016", "2016-05-20", "2016/05".
+        let digits: String = text.trim().chars().take_while(char::is_ascii_digit).collect();
+        digits.parse::<u32>().ok().filter(|y| (1000..=9999).contains(y))
+    };
+    tag.date()
+        .map(|d| u32::from(d.year))
+        .or_else(|| [ItemKey::Year, ItemKey::ReleaseDate, ItemKey::OriginalReleaseDate].into_iter().find_map(parsed))
+}
+
+fn file_added(path: &Path) -> Option<i64> {
+    let meta = std::fs::metadata(path).ok()?;
+    let time = meta.created().or_else(|_| meta.modified()).ok()?;
+    let secs = time.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
+    i64::try_from(secs).ok()
 }
 
 fn best_tag(tagged: &TaggedFile) -> Option<&Tag> {
@@ -179,12 +237,20 @@ mod tests {
         Track {
             path: PathBuf::from(format!("/music/{title}.mp3")),
             title: title.into(),
-            artist: artist.map(Into::into),
+            artists: artist.into_iter().map(Into::into).collect(),
             album: album.map(Into::into),
-            disc: None,
             number,
             duration: Some(1.0),
+            ..Track::default()
         }
+    }
+
+    #[test]
+    fn multi_value_tags_split_trim_and_drop_repeats() {
+        let genres = split_values(["Rock;Indie Rock", " rock , Dream Pop", ""].into_iter(), &[';', ',']);
+        assert_eq!(genres, ["Rock", "Indie Rock", "Dream Pop"]);
+        let artists = split_values(["Armand Hammer & The Alchemist", "Big Thief;Laraaji"].into_iter(), &[';']);
+        assert_eq!(artists, ["Armand Hammer & The Alchemist", "Big Thief", "Laraaji"], "only `;` separates artists");
     }
 
     #[test]

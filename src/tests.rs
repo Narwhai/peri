@@ -7,7 +7,7 @@ use crate::queue::Repeat;
 use crate::view::view;
 
 fn runtime(dark: bool) -> Runtime<App> {
-    let mut app = App::new(Output::Silent);
+    let mut app = App::new(Output::Silent, crate::base::store::Store::memory());
     crate::scene_library(&mut app);
     let mut rt = Runtime::new(app, view, (980.0, 640.0), Env::new(dark, 1.0));
     rt.on_key = Some(crate::app::on_key);
@@ -35,6 +35,11 @@ fn key(rt: &mut Runtime<App>, key: Key) {
     settle(rt);
 }
 
+/// The library index of the demo song titled `title`.
+fn idx(rt: &Runtime<App>, title: &str) -> usize {
+    rt.state.tracks.iter().position(|t| t.title == title).unwrap_or_else(|| panic!("no song {title}"))
+}
+
 fn text_of(rt: &Runtime<App>, key: &str) -> String {
     rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).and_then(|e| e.text).unwrap_or_default()
 }
@@ -42,7 +47,7 @@ fn text_of(rt: &Runtime<App>, key: &str) -> String {
 #[test]
 fn the_library_lists_every_track_and_counts_them() {
     let rt = runtime(true);
-    assert_eq!(text_of(&rt, "count"), "11 tracks");
+    assert_eq!(text_of(&rt, "count"), "13 tracks");
     assert!(rt.find("t0").is_some());
     assert!(rt.find("t10").is_some());
 }
@@ -50,16 +55,17 @@ fn the_library_lists_every_track_and_counts_them() {
 #[test]
 fn double_clicking_a_row_plays_it_and_fills_the_bar() {
     let mut rt = runtime(true);
-    let (x, y) = rt.find("t4").unwrap();
+    let shy = idx(&rt, "Super Shy");
+    let (x, y) = rt.find(&format!("t{shy}")).unwrap();
     for _ in 0..2 {
         rt.pointer_down(x, y);
         rt.pointer_up(x, y);
         rt.frame(0.05);
     }
     settle(&mut rt);
-    assert_eq!(rt.state.current, Some(4));
+    assert_eq!(rt.state.current, Some(shy));
     assert!(rt.state.playing);
-    assert_eq!(text_of(&rt, "np-title"), rt.state.tracks[4].title);
+    assert_eq!(text_of(&rt, "np-title"), "Super Shy");
     assert_eq!(text_of(&rt, "total"), "2:34");
 }
 
@@ -78,15 +84,20 @@ fn space_plays_the_selection_and_pauses() {
 #[test]
 fn next_and_previous_walk_the_list_and_stop_at_the_end() {
     let mut rt = runtime(true);
-    click(&mut rt, "t9");
+    let (last, before) = (rt.state.filtered[12], rt.state.filtered[11]);
+    // Arrow keys move the selection and scroll it into view.
+    for _ in 0..12 {
+        key(&mut rt, Key::Down);
+    }
+    assert_eq!(rt.state.selected, Some(before));
     key(&mut rt, Key::Enter);
     click(&mut rt, "next");
-    assert_eq!(rt.state.current, Some(10));
+    assert_eq!(rt.state.current, Some(last));
     click(&mut rt, "next");
     assert!(!rt.state.playing, "past the last track playback stops");
-    assert_eq!(rt.state.current, Some(10));
+    assert_eq!(rt.state.current, Some(last));
     click(&mut rt, "prev");
-    assert_eq!(rt.state.current, Some(9));
+    assert_eq!(rt.state.current, Some(before));
 }
 
 #[test]
@@ -97,15 +108,15 @@ fn searching_filters_the_list_and_plays_within_it() {
         s.refilter();
     });
     settle(&mut rt);
-    assert_eq!(text_of(&rt, "count"), "4 of 11 tracks");
+    assert_eq!(text_of(&rt, "count"), "4 of 13 tracks");
     assert!(rt.find("t0").is_none(), "Laraaji is filtered out");
     let first = rt.state.filtered[0];
-    click(&mut rt, &crate::app::row_key(first));
+    click(&mut rt, &crate::app::row_key(first, None));
     key(&mut rt, Key::Enter);
     for _ in 0..3 {
         click(&mut rt, "next");
     }
-    assert!(rt.state.current.is_some_and(|i| rt.state.tracks[i].artist.as_deref() == Some("Nils Frahm")));
+    assert!(rt.state.current.is_some_and(|i| rt.state.tracks[i].artist().as_deref() == Some("Nils Frahm")));
 }
 
 #[test]
@@ -205,7 +216,7 @@ fn clicking_the_search_field_takes_typing_and_letters_do_not_trigger_shortcuts()
     }
     assert_eq!(rt.state.search.text, "nils r");
     assert_eq!(rt.state.repeat, Repeat::Off, "typing doesn't hit the R shortcut");
-    assert_eq!(text_of(&rt, "count"), "4 of 11 tracks");
+    assert_eq!(text_of(&rt, "count"), "4 of 13 tracks");
 }
 
 #[test]
@@ -216,4 +227,41 @@ fn space_still_plays_and_pauses_after_clicking_a_transport_button() {
     key(&mut rt, Key::Text(" ".into()));
     assert!(rt.state.shuffle, "Space didn't press the shuffle button again");
     assert_eq!((rt.state.current, rt.state.playing), (Some(1), true));
+}
+
+/// Reads the real library's new attributes and times grouping it:
+/// `RUNE_MUSIC_DIR=~/Music cargo test --release real_library_groups -- --ignored --nocapture`.
+#[test]
+#[ignore = "needs RUNE_MUSIC_DIR"]
+fn real_library_groups_by_every_property() {
+    use crate::base::property::Property;
+    use crate::base::view::{Direction, GroupBy, View, evaluate};
+    let dir = std::env::var("RUNE_MUSIC_DIR").expect("set RUNE_MUSIC_DIR to a music folder");
+    let rx = crate::library::scan(vec![dir.into()], || {});
+    let tracks = loop {
+        if let crate::library::ScanMsg::Done { tracks, .. } = rx.recv().expect("the scan finishes") {
+            break tracks;
+        }
+    };
+    let share = |f: &dyn Fn(&crate::library::Track) -> bool| 100 * tracks.iter().filter(|t| f(t)).count() / tracks.len();
+    println!(
+        "{} tracks: genre {}%, year {}%, album artist {}%, label {}%, composer {}%, several artists {}%",
+        tracks.len(),
+        share(&|t| !t.genres.is_empty()),
+        share(&|t| t.year.is_some()),
+        share(&|t| t.album_artist.is_some()),
+        share(&|t| t.label.is_some()),
+        share(&|t| !t.composers.is_empty()),
+        share(&|t| t.artists.len() > 1),
+    );
+    for property in Property::ALL {
+        let mut view = View::new("v");
+        view.group_by = Some(GroupBy { property, direction: Direction::Asc });
+        let started = std::time::Instant::now();
+        let e = evaluate(&view, &tracks, "");
+        let took = started.elapsed();
+        let sample: Vec<String> = e.sections.iter().take(4).map(|s| format!("{} ({})", s.title, s.tracks.len())).collect();
+        println!("{:>13}: {:>4} groups in {took:>9.2?}  {}", property.label(), e.sections.len(), sample.join(", "));
+        assert_eq!(e.order.len(), tracks.len(), "every song plays once");
+    }
 }

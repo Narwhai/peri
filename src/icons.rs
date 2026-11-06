@@ -95,3 +95,26 @@ pub static BARS: Icon = Icon {
     body: r#"<rect x="4" y="9" width="3.6" height="11" rx="1" fill="currentColor"/><rect x="10.2" y="4" width="3.6" height="16" rx="1" fill="currentColor"/><rect x="16.4" y="12" width="3.6" height="8" rx="1" fill="currentColor"/>"#,
 };
 
+
+macro_rules! line_icon {
+    ($id:ident, $name:literal, $($d:literal),+) => {
+        pub static $id: Icon = Icon {
+            name: $name,
+            view: 24.0,
+            body: concat!($("<path d=\"", $d, "\" stroke=\"currentColor\" stroke-width=\"1.8\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"),+),
+        };
+    };
+}
+
+// Toolbar glyphs, after Lucide's (ISC), which Obsidian's Bases toolbar uses.
+line_icon!(VIEWS, "rm-views", "M3 5 H21 V19 H3 Z", "M3 10 H21", "M9 10 V19");
+line_icon!(SORT, "rm-sort", "M7 4 V20", "M3.5 16.5 L7 20 L10.5 16.5", "M17 20 V4", "M13.5 7.5 L17 4 L20.5 7.5");
+line_icon!(GROUP, "rm-group", "M4 5 H20 V10 H4 Z", "M4 14 H20 V19 H4 Z");
+line_icon!(FILTER, "rm-filter", "M3 6 H21", "M7 12 H17", "M10 18 H14");
+line_icon!(PLUS, "rm-plus", "M12 5 V19", "M5 12 H19");
+line_icon!(TRASH, "rm-trash", "M4 7 H20", "M9 7 V4.5 H15 V7", "M6 7 L7 20 H17 L18 7", "M10 11 V16", "M14 11 V16");
+line_icon!(EDIT, "rm-edit", "M4 20 H8 L19 9 L15 5 L4 16 Z", "M13 7 L17 11");
+line_icon!(COPY, "rm-copy", "M8 8 H20 V20 H8 Z", "M16 8 V4 H4 V16 H8");
+line_icon!(ARROW_UP, "rm-arrow-up", "M12 19 V5", "M6 11 L12 5 L18 11");
+line_icon!(COLLAPSE, "rm-collapse", "M7 9 L12 4 L17 9", "M7 15 L12 20 L17 15");
+line_icon!(EXPAND, "rm-expand", "M7 4 L12 9 L17 4", "M7 20 L12 15 L17 20");

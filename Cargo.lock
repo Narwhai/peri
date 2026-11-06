@@ -2880,6 +2880,8 @@ dependencies = [
  "rodio",
  "rune",
  "rune-kit",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
