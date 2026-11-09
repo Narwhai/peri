@@ -1,4 +1,4 @@
-//! The saved views: JSON in the app's config folder through `rune::prefs`
+//! The saved views and library folders: JSON in the app's config folder through `rune::prefs`
 //! (`~/.config/rune-music/prefs.json` on Linux, `%APPDATA%\rune-music` on Windows,
 //! `~/Library/Application Support/rune-music` on macOS).
 
@@ -10,6 +10,7 @@ use super::view::View;
 
 const APP_ID: &str = "rune-music";
 const KEY: &str = "base";
+const LIBRARY_KEY: &str = "library";
 /// Bumped when the saved shape changes incompatibly.
 const VERSION: u32 = 1;
 
@@ -85,5 +86,14 @@ impl Store {
 
     pub fn save(&mut self, base: &Base) -> Result<(), String> {
         self.prefs.set(KEY, base).map_err(|e| format!("Couldn't save views: {e}"))
+    }
+
+    /// The saved library folders and files, scanned at launch; none when nothing is saved.
+    pub fn load_library(&self) -> Vec<std::path::PathBuf> {
+        self.prefs.get(LIBRARY_KEY).unwrap_or_default()
+    }
+
+    pub fn save_library(&mut self, roots: &[std::path::PathBuf]) -> Result<(), String> {
+        self.prefs.set(LIBRARY_KEY, roots).map_err(|e| format!("Couldn't save the library folders: {e}"))
     }
 }

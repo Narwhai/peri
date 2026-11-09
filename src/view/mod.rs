@@ -7,6 +7,7 @@ mod filters;
 mod list;
 mod player;
 mod search;
+mod settings;
 mod table;
 mod toolbar;
 
@@ -37,8 +38,8 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     let p = Palette::new(cx.system_dark());
     let kit = Kit::from_palette(PaletteSeed { bg: p.bg2, fg: p.tx, accent: p.blue });
     let mut layer = Vec::new();
-    // The view's toolbar does nothing to search results, so they go without it.
-    let toolbar = (s.page != crate::app::Page::Search).then(|| toolbar::toolbar(s, &p, &kit, &mut layer));
+    // The view's toolbar does nothing to search results or settings, so they go without it.
+    let toolbar = (!matches!(s.page, crate::app::Page::Search | crate::app::Page::Settings)).then(|| toolbar::toolbar(s, &p, &kit, &mut layer));
     let body = col()
         .w_full()
         .h_full()
@@ -49,12 +50,13 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
             (Some(a), _) => albums::album_page(s, a, &p),
             (None, Some(name)) => artists::artist_page(s, name, &p),
             (None, None) if s.page == crate::app::Page::Search => search::search_page(s, &p),
+            (None, None) if s.page == crate::app::Page::Settings => settings::settings_page(s, &p),
             (None, None) => list::list(s, &p, cx),
         })
         .child(player::now_playing(s, &p))
         .on_drop_files(|s: &mut App, files, _tx| {
             s.drop_hover = false;
-            s.start_scan(files.to_vec(), true);
+            s.add_to_library(files.to_vec());
         })
         .accepts_files(|path| path.is_dir() || crate::library::is_audio(path))
         .on_drop_hover(|s: &mut App, over, _tx| s.drop_hover = over);
@@ -138,6 +140,7 @@ fn header(s: &App, p: &Palette, kit: &Kit) -> El {
         .child(text(count).key("count").font(SMALL).color(p.tx3).grow(1.0).shrink().truncate())
         .child(search)
         .child(pill_button("open", "Open folder…", p).on_press_tx(|s: &mut App, tx| s.open_folder(tx)))
+        .child(icon_button("settings", &icons::SETTINGS, "Settings", p).role("button").on_press(|s: &mut App| s.show_settings()))
 }
 
 fn icon_button(key: &'static str, glyph: &'static Icon, help: &str, p: &Palette) -> El {

@@ -60,6 +60,8 @@ pub enum Page {
     Artist(String),
     /// Artists, albums and songs matching the search field, which holds the query.
     Search,
+    /// The app's settings: the library's folders.
+    Settings,
 }
 
 /// The song details dialog: which song, and what was read from its file when it opened.
@@ -98,6 +100,8 @@ pub struct App {
     pub list_version: u64,
     /// The saved views; edits save at once.
     pub base: Base,
+    /// The folders and files the library is made of, saved and scanned at launch.
+    pub library: Vec<PathBuf>,
     store: Store,
     /// Collapsed group titles in the active view (this run only).
     pub collapsed: std::collections::HashSet<String>,
@@ -156,6 +160,7 @@ impl App {
             columns: 4,
             list_version: 0,
             base: store.load(),
+            library: store.load_library(),
             store,
             collapsed: Default::default(),
             panel: None,
@@ -187,13 +192,16 @@ impl App {
         }
     }
 
-    /// `AppSpec::setup`: keep the waker for the scan thread and cover decoding, then scan any
-    /// folders or files named on the command line.
+    /// `AppSpec::setup`: keep the waker for the scan thread and cover decoding, then scan the
+    /// folders or files named on the command line (for this run only), else the saved library.
     pub fn setup(&mut self, waker: Waker) {
         self.images = Some(ImageCache::new(waker.clone()));
         self.covers = Some(if matches!(self.output, Output::Silent) { Covers::synchronous(waker.clone()) } else { Covers::new(waker.clone()) });
         self.waker = Some(waker);
-        let roots: Vec<PathBuf> = rune::extra_args().iter().map(PathBuf::from).collect();
+        let mut roots: Vec<PathBuf> = rune::extra_args().iter().map(PathBuf::from).collect();
+        if roots.is_empty() {
+            roots = self.library.clone();
+        }
         if !roots.is_empty() {
             self.start_scan(roots, false);
             // Headless frames run on a virtual clock far faster than the scan, so a snapshot
@@ -236,10 +244,82 @@ impl App {
     pub fn open_folder(&mut self, tx: &mut Tx) {
         let options = FileDialogOptions { title: "Open a music folder".into(), ..Default::default() };
         tx.open_folder(options, |s: &mut App, result, _tx| match result {
-            Ok(Some(path)) => s.start_scan(vec![path], false),
+            Ok(Some(path)) => s.replace_library(vec![path]),
             Ok(None) => {}
             Err(e) => s.error = Some(format!("Couldn't open the folder dialog: {e}")),
         });
+    }
+
+    /// Settings' "Add folder…": adds a folder to the saved library and scans it in.
+    pub fn add_library_folder(&mut self, tx: &mut Tx) {
+        let options = FileDialogOptions { title: "Add a music folder".into(), ..Default::default() };
+        tx.open_folder(options, |s: &mut App, result, _tx| match result {
+            Ok(Some(path)) => s.add_to_library(vec![path]),
+            Ok(None) => {}
+            Err(e) => s.error = Some(format!("Couldn't open the folder dialog: {e}")),
+        });
+    }
+
+    /// Makes `roots` the whole library, saved for next launch, and scans them.
+    pub fn replace_library(&mut self, roots: Vec<PathBuf>) {
+        self.library = roots.clone();
+        self.save_library();
+        self.start_scan(roots, false);
+    }
+
+    /// Adds `roots` (dropped or picked folders and files) to the saved library and scans them in.
+    pub fn add_to_library(&mut self, roots: Vec<PathBuf>) {
+        for root in &roots {
+            if !self.library.contains(root) {
+                self.library.push(root.clone());
+            }
+        }
+        self.save_library();
+        self.start_scan(roots, true);
+    }
+
+    /// Settings' remove button: drops saved root `i` and rescans what's left.
+    pub fn remove_library_root(&mut self, i: usize) {
+        if i >= self.library.len() {
+            return;
+        }
+        self.library.remove(i);
+        self.save_library();
+        self.rescan_library();
+    }
+
+    /// Settings' "Forget library": no saved folders, and an empty library.
+    pub fn forget_library(&mut self) {
+        self.library.clear();
+        self.save_library();
+        self.rescan_library();
+    }
+
+    /// Scans the saved library afresh, replacing what's loaded; empties it when nothing is saved.
+    pub fn rescan_library(&mut self) {
+        if self.library.is_empty() {
+            // Dropping the receiver stops a running scan.
+            self.scan = None;
+            self.set_library(Vec::new(), false);
+            return;
+        }
+        self.start_scan(self.library.clone(), false);
+    }
+
+    fn save_library(&mut self) {
+        if let Err(e) = self.store.save_library(&self.library) {
+            self.error = Some(e);
+        }
+    }
+
+    pub fn show_settings(&mut self) {
+        self.go_to(Page::Settings);
+    }
+
+    /// Tests scan without a window: a waker that does nothing.
+    #[cfg(test)]
+    pub fn set_waker(&mut self, waker: Waker) {
+        self.waker = Some(waker);
     }
 
     /// Takes the scan thread's messages; true when the view changes.
@@ -329,7 +409,7 @@ impl App {
     pub fn open_album(&self) -> Option<usize> {
         match &self.page {
             Page::Album(id) => self.albums.iter().position(|a| &a.id() == id),
-            Page::Library | Page::Artist(_) | Page::Search => None,
+            Page::Library | Page::Artist(_) | Page::Search | Page::Settings => None,
         }
     }
 
@@ -344,7 +424,7 @@ impl App {
     pub fn shown_columns(&self) -> &[Property] {
         match self.page {
             Page::Library => &self.base.active().columns,
-            Page::Album(_) | Page::Artist(_) | Page::Search => &self.base.page_columns,
+            Page::Album(_) | Page::Artist(_) | Page::Search | Page::Settings => &self.base.page_columns,
         }
     }
 
@@ -352,7 +432,7 @@ impl App {
     pub fn shown_columns_mut(&mut self) -> &mut Vec<Property> {
         match self.page {
             Page::Library => &mut self.base.active_mut().columns,
-            Page::Album(_) | Page::Artist(_) | Page::Search => &mut self.base.page_columns,
+            Page::Album(_) | Page::Artist(_) | Page::Search | Page::Settings => &mut self.base.page_columns,
         }
     }
 
@@ -360,14 +440,14 @@ impl App {
     pub fn shown_widths(&self) -> &Widths {
         match self.page {
             Page::Library => &self.base.active().widths,
-            Page::Album(_) | Page::Artist(_) | Page::Search => &self.base.page_widths,
+            Page::Album(_) | Page::Artist(_) | Page::Search | Page::Settings => &self.base.page_widths,
         }
     }
 
     pub fn shown_widths_mut(&mut self) -> &mut Widths {
         match self.page {
             Page::Library => &mut self.base.active_mut().widths,
-            Page::Album(_) | Page::Artist(_) | Page::Search => &mut self.base.page_widths,
+            Page::Album(_) | Page::Artist(_) | Page::Search | Page::Settings => &mut self.base.page_widths,
         }
     }
 
@@ -375,7 +455,7 @@ impl App {
     pub fn open_artist(&self) -> Option<&str> {
         match &self.page {
             Page::Artist(name) => Some(name),
-            Page::Library | Page::Album(_) | Page::Search => None,
+            Page::Library | Page::Album(_) | Page::Search | Page::Settings => None,
         }
     }
 

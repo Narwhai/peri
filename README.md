@@ -5,8 +5,8 @@ A desktop music player built with [Rune](https://github.com/anomalyco/rune). Run
 ## Run
 
 ```sh
-cargo run --release -- ~/Music          # scan folders/files given on the command line
-cargo run --release                     # then "Open folder…" or drop folders/files on the window
+cargo run --release                     # scan the saved library folders (see Settings)
+cargo run --release -- ~/Music          # scan these instead, for this run only
 ```
 
 On Linux, building needs `libxkbcommon`, `wayland` and `alsa-lib` (PipeWire works through `pipewire-alsa`).
@@ -14,6 +14,8 @@ On Linux, building needs `libxkbcommon`, `wayland` and `alsa-lib` (PipeWire work
 ## Features
 
 - Recursive folder scan on a background thread. It reads mp3, flac, ogg, wav, m4a/aac, aiff and caf files.
+- The library folders are remembered. **Open folder…** replaces them, and dropping folders or files on the window adds to them. Both are scanned at every launch.
+- **Settings** (the sliders button, top right): see the library folders, add or remove one, rescan, or **Forget library**. A folder that can't be found (an unplugged drive) stays saved, is marked *Not found*, and is scanned again once it's back.
 - Search across title, artist and album.
 - A virtualised track list, so large libraries scroll smoothly.
 - A now-playing bar with cover art (embedded, else `cover.jpg`/`folder.jpg` next to the file).

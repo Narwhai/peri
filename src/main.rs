@@ -27,6 +27,8 @@ mod table_ui_tests;
 #[cfg(test)]
 mod base_ui_tests;
 #[cfg(test)]
+mod settings_ui_tests;
+#[cfg(test)]
 mod tests;
 
 use app::{App, Output, Panel};
@@ -201,6 +203,13 @@ fn scene_album_page(s: &mut App) {
     s.page = app::Page::Album(s.albums[a].id());
 }
 
+/// The settings page with a saved folder and one that's gone missing.
+fn scene_settings(s: &mut App) {
+    scene_library(s);
+    s.library = vec!["/home/me/Music".into(), "/media/backup-drive/Music".into()];
+    s.show_settings();
+}
+
 fn main() {
     rune::run(AppSpec {
         scenes: &[
@@ -216,6 +225,7 @@ fn main() {
             ("album-list", scene_album_list),
             ("album", scene_album_page),
             ("artist", scene_artist),
+            ("settings", scene_settings),
         ],
         min_size: Some((720.0, 420.0)),
         setup: Some(setup),
