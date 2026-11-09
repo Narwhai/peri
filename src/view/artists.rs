@@ -44,18 +44,26 @@ pub(super) fn artist_page(s: &App, name: &str, p: &Palette) -> El {
 /// Their albums, the songs they appear on, their credits, then their songs.
 pub(super) fn sections(s: &App, info: &ArtistPage, p: &Palette) -> Vec<El> {
     let mut out = Vec::new();
-    out.extend(release_strips(s, "artist", &info.albums, false, p));
+    let pills: Vec<(usize, Vec<table::Pill>)> = info.album_credits.iter().map(|(a, roles)| (*a, album_pills(s.albums[*a].tracks.len(), roles, p))).collect();
+    out.extend(release_strips(s, "artist", &info.albums, false, &pills, p));
     if !info.appears_on.is_empty() {
         out.push(songs(s, "appears-on", "Appears on", &info.appears_on, p));
     }
     // Credits come first, each song once with a pill per role; the Songs section starts
     // collapsed when there are any.
     if !info.credits.is_empty() {
-        out.push(credits(s, info, p));
+        let open = !s.artist_credits_closed;
+        let toggle = section_toggle("artist-credits-toggle", "Credits", info.credits.len(), open, p).on_press(move |s: &mut App| s.artist_credits_closed = open);
+        let mut section = col().key("credits").w_full().gap(8.0).child(toggle);
+        if open {
+            section = section.child(credits(s, info, p));
+        }
+        out.push(section);
     }
     if !info.songs.is_empty() {
         let open = s.artist_songs_open.unwrap_or(info.credits.is_empty());
-        let mut section = col().key("artist-songs").w_full().gap(8.0).child(songs_toggle(info.songs.len(), open, p));
+        let toggle = section_toggle("artist-songs-toggle", "Songs", info.songs.len(), open, p).on_press(move |s: &mut App| s.artist_songs_open = Some(!open));
+        let mut section = col().key("artist-songs").w_full().gap(8.0).child(toggle);
         if open {
             section = section.child(song_table(s, "artist-songs", untagged(&info.songs), &[], &info.songs, p));
         }
@@ -66,13 +74,13 @@ pub(super) fn sections(s: &App, info: &ArtistPage, p: &Palette) -> Vec<El> {
 
 /// One strip per release type (Albums, EPs, Singles, Compilations) of `albums`, keeping
 /// their order; keyed `{key}-albums`, `{key}-eps`…
-pub(super) fn release_strips(s: &App, key: &str, albums: &[usize], artists: bool, p: &Palette) -> Vec<El> {
+pub(super) fn release_strips(s: &App, key: &str, albums: &[usize], artists: bool, pills: &[(usize, Vec<table::Pill>)], p: &Palette) -> Vec<El> {
     ReleaseType::ALL
         .into_iter()
         .filter_map(|kind| {
             let of_kind: Vec<usize> = albums.iter().copied().filter(|&a| s.albums[a].release_type == kind).collect();
             let section = format!("{key}-{}", kind.plural().to_lowercase());
-            (!of_kind.is_empty()).then(|| album_strip(s, &section, kind.plural(), &of_kind, artists, p))
+            (!of_kind.is_empty()).then(|| album_strip(s, &section, kind.plural(), &of_kind, artists, pills, p))
         })
         .collect()
 }
@@ -168,8 +176,8 @@ fn untagged(list: &[usize]) -> Vec<(usize, Vec<Option<table::Pill>>)> {
     list.iter().map(|&i| (i, Vec::new())).collect()
 }
 
-/// Each song crediting the artist once, with a Roles column: one slot per role any of the
-/// songs credits them with, so a role's pills line up down the table.
+/// The Credits table: each song crediting the artist once, with a Roles column: one slot per
+/// role any of the songs credits them with, so a role's pills line up down the table.
 fn credits(s: &App, info: &ArtistPage, p: &Palette) -> El {
     let used: Vec<Role> = Role::ALL.into_iter().filter(|r| info.credits.iter().any(|(_, roles)| roles.contains(r))).collect();
     let rows: Vec<(usize, Vec<Option<table::Pill>>)> = info
@@ -184,7 +192,20 @@ fn credits(s: &App, info: &ArtistPage, p: &Palette) -> El {
     let slots: Vec<f32> = (0..used.len())
         .map(|k| rows.iter().filter_map(|(_, pills)| pills[k].as_ref()).map(|pill| table::pill_width(&pill.label)).fold(0.0, f32::max))
         .collect();
-    titled("credits", "Credits", song_table(s, "credits", rows, &slots, &info.credited(), p), p)
+    song_table(s, "credits", rows, &slots, &info.credited(), p)
+}
+
+/// The artist's roles on one of their albums of `songs` songs: "Producer" when they hold it
+/// on every song, else "Producer · 3/10".
+fn album_pills(songs: usize, roles: &[(Role, usize)], p: &Palette) -> Vec<table::Pill> {
+    roles
+        .iter()
+        .map(|&(role, n)| {
+            let label = if n == songs { role.label().to_string() } else { format!("{} · {n}/{songs}", role.label()) };
+            let (fill, color) = p.role(role);
+            table::Pill { label, fill, color }
+        })
+        .collect()
 }
 
 /// `artist`'s `role` on a song: "Producer"; a performer's says what they played:
@@ -206,11 +227,12 @@ fn song_table(s: &App, key: &str, rows: Vec<(usize, Vec<Option<table::Pill>>)>, 
     table::scrolling(format!("{key}-table"), columns, 8.0, body)
 }
 
-/// The Songs heading, which opens and closes the section.
-fn songs_toggle(count: usize, open: bool, p: &Palette) -> El {
+/// A section heading with its count, which opens and closes the section; the caller adds
+/// the press.
+fn section_toggle(key: &'static str, title: &'static str, count: usize, open: bool, p: &Palette) -> El {
     let chevron = icon(&rune_kit::glyphs::TRIANGLE_RIGHT, 12.0).color(p.tx3).icon_rotation(if open { std::f32::consts::FRAC_PI_2 } else { 0.0 }).motion(SNAPPY);
     row()
-        .key("artist-songs-toggle")
+        .key(key)
         .h(32.0)
         .pr(10.0)
         .gap(8.0)
@@ -220,10 +242,9 @@ fn songs_toggle(count: usize, open: bool, p: &Palette) -> El {
         .cursor(Cursor::Pointer)
         .role("button")
         .expanded(open)
-        .label(format!("Songs, {count}"))
-        .on_press(move |s: &mut App| s.artist_songs_open = Some(!open))
+        .label(format!("{title}, {count}"))
         .child(el().w(16.0).center().child(chevron))
-        .child(text("Songs").font(HEADING).color(p.tx))
+        .child(text(title).font(HEADING).color(p.tx))
         .child(text(format!("{count}")).key("count").font(NUM).color(p.tx3))
 }
 

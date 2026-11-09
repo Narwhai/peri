@@ -225,6 +225,25 @@ fn scene_credits(s: &mut App) {
             }
         }
     }
+    // Her own album: she wrote every song and produced two of the three.
+    for (n, title) in ["Lucky", "Ice", "Test It"].into_iter().enumerate() {
+        let mut credits = vec![Credit::parse(Role::Lyricist, "Erika de Casier")];
+        if n < 2 {
+            credits.push(Credit::parse(Role::Producer, "Erika de Casier"));
+        }
+        tracks.push(Track {
+            path: format!("/demo/Erika de Casier/Still/{n:02} {title}.flac").into(),
+            title: title.into(),
+            credit: Some("Erika de Casier".into()),
+            album_artist: Some("Erika de Casier".into()),
+            album: Some("Still".into()),
+            year: Some(2024),
+            number: Some(n as u32 + 1),
+            duration: Some(200.0),
+            credits,
+            ..Track::default()
+        });
+    }
     s.set_library(tracks, false);
     s.page = app::Page::Artist("Erika de Casier".into());
 }

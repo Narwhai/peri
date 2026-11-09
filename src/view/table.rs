@@ -240,7 +240,7 @@ pub fn pill_width(label: &str) -> f32 {
     rune::text::measure(label, &[], SMALL, None).0 + 2.0 * PILL_PX
 }
 
-fn pill_el(pill: Pill) -> El {
+pub(super) fn pill_el(pill: Pill) -> El {
     row()
         .key(format!("tag-{}", pill.label.to_lowercase().replace(' ', "-")))
         .h(18.0)

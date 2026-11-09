@@ -43,7 +43,7 @@ pub(super) fn search_page(s: &App, p: &Palette) -> El {
         let title = if found.artist.is_some() { "Other artists" } else { "Artists" };
         body = body.child(col().key("search-artists").gap(10.0).child(text(title).font(HEADING).color(p.tx)).child(list));
     }
-    body = body.children(artists::release_strips(s, "search", &found.albums, true, p));
+    body = body.children(artists::release_strips(s, "search", &found.albums, true, &[], p));
     if !found.songs.is_empty() {
         body = body.child(artists::songs(s, "search-songs", "Songs", &found.songs, p));
     }

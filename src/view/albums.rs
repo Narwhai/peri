@@ -336,15 +336,20 @@ fn more_by(s: &App, a: usize, p: &Palette) -> Option<El> {
         return None;
     }
     others.sort_by_key(|&o| std::cmp::Reverse(s.albums[o].year));
-    Some(album_strip(s, "more", &format!("More by {}", album.artist_name()), &others, false, p))
+    Some(album_strip(s, "more", &format!("More by {}", album.artist_name()), &others, false, &[], p))
 }
 
 /// A titled, sideways-scrolling row of album covers keyed `{key}`, `{key}{album}` per card.
-/// With `artists`, each card names its artists too.
-pub(super) fn album_strip(s: &App, key: &str, title: &str, albums: &[usize], artists: bool, p: &Palette) -> El {
+/// With `artists`, each card names its artists too. `pills` go under the cards of the albums
+/// they name.
+pub(super) fn album_strip(s: &App, key: &str, title: &str, albums: &[usize], artists: bool, pills: &[(usize, Vec<table::Pill>)], p: &Palette) -> El {
     let mut strip = row().gap(CARD_GAP).items_start();
     for &o in albums {
-        strip = strip.child(small_card(s, key, o, artists, p));
+        let card = small_card(s, key, o, artists, p);
+        strip = strip.child(match pills.iter().find(|(a, _)| *a == o) {
+            Some((_, list)) => card.child(row().key(format!("{key}-roles{o}")).w_full().gap(4.0).pt(2.0).wrap().children(list.iter().cloned().map(table::pill_el))),
+            None => card,
+        });
     }
     let section = if key == "more" { "more-by".to_string() } else { key.to_string() };
     col()

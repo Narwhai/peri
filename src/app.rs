@@ -85,6 +85,8 @@ pub struct App {
     /// The artist page's Songs section, when toggled: `None` shows it collapsed if the artist
     /// has credits (so they come first), else open. Reset on every page change.
     pub artist_songs_open: Option<bool>,
+    /// Whether the artist page's Credits section is folded. Reset on every page change.
+    pub artist_credits_closed: bool,
     /// Where the library list is scrolled to (x, y), kept current while it shows.
     pub library_scroll: Live<[f32; 2]>,
     /// `library_scroll` when a page last opened from the library, where Back returns to.
@@ -158,6 +160,7 @@ impl App {
             page: Page::Library,
             history: Vec::new(),
             artist_songs_open: None,
+            artist_credits_closed: false,
             library_scroll: Live::new([0.0, 0.0]),
             library_scroll_saved: [0.0, 0.0],
             covers: None,
@@ -493,6 +496,7 @@ impl App {
             return;
         }
         self.artist_songs_open = None;
+        self.artist_credits_closed = false;
         let left = std::mem::replace(&mut self.page, page);
         if left == Page::Library {
             self.library_scroll_saved = self.library_scroll.get();
@@ -505,6 +509,7 @@ impl App {
     pub fn go_back(&mut self, tx: &mut Tx) {
         self.page = self.history.pop().unwrap_or(Page::Library);
         self.artist_songs_open = None;
+        self.artist_credits_closed = false;
         if self.page == Page::Library {
             let [x, y] = self.library_scroll_saved;
             tx.scroll_to_instant("tracks", x, y);
@@ -522,6 +527,7 @@ impl App {
         self.details = None;
         self.search.clear();
         self.artist_songs_open = None;
+        self.artist_credits_closed = false;
         self.show_library();
     }
 
@@ -541,6 +547,7 @@ impl App {
                     self.history.truncate(at);
                     self.page = Page::Search;
                     self.artist_songs_open = None;
+        self.artist_credits_closed = false;
                 }
                 None => self.go_to(Page::Search),
             }

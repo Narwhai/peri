@@ -18,8 +18,12 @@ pub struct ArtistPage {
     pub songs: Vec<usize>,
     /// Of `songs`, the ones that feature them.
     pub featured_on: Vec<usize>,
-    /// Songs crediting them, in library order, each with their roles on it in [`Role::ALL`] order.
+    /// Songs on other artists' albums crediting them, in library order, each with their roles
+    /// on it in [`Role::ALL`] order.
     pub credits: Vec<(usize, Vec<Role>)>,
+    /// Their credits on their own albums: per album of `albums` with any, each role with how
+    /// many of its songs credit them with it, in [`Role::ALL`] order.
+    pub album_credits: Vec<(usize, Vec<(Role, usize)>)>,
 }
 
 impl ArtistPage {
@@ -63,11 +67,19 @@ pub fn page(name: &str, tracks: &[Track], albums: &[Album]) -> ArtistPage {
     let mut own: Vec<usize> = (0..albums.len()).filter(|&a| has(&albums[a].album_artists, name)).collect();
     let appears_on = songs.iter().copied().filter(|i| !own.iter().any(|&a| albums[a].tracks.contains(i))).collect();
     own.sort_by_key(|&a| std::cmp::Reverse(albums[a].year));
-    let credits = (0..tracks.len())
-        .map(|i| (i, Role::ALL.into_iter().filter(|&role| has(&tracks[i].credited(role), name)).collect::<Vec<Role>>()))
-        .filter(|(_, roles)| !roles.is_empty())
+    let roles = |i: usize| Role::ALL.into_iter().filter(|&role| has(&tracks[i].credited(role), name)).collect::<Vec<Role>>();
+    let on_own = |i: usize| own.iter().any(|&a| albums[a].tracks.contains(&i));
+    let credits = (0..tracks.len()).filter(|&i| !on_own(i)).map(|i| (i, roles(i))).filter(|(_, roles)| !roles.is_empty()).collect();
+    let album_credits = own
+        .iter()
+        .map(|&a| {
+            let on: Vec<Vec<Role>> = albums[a].tracks.iter().map(|&i| roles(i)).collect();
+            let counts = Role::ALL.into_iter().map(|r| (r, on.iter().filter(|rs| rs.contains(&r)).count())).filter(|&(_, n)| n > 0).collect::<Vec<_>>();
+            (a, counts)
+        })
+        .filter(|(_, counts)| !counts.is_empty())
         .collect();
-    ArtistPage { name: spelling(name, tracks), albums: own, appears_on, songs, featured_on, credits }
+    ArtistPage { name: spelling(name, tracks), albums: own, appears_on, songs, featured_on, credits, album_credits }
 }
 
 /// The library's most common spelling of `name` (ignoring case), else `name`.
@@ -161,11 +173,33 @@ mod tests {
     }
 
     #[test]
-    fn producers_get_their_credited_songs() {
-        let (tracks, albums) = library();
+    fn credits_on_their_own_albums_go_with_the_album_not_the_credits_list() {
+        let (mut tracks, _) = library();
+        // He also produced Somebody's "Wrote It".
+        tracks[3].credits.push(Credit::parse(Role::Producer, "The Alchemist"));
+        let albums = crate::album::build(&tracks);
         let p = page("The Alchemist", &tracks, &albums);
-        assert_eq!(p.credits.iter().map(|(i, r)| (tracks[*i].title.as_str(), r.as_slice())).collect::<Vec<_>>(), [("Calypso Gene", [Role::Producer].as_slice()), ("Laraaji", [Role::Producer].as_slice())]);
+        assert_eq!(p.credits.iter().map(|(i, r)| (tracks[*i].title.as_str(), r.as_slice())).collect::<Vec<_>>(), [("Wrote It", [Role::Producer].as_slice())]);
+        let mercy = albums.iter().position(|a| a.title == "Mercy").expect("Mercy");
+        assert_eq!(p.album_credits, [(mercy, vec![(Role::Producer, 2)])], "both Mercy songs");
         assert!(page("Nobody", &tracks, &albums).is_empty());
+    }
+
+    #[test]
+    fn an_album_credit_counts_the_songs_it_covers() {
+        let (mut tracks, _) = library();
+        tracks[2].credits.push(Credit::parse(Role::Mixer, "Armand Hammer"));
+        tracks[1].credits.push(Credit::parse(Role::Mixer, "Armand Hammer"));
+        tracks[1].credits.push(Credit::parse(Role::Composer, "Armand Hammer"));
+        let albums = crate::album::build(&tracks);
+        let p = page("Armand Hammer", &tracks, &albums);
+        let at = |t: &str| albums.iter().position(|a| a.title == t).expect("album");
+        let mut got = p.album_credits.clone();
+        got.sort_by_key(|(a, _)| *a);
+        let mut want = vec![(at("Mercy"), vec![(Role::Composer, 1), (Role::Mixer, 1)]), (at("Haram"), vec![(Role::Mixer, 1)])];
+        want.sort_by_key(|(a, _)| *a);
+        assert_eq!(got, want);
+        assert!(p.credits.is_empty());
     }
 
     #[test]

@@ -212,7 +212,8 @@ fn dragging_a_header_edge_resizes_the_column_and_double_click_or_reset_restores_
 #[test]
 fn page_tables_keep_their_own_widths() {
     let mut rt = runtime();
-    rt.update(|s, tx| s.show_artist("Laraaji", tx));
+    // Brian Eno produced Laraaji's album: his credits are a page table.
+    rt.update(|s, tx| s.show_artist("Brian Eno", tx));
     settle(&mut rt);
     drag(&mut rt, "credits-header-col-artist-resize", 50.0);
     assert!(rt.state.base.page_widths.contains_key(&Property::Artist));

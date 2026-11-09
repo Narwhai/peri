@@ -35,6 +35,37 @@ fn mercy() -> Vec<Track> {
     ]
 }
 
+/// Somebody's album "Elsewhere", which The Alchemist produced: credits on another artist's
+/// songs, so they list under Credits rather than on his own album's card.
+fn elsewhere() -> Vec<Track> {
+    let song = |n: u32, title: &str| Track {
+        path: format!("/m/Elsewhere/{n:02} {title}.flac").into(),
+        title: title.into(),
+        credit: Some("Somebody".into()),
+        album_artist: Some("Somebody".into()),
+        tagged: TaggedArtists { artists: strings(&["Somebody"]), ..TaggedArtists::default() },
+        album: Some("Elsewhere".into()),
+        year: Some(2020),
+        number: Some(n),
+        duration: Some(200.0),
+        credits: vec![Credit::parse(Role::Producer, "The Alchemist")],
+        ..Track::default()
+    };
+    vec![song(1, "Over There"), song(2, "Far Off")]
+}
+
+/// The runtime with Mercy and Elsewhere, on The Alchemist's page.
+fn alchemist(elsewhere: Vec<Track>) -> Runtime<App> {
+    let mut tracks = mercy();
+    tracks.extend(elsewhere);
+    let mut rt = runtime();
+    rt.update(|s, _| s.set_library(tracks, false));
+    settle(&mut rt);
+    rt.update(|s, tx| s.show_artist("The Alchemist", tx));
+    settle(&mut rt);
+    rt
+}
+
 /// Wide enough that the Artist column shows "… feat. Silka & Cleo Reed" whole, so its names
 /// can be clicked.
 fn runtime() -> Runtime<App> {
@@ -97,7 +128,7 @@ fn each_artist_of_a_collaborative_album_opens_from_the_album_page_and_back_retra
     click(&mut rt, "The Alchemist");
     assert_eq!(rt.state.page, Page::Artist("The Alchemist".into()));
     assert!(rt.find("artist-albums").is_some(), "Mercy counts as The Alchemist's album");
-    assert!(rt.find("credits").is_some());
+    assert!(rt.find("credits").is_none(), "his only credits are on his own album");
     // From the artist page into a guest's page, then Back twice to the album.
     click(&mut rt, "Silka");
     assert_eq!(rt.state.page, Page::Artist("Silka".into()));
@@ -128,10 +159,8 @@ fn the_now_playing_bar_links_the_playing_songs_artists() {
 
 #[test]
 fn songs_start_collapsed_under_the_credits_when_the_artist_has_credits() {
-    let mut rt = runtime();
-    // The Alchemist plays on Mercy and produced it: credits first, songs folded.
-    rt.update(|s, tx| s.show_artist("The Alchemist", tx));
-    settle(&mut rt);
+    // The Alchemist plays on Mercy and produced Elsewhere: credits first, songs folded.
+    let mut rt = alchemist(elsewhere());
     let y = |rt: &Runtime<App>, key: &str| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).unwrap_or_else(|| panic!("no {key}")).rect[1];
     assert!(y(&rt, "credits") < y(&rt, "artist-songs"), "credits come before songs");
     assert!(rt.find("artist-songs-table").is_none(), "songs start collapsed");
@@ -193,18 +222,14 @@ fn eps_and_singles_list_apart_from_albums_on_the_artist_page_and_in_search() {
 
 #[test]
 fn a_song_with_several_of_the_artists_credits_lists_once_with_a_pill_per_role() {
-    let mut tracks = mercy();
-    tracks[0].credits.extend([Credit::parse(Role::Composer, "The Alchemist"), Credit::parse(Role::Mixer, "The Alchemist")]);
-    let mut rt = runtime();
-    rt.update(|s, _| s.set_library(tracks, false));
-    settle(&mut rt);
-    rt.update(|s, tx| s.show_artist("The Alchemist", tx));
-    settle(&mut rt);
-    let laraaji = rt.state.tracks.iter().position(|t| t.title == "Laraaji").expect("Laraaji");
-    let calypso = rt.state.tracks.iter().position(|t| t.title == "Calypso Gene").expect("Calypso Gene");
+    let mut songs = elsewhere();
+    songs[0].credits.extend([Credit::parse(Role::Composer, "The Alchemist"), Credit::parse(Role::Mixer, "The Alchemist")]);
+    let rt = alchemist(songs);
+    let over = rt.state.tracks.iter().position(|t| t.title == "Over There").expect("Over There");
+    let far = rt.state.tracks.iter().position(|t| t.title == "Far Off").expect("Far Off");
     let keys: Vec<String> = rt.elements().into_iter().filter_map(|e| e.key).collect();
-    assert_eq!(keys.iter().filter(|k| *k == &format!("credits-t{laraaji}")).count(), 1, "Laraaji lists once");
-    assert!(keys.iter().any(|k| k == &format!("credits-t{calypso}")));
+    assert_eq!(keys.iter().filter(|k| *k == &format!("credits-t{over}")).count(), 1, "Over There lists once");
+    assert!(keys.iter().any(|k| k == &format!("credits-t{far}")));
     for role in ["tag-composer", "tag-producer", "tag-mixer"] {
         assert!(keys.iter().any(|k| k == role), "a {role} pill");
     }
@@ -214,17 +239,56 @@ fn a_song_with_several_of_the_artists_credits_lists_once_with_a_pill_per_role() 
 
 #[test]
 fn a_roles_pills_line_up_down_the_credits_table() {
-    let mut tracks = mercy();
-    // Laraaji: producer only. Calypso Gene: composer and producer, so its producer pill sits
-    // after a composer pill; Laraaji's must still sit under it.
-    tracks[1].credits.push(Credit::parse(Role::Composer, "The Alchemist"));
-    let mut rt = runtime();
-    rt.update(|s, _| s.set_library(tracks, false));
-    settle(&mut rt);
-    rt.update(|s, tx| s.show_artist("The Alchemist", tx));
-    settle(&mut rt);
-    let xs: Vec<f32> = rt.elements().into_iter().filter(|e| e.key.as_deref() == Some("tag-producer")).map(|e| e.rect[0]).collect();
+    // Over There: producer only. Far Off: composer and producer, so its producer pill sits
+    // after a composer pill; Over There's must still sit under it.
+    let mut songs = elsewhere();
+    songs[1].credits.push(Credit::parse(Role::Composer, "The Alchemist"));
+    let rt = alchemist(songs);
+    let xs: Vec<f32> = rt.elements().into_iter().filter(|e| e.key.as_deref() == Some("tag-producer") && e.path.contains("credits-table")).map(|e| e.rect[0]).collect();
     assert_eq!(xs.len(), 2, "both songs have a producer pill");
     assert!((xs[0] - xs[1]).abs() < 0.5, "producer pills share a column: {xs:?}");
     assert!(rt.find("credits-header-col-roles").is_some(), "the table heads the pills Roles");
+}
+
+#[test]
+fn the_credits_section_folds_and_opens_again_on_the_next_artist_page() {
+    let mut rt = alchemist(elsewhere());
+    let label = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("artist-credits-toggle")).and_then(|e| e.label);
+    assert_eq!(label.as_deref(), Some("Credits, 2"), "Credits counts its songs");
+    assert!(rt.find("credits-table").is_some(), "credits start open");
+    click(&mut rt, "artist-credits-toggle");
+    assert!(rt.find("credits-table").is_none());
+    assert!(rt.find("artist-credits-toggle").is_some(), "the heading stays to open it again");
+    click(&mut rt, "artist-credits-toggle");
+    assert!(rt.find("credits-table").is_some());
+    click(&mut rt, "artist-credits-toggle");
+    rt.update(|s, tx| s.show_artist("Cleo Reed", tx));
+    settle(&mut rt);
+    assert!(rt.find("credits-table").is_some(), "another artist's credits start open");
+}
+
+#[test]
+fn credits_on_their_own_album_show_on_its_card() {
+    let mut songs = elsewhere();
+    songs.push({
+        // A third Mercy song he didn't mix, so the mixer pill counts songs.
+        let mut t = mercy()[0].clone();
+        t.path = "/m/Mercy/05 Dry Spell.flac".into();
+        t.title = "Dry Spell".into();
+        t.number = Some(5);
+        t.credits = vec![Credit::parse(Role::Producer, "The Alchemist"), Credit::parse(Role::Mixer, "The Alchemist")];
+        t
+    });
+    let rt = alchemist(songs);
+    let mercy = rt.state.albums.iter().position(|a| a.title == "Mercy").expect("Mercy");
+    let pills: Vec<String> = rt
+        .elements()
+        .into_iter()
+        .filter(|e| e.path.contains(&format!("/artist-albums-roles{mercy}/")) && e.role == "text")
+        .filter_map(|e| e.text)
+        .collect();
+    assert_eq!(pills, ["Producer", "Mixer · 1/3"], "a role on every song, then one on some");
+    let dry = rt.state.tracks.iter().position(|t| t.title == "Dry Spell").expect("Dry Spell");
+    assert!(rt.find(&format!("credits-t{dry}")).is_none(), "own-album songs stay out of Credits");
+    assert_eq!(text_of(&rt, "artist-counts"), "1 album  •  3 songs  •  credited on 2 songs");
 }
