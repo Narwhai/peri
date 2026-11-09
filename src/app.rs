@@ -409,6 +409,8 @@ impl App {
             if self.page == Page::Search {
                 return;
             }
+            // A toolbar popover would be left open with its toolbar hidden.
+            self.close_panel();
             match back_at {
                 Some(at) => {
                     self.history.truncate(at);

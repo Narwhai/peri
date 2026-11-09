@@ -122,6 +122,7 @@ fn searching_opens_results_that_back_returns_to_and_clearing_leaves() {
         key(&mut rt, Key::Text(c.to_string()));
     }
     assert_eq!(rt.state.page, Page::Search, "typing opens the results");
+    assert!(rt.find("toolbar").is_none(), "the view's toolbar hides on the results");
     assert_eq!(text_of(&rt, "artist-name"), "Nils Frahm");
     assert!(rt.find("artist-albums").is_some(), "her albums show like on the artist page");
     assert!(rt.find("artist-songs").is_some());
@@ -154,6 +155,7 @@ fn searching_opens_results_that_back_returns_to_and_clearing_leaves() {
     assert_eq!(rt.state.search.text, "");
     assert_eq!(rt.state.page, Page::Library);
     assert_eq!(text_of(&rt, "count"), "13 tracks", "the view isn't filtered by the search");
+    assert!(rt.find("toolbar").is_some(), "the toolbar returns with the view");
 }
 
 #[test]

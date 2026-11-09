@@ -37,13 +37,14 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     let p = Palette::new(cx.system_dark());
     let kit = Kit::from_palette(PaletteSeed { bg: p.bg2, fg: p.tx, accent: p.blue });
     let mut layer = Vec::new();
-    let toolbar = toolbar::toolbar(s, &p, &kit, &mut layer);
+    // The view's toolbar does nothing to search results, so they go without it.
+    let toolbar = (s.page != crate::app::Page::Search).then(|| toolbar::toolbar(s, &p, &kit, &mut layer));
     let body = col()
         .w_full()
         .h_full()
         .fill(p.bg)
         .child(header(s, &p, &kit))
-        .child(toolbar)
+        .children(toolbar)
         .child(match (s.open_album(), s.open_artist()) {
             (Some(a), _) => albums::album_page(s, a, &p),
             (None, Some(name)) => artists::artist_page(s, name, &p),
