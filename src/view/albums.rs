@@ -38,10 +38,11 @@ pub fn grid_row_h(width: f32, columns: usize) -> f32 {
     card_w(width, columns) + CARD_TEXT_H + CARD_GAP + 16.0
 }
 
-/// "EP • 2024 • 4 tracks • 12:08", skipping what isn't known; albums don't say "Album".
-fn meta(a: &Album, with_length: bool) -> String {
+/// "EP • 2024 • 4 tracks • 12:08", skipping what isn't known; albums only say "Album" when
+/// `always_kind` is set (the album page).
+fn meta(a: &Album, with_length: bool, always_kind: bool) -> String {
     let mut parts = Vec::new();
-    if a.release_type != ReleaseType::Album {
+    if always_kind || a.release_type != ReleaseType::Album {
         parts.push(a.release_type.label().to_string());
     }
     if let Some(y) = a.year {
@@ -130,7 +131,7 @@ fn grid_card(s: &App, a: usize, section: Option<usize>, w: f32, p: &Palette) -> 
         .child(art)
         .child(el().h(6.0))
         .child(text(album.title.clone()).font(TITLE).color(title_color).truncate())
-        .child(text(meta(album, false)).font(SMALL).color(p.tx3).truncate())
+        .child(text(meta(album, false, false)).font(SMALL).color(p.tx3).truncate())
         .child(album_artist(album, p.tx2).key("artist").font(SMALL).truncate())
 }
 
@@ -147,7 +148,7 @@ pub(super) fn list_card(s: &App, a: usize, section: Option<usize>, p: &Palette) 
         .shrink()
         .child(album_artist(album, p.tx2).key("artist").font(BODY).truncate())
         .child(text(album.title.clone()).key("title").font(ALBUM_TITLE).color(p.tx).truncate().cursor(Cursor::Pointer).on_press_tx(open))
-        .child(text(meta(album, true)).font(BODY).color(p.tx3))
+        .child(text(meta(album, true, true)).font(BODY).color(p.tx3))
         .child(el().h(10.0))
         .child(row().gap(8.0).child(play_button("play-album", "Play album", p).on_press_tx(move |s: &mut App, tx| s.play_album(a, None, tx))));
     let card = col()
@@ -278,10 +279,9 @@ pub(super) fn album_page(s: &App, a: usize, p: &Palette) -> El {
         .gap(6.0)
         .grow(1.0)
         .shrink()
-        .child(text(album.release_type.label()).key("page-kind").font(SMALL).color(p.tx3))
         .child(text(album.title.clone()).key("page-title").font(PAGE_TITLE).color(p.tx).wrap())
         .child(album_artist(album, p.tx2).key("page-artist").font(HEADING))
-        .child(text(meta(album, true)).font(BODY).color(p.tx3))
+        .child(text(meta(album, true, true)).key("page-meta").font(BODY).color(p.tx3))
         .child(el().h(6.0))
         .child(facts)
         .child(el().h(12.0))

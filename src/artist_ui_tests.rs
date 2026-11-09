@@ -184,5 +184,5 @@ fn eps_and_singles_list_apart_from_albums_on_the_artist_page_and_in_search() {
 
     rt.update(|s, tx| s.show_album(shrines, tx));
     settle(&mut rt);
-    assert_eq!(text_of(&rt, "page-kind"), "EP");
+    assert!(text_of(&rt, "page-meta").starts_with("EP  •"));
 }
