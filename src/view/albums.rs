@@ -150,16 +150,17 @@ pub(super) fn list_card(s: &App, a: usize, section: Option<usize>, p: &Palette) 
         .child(text(meta(album, true)).font(BODY).color(p.tx3))
         .child(el().h(10.0))
         .child(row().gap(8.0).child(play_button("play-album", "Play album", p).on_press_tx(move |s: &mut App, tx| s.play_album(a, None, tx))));
-    col()
+    let card = col()
         .key(album_key(a, section))
         .w_full()
-        .mb(14.0)
         .padding(16.0)
         .radius(12.0)
         .fill(p.bg2)
         .gap(14.0)
         .child(row().gap(18.0).items_start().child(art).child(head))
-        .child(track_table(s, a, table::Columns { shown: &s.base.active().columns, widths: &s.base.active().widths }, p))
+        .child(track_table(s, a, table::Columns { shown: &s.base.active().columns, widths: &s.base.active().widths }, p));
+    // Padding, not margin: virtual rows size each row by its box, so the gap sits inside it.
+    col().w_full().pb(16.0).child(card)
 }
 
 /// The album's songs as a table with the page columns. Double-click plays the album from
