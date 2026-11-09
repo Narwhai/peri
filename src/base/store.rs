@@ -22,6 +22,9 @@ pub struct Base {
     /// The columns of album pages' and artist pages' song tables, which belong to no view.
     #[serde(default = "page_columns")]
     pub page_columns: Vec<Property>,
+    /// Those tables' dragged column widths.
+    #[serde(default)]
+    pub page_widths: super::view::Widths,
 }
 
 /// What album and artist pages' song tables show after the title by default.
@@ -31,7 +34,7 @@ pub fn page_columns() -> Vec<Property> {
 
 impl Default for Base {
     fn default() -> Base {
-        Base { version: VERSION, views: vec![View::new("All songs")], active: 0, page_columns: page_columns() }
+        Base { version: VERSION, views: vec![View::new("All songs")], active: 0, page_columns: page_columns(), page_widths: Default::default() }
     }
 }
 

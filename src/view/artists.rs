@@ -8,7 +8,6 @@ use super::table;
 use super::*;
 use crate::album::ReleaseType;
 use crate::artist::{ArtistPage, page};
-use crate::base::property::Property;
 use crate::credits::Role;
 use crate::palette::Palette;
 
@@ -167,7 +166,7 @@ pub(super) fn songs(s: &App, key: &str, title: &str, list: &[usize], role: Optio
 }
 
 fn song_table(s: &App, key: &str, list: &[usize], role: Option<Role>, artist: &str, p: &Palette) -> El {
-    let columns = &s.base.page_columns;
+    let columns = table::Columns { shown: &s.base.page_columns, widths: &s.base.page_widths };
     let mut rows = col().child(table::header(&format!("{key}-header"), "", columns, 8.0, p));
     for &i in list {
         rows = rows.child(song_line(s, key, i, list, role, artist, columns, p));
@@ -197,7 +196,7 @@ fn songs_toggle(count: usize, open: bool, p: &Palette) -> El {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn song_line(s: &App, key: &str, i: usize, list: &[usize], role: Option<Role>, artist: &str, columns: &[Property], p: &Palette) -> El {
+fn song_line(s: &App, key: &str, i: usize, list: &[usize], role: Option<Role>, artist: &str, columns: table::Columns, p: &Palette) -> El {
     let t = &s.tracks[i];
     let current = s.current == Some(i);
     // The song's album cover, dimmed under the playing icon for the current song.

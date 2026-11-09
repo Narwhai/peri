@@ -482,6 +482,10 @@ fn columns_body<'a>(s: &'a App, p: &'a Palette) -> impl FnOnce(&mut Vec<El>) -> 
             *s.shown_columns_mut() = default;
             s.views_changed();
         }))
+        .child(menu_row("columns-reset-widths", &icons::COLUMNS, "Reset widths", p).on_press(|s: &mut App| {
+            s.shown_widths_mut().clear();
+            s.views_changed();
+        }))
     }
 }
 

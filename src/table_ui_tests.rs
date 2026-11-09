@@ -162,3 +162,59 @@ fn real_details_dialog() {
 }
 
 
+
+/// The laid-out width of the first element keyed `key` (a row's cell or a header).
+fn width_of(rt: &Runtime<App>, key: &str) -> f32 {
+    rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).unwrap_or_else(|| panic!("no {key}")).rect[2]
+}
+
+fn drag(rt: &mut Runtime<App>, key: &str, dx: f32) {
+    let (x, y) = rt.find(key).unwrap_or_else(|| panic!("no element {key}"));
+    rt.pointer_down(x, y);
+    for step in 1..=4 {
+        rt.pointer_move(x + dx * step as f32 / 4.0, y);
+        rt.frame(1.0 / 60.0);
+    }
+    rt.pointer_up(x + dx, y);
+    settle(rt);
+}
+
+#[test]
+fn dragging_a_header_edge_resizes_the_column_and_double_click_or_reset_restores_it() {
+    let mut rt = runtime();
+    let album = "table-header-col-album";
+    let grown = width_of(&rt, album);
+    assert!(grown > crate::view::table_width(Property::Album), "album names grow with spare room, got {grown}");
+    drag(&mut rt, &format!("{album}-resize"), 60.0);
+    let set = rt.state.base.active().widths.get(&Property::Album).copied().expect("dragging sets a width");
+    assert!((set - (grown + 60.0)).abs() <= 1.0, "the drag starts from the width on screen: {grown} + 60 ≠ {set}");
+    assert!((width_of(&rt, album) - set).abs() <= 1.0);
+    assert!((width_of(&rt, "col-album") - set).abs() <= 1.0, "rows follow the header");
+    // Never narrower than the minimum.
+    drag(&mut rt, &format!("{album}-resize"), -1000.0);
+    assert_eq!(rt.state.base.active().widths.get(&Property::Album).copied(), Some(40.0));
+    // Double-click lets it size itself again.
+    let (x, y) = rt.find(&format!("{album}-resize")).expect("handle");
+    for _ in 0..2 {
+        rt.pointer_down(x, y);
+        rt.pointer_up(x, y);
+    }
+    settle(&mut rt);
+    assert!(rt.state.base.active().widths.is_empty());
+    // Reset widths in the Columns popover clears every dragged width.
+    drag(&mut rt, "table-header-col-duration-resize", 30.0);
+    assert!(!rt.state.base.active().widths.is_empty());
+    click(&mut rt, "columns");
+    click(&mut rt, "columns-reset-widths");
+    assert!(rt.state.base.active().widths.is_empty());
+}
+
+#[test]
+fn page_tables_keep_their_own_widths() {
+    let mut rt = runtime();
+    rt.update(|s, tx| s.show_artist("Laraaji", tx));
+    settle(&mut rt);
+    drag(&mut rt, "credits-composer-header-col-artist-resize", 50.0);
+    assert!(rt.state.base.page_widths.contains_key(&Property::Artist));
+    assert!(rt.state.base.active().widths.is_empty(), "the view's widths are its own");
+}

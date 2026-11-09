@@ -255,6 +255,12 @@ impl Borders for El {
     }
 }
 
+/// A column's default width, for tests.
+#[cfg(test)]
+pub fn table_width(c: crate::base::property::Property) -> f32 {
+    table::width(c)
+}
+
 pub fn clock(seconds: f64) -> String {
     let s = seconds.max(0.0).floor() as u64;
     if s >= 3600 { format!("{}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60) } else { format!("{}:{:02}", s / 60, s % 60) }

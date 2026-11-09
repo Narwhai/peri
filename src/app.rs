@@ -11,7 +11,7 @@ use crate::audio::{self, Engine};
 use crate::base::property::{Mode, Property};
 use crate::covers::Covers;
 use crate::base::store::{Base, Store};
-use crate::base::view::{Evaluated, Layout, Section, evaluate};
+use crate::base::view::{Evaluated, Layout, Section, Widths, evaluate};
 use crate::library::{self, ScanMsg, Track};
 use crate::queue::{Queue, Repeat, Rng};
 
@@ -112,6 +112,8 @@ pub struct App {
     /// One editor per filter condition with a typed value, by path.
     pub filter_edits: std::collections::HashMap<Vec<usize>, TextEdit>,
     pub search: TextEdit,
+    /// Each column's width as last laid out on screen, where a resize drag starts from.
+    pub laid_out_widths: std::collections::HashMap<Property, f32>,
     /// Index into `tracks` of the highlighted row.
     pub selected: Option<usize>,
     /// Index into `tracks` of the loaded track.
@@ -162,6 +164,7 @@ impl App {
             rename: TextEdit::new(""),
             filter_edits: Default::default(),
             search: TextEdit::new(""),
+            laid_out_widths: Default::default(),
             selected: None,
             current: None,
             queue: None,
@@ -350,6 +353,21 @@ impl App {
         match self.page {
             Page::Library => &mut self.base.active_mut().columns,
             Page::Album(_) | Page::Artist(_) | Page::Search => &mut self.base.page_columns,
+        }
+    }
+
+    /// The dragged column widths of the tables on screen, which go with their columns.
+    pub fn shown_widths(&self) -> &Widths {
+        match self.page {
+            Page::Library => &self.base.active().widths,
+            Page::Album(_) | Page::Artist(_) | Page::Search => &self.base.page_widths,
+        }
+    }
+
+    pub fn shown_widths_mut(&mut self) -> &mut Widths {
+        match self.page {
+            Page::Library => &mut self.base.active_mut().widths,
+            Page::Album(_) | Page::Artist(_) | Page::Search => &mut self.base.page_widths,
         }
     }
 

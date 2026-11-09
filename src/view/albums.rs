@@ -5,7 +5,6 @@ use rune::{Align, Cursor, El, Image, ScrollSpec, SurfaceFit, Tx, col, el, icon, 
 use super::table;
 use super::*;
 use crate::album::{Album, ReleaseType};
-use crate::base::property::Property;
 use crate::credits::{self, Role};
 use crate::app::{App, album_key, grid_key};
 use crate::icons;
@@ -160,12 +159,12 @@ pub(super) fn list_card(s: &App, a: usize, section: Option<usize>, p: &Palette) 
         .fill(p.bg2)
         .gap(14.0)
         .child(row().gap(18.0).items_start().child(art).child(head))
-        .child(track_table(s, a, &s.base.active().columns, p))
+        .child(track_table(s, a, table::Columns { shown: &s.base.active().columns, widths: &s.base.active().widths }, p))
 }
 
 /// The album's songs as a table with the page columns. Double-click plays the album from
 /// that song. Album cards in list views use the view's columns instead.
-fn track_table(s: &App, a: usize, columns: &[Property], p: &Palette) -> El {
+fn track_table(s: &App, a: usize, columns: table::Columns, p: &Palette) -> El {
     let album = &s.albums[a];
     let discs = album.discs(&s.tracks);
     let mut rows = col().w_full();
@@ -186,7 +185,7 @@ fn track_table(s: &App, a: usize, columns: &[Property], p: &Palette) -> El {
     table::scrolling("tracks".into(), columns, 8.0, body)
 }
 
-fn track_line(s: &App, t: &Track, i: usize, n: usize, a: usize, columns: &[Property], p: &Palette) -> El {
+fn track_line(s: &App, t: &Track, i: usize, n: usize, a: usize, columns: table::Columns, p: &Palette) -> El {
     let current = s.current == Some(i);
     let lead: El = if current {
         icon(if s.playing { &icons::BARS } else { &icons::PAUSE }, 13.0).color(p.blue)
@@ -300,7 +299,7 @@ pub(super) fn album_page(s: &App, a: usize, p: &Palette) -> El {
         .gap(22.0)
         .child(back)
         .child(top)
-        .child(track_table(s, a, &s.base.page_columns, p));
+        .child(track_table(s, a, table::Columns { shown: &s.base.page_columns, widths: &s.base.page_widths }, p));
     let more = more_by(s, a, p);
     if let Some(more) = more {
         page = page.child(more);

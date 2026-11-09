@@ -6,7 +6,7 @@ use super::albums::{columns_for, grid_row, grid_row_h, list_card};
 use super::table;
 use super::*;
 use crate::app::{App, Row, album_key, grid_key, header_key, row_key};
-use crate::base::property::{Mode, Property};
+use crate::base::property::Mode;
 use crate::base::view::Layout;
 use crate::base::view::Section;
 use crate::icons;
@@ -88,8 +88,9 @@ pub(super) fn list(s: &App, p: &Palette, cx: &mut Cx<App>) -> El {
                     let current = s.current == Some(track);
                     let playing = current && s.playing;
                     let number = number_in(s, track, section);
-                    let columns = &s.base.active().columns;
-                    memo(row_key(track, section), (s.list_version, number, selected, current, playing, p.dark, columns.clone()), || {
+                    let view = s.base.active();
+                    let columns = table::Columns { shown: &view.columns, widths: &view.widths };
+                    memo(row_key(track, section), (s.list_version, number, selected, current, playing, p.dark, columns.version()), || {
                         track_row(&s.tracks[track], track, section, number, selected, current, playing, columns, &p)
                     })
                 }
@@ -113,7 +114,8 @@ pub(super) fn list(s: &App, p: &Palette, cx: &mut Cx<App>) -> El {
     }
     // Songs: a table as wide as its columns need, scrolling sideways when the window is
     // narrower. The column header sits above the viewport and follows its sideways scroll.
-    let columns = &s.base.active().columns;
+    let view = s.base.active();
+    let columns = table::Columns { shown: &view.columns, widths: &view.widths };
     // A viewport scrolling both ways lays its content out at its natural width, so the table
     // fills the viewport itself, and is wider when its columns need it.
     let min_w = table::min_width(columns, LIST_PX).max(width + 2.0 * pad);
@@ -172,7 +174,7 @@ fn group_header(section: &Section, g: usize, open: bool, p: &Palette) -> El {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn track_row(t: &Track, i: usize, section: Option<usize>, number: usize, selected: bool, current: bool, playing: bool, columns: &[Property], p: &Palette) -> El {
+fn track_row(t: &Track, i: usize, section: Option<usize>, number: usize, selected: bool, current: bool, playing: bool, columns: table::Columns, p: &Palette) -> El {
     let lead: El = if current {
         icon(if playing { &icons::BARS } else { &icons::PAUSE }, 14.0).color(p.blue)
     } else {

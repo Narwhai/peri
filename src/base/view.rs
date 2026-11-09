@@ -75,7 +75,13 @@ pub struct View {
     /// The columns song tables show after the title, in order.
     #[serde(default = "default_columns")]
     pub columns: Vec<Property>,
+    /// Widths the user dragged columns to; the rest size themselves.
+    #[serde(default)]
+    pub widths: Widths,
 }
+
+/// Column widths set by dragging, in points, by property.
+pub type Widths = std::collections::BTreeMap<Property, f32>;
 
 /// What a new view's song tables show after the title.
 pub fn default_columns() -> Vec<Property> {
@@ -84,7 +90,7 @@ pub fn default_columns() -> Vec<Property> {
 
 impl View {
     pub fn new(name: impl Into<String>) -> View {
-        View { name: name.into(), mode: Mode::Songs, layout: Layout::Grid, filter: Group::default(), sorts: Vec::new(), group_by: None, columns: default_columns() }
+        View { name: name.into(), mode: Mode::Songs, layout: Layout::Grid, filter: Group::default(), sorts: Vec::new(), group_by: None, columns: default_columns(), widths: Widths::new() }
     }
 
     /// Switches what the view lists, dropping sorts, grouping and conditions on properties
