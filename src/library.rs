@@ -52,6 +52,8 @@ pub struct Track {
     pub genres: Vec<String>,
     /// From the recording date, else the year, release date or original release date.
     pub year: Option<u32>,
+    /// The album's release type, as this song's tags give it.
+    pub release_type: crate::album::ReleaseType,
     /// Composers, lyricists, producers and the other people the tags credit.
     pub credits: Vec<Credit>,
     pub label: Option<String>,
@@ -225,6 +227,7 @@ fn read_track(path: PathBuf) -> Track {
         album: text(|t| t.album()),
         genres: many(&[ItemKey::Genre], &[';', ',', '\0']),
         year: tag.and_then(year),
+        release_type: crate::album::ReleaseType::parse(item(ItemKey::MusicBrainzReleaseType).as_deref(), item(ItemKey::FlagCompilation).as_deref()),
         credits,
         label: item(ItemKey::Label).or_else(|| item(ItemKey::Publisher)),
         disc: tag.and_then(|t| t.disk()),

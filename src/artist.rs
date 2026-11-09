@@ -26,6 +26,27 @@ impl ArtistPage {
     pub fn is_empty(&self) -> bool {
         self.albums.is_empty() && self.appears_on.is_empty() && self.songs.is_empty() && self.credits.is_empty()
     }
+
+    /// What Play plays: their own releases newest first (each in track order), then the songs
+    /// they appear on; else, with neither, the songs crediting them, in library order.
+    pub fn play_list(&self, albums: &[Album]) -> Vec<usize> {
+        let list: Vec<usize> = self.albums.iter().flat_map(|&a| albums[a].tracks.iter().copied()).chain(self.appears_on.iter().copied()).collect();
+        if !list.is_empty() {
+            return list;
+        }
+        let mut credited: Vec<usize> = self.credits.iter().flat_map(|(_, l)| l.iter().copied()).collect();
+        credited.sort_unstable();
+        credited.dedup();
+        credited
+    }
+
+    /// What Play Discography plays: their own releases oldest first, undated last, each in
+    /// track order.
+    pub fn discography(&self, albums: &[Album]) -> Vec<usize> {
+        let mut own = self.albums.clone();
+        own.sort_by_key(|&a| (albums[a].year.is_none(), albums[a].year));
+        own.iter().flat_map(|&a| albums[a].tracks.iter().copied()).collect()
+    }
 }
 
 fn has(names: &[String], name: &str) -> bool {
@@ -122,6 +143,20 @@ mod tests {
         assert_eq!(p.featured_on, p.songs);
         assert_eq!(p.credits.len(), 1);
         assert_eq!((p.credits[0].0, tracks[p.credits[0].1[0]].title.as_str()), (Role::Lyricist, "Wrote It"), "credits match ignoring case");
+    }
+
+    #[test]
+    fn play_takes_own_releases_newest_first_then_appearances_and_discography_oldest_first() {
+        let (tracks, albums) = library();
+        let names = |list: Vec<usize>| list.into_iter().map(|i| tracks[i].title.clone()).collect::<Vec<String>>();
+        let p = page("Armand Hammer", &tracks, &albums);
+        assert_eq!(names(p.play_list(&albums)), ["Calypso Gene", "Laraaji", "Solo"], "Mercy (2025) in album order, then Haram (2021)");
+        assert_eq!(names(p.discography(&albums)), ["Solo", "Calypso Gene", "Laraaji"], "Haram (2021), then Mercy (2025)");
+        let guest = page("Cleo Reed", &tracks, &albums);
+        assert_eq!(names(guest.play_list(&albums)), ["Calypso Gene"], "with no releases of their own, their appearances");
+        assert!(guest.discography(&albums).is_empty());
+        let writer = page("Somebody", &tracks, &albums);
+        assert_eq!(names(writer.play_list(&albums)), ["Wrote It"]);
     }
 
     #[test]

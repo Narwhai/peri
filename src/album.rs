@@ -8,6 +8,66 @@ use crate::credits::{self, Credit};
 use crate::library::Track;
 
 pub const UNKNOWN_ALBUM: &str = "Unknown album";
+
+/// What kind of release an album is, from its release type tag (`RELEASETYPE`, "MusicBrainz
+/// Album Type") and compilation flag. Untagged releases count as albums.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ReleaseType {
+    #[default]
+    Album,
+    Ep,
+    Single,
+    Compilation,
+}
+
+impl ReleaseType {
+    /// In the order artist pages list them.
+    pub const ALL: [ReleaseType; 4] = [ReleaseType::Album, ReleaseType::Ep, ReleaseType::Single, ReleaseType::Compilation];
+
+    /// Reads the release type tag ("album", "EP", "album; compilation; remix") and the
+    /// compilation flag ("1"). A compilation is one by either; else the primary type decides,
+    /// and types other than EP and single (broadcast, other) count as albums.
+    pub fn parse(release_type: Option<&str>, compilation: Option<&str>) -> ReleaseType {
+        let types: Vec<String> = release_type.unwrap_or_default().split([';', '/', ',']).map(|t| t.trim().to_lowercase()).filter(|t| !t.is_empty()).collect();
+        let flagged = compilation.is_some_and(|c| matches!(c.trim().to_lowercase().as_str(), "1" | "true" | "yes"));
+        if flagged || types.iter().any(|t| t == "compilation") {
+            return ReleaseType::Compilation;
+        }
+        match types.first().map(String::as_str) {
+            Some("ep") => ReleaseType::Ep,
+            Some("single") => ReleaseType::Single,
+            _ => ReleaseType::Album,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ReleaseType::Album => "Album",
+            ReleaseType::Ep => "EP",
+            ReleaseType::Single => "Single",
+            ReleaseType::Compilation => "Compilation",
+        }
+    }
+
+    /// "1 album", "3 EPs", for counts.
+    pub fn count(self, n: usize) -> String {
+        let word = if n == 1 { self.label() } else { self.plural() };
+        match self {
+            ReleaseType::Ep => format!("{n} {word}"),
+            ReleaseType::Album | ReleaseType::Single | ReleaseType::Compilation => format!("{n} {}", word.to_lowercase()),
+        }
+    }
+
+    /// A section heading listing several.
+    pub fn plural(self) -> &'static str {
+        match self {
+            ReleaseType::Album => "Albums",
+            ReleaseType::Ep => "EPs",
+            ReleaseType::Single => "Singles",
+            ReleaseType::Compilation => "Compilations",
+        }
+    }
+}
 pub const UNKNOWN_ARTIST: &str = "Unknown artist";
 
 #[derive(Clone, Debug, PartialEq)]
@@ -18,6 +78,8 @@ pub struct Album {
     /// The album's artists one per act ("Armand Hammer", "The Alchemist"), from its first song.
     pub album_artists: Vec<String>,
     pub year: Option<u32>,
+    /// From the first song.
+    pub release_type: ReleaseType,
     /// Indices into the library, in disc then track order.
     pub tracks: Vec<usize>,
     /// Whether these are the artist's songs that have no album tag.
@@ -86,6 +148,7 @@ impl Record for Album {
             Property::Featured => list(&self.featured),
             Property::Genre => list(&self.genres),
             Property::Year => number(self.year.map(f64::from)),
+            Property::ReleaseType => Value::Text(self.release_type.label().to_string()),
             Property::Composer
             | Property::Lyricist
             | Property::Writer
@@ -129,6 +192,7 @@ pub fn build(tracks: &[Track]) -> Vec<Album> {
                 artist: artist.clone(),
                 album_artists: if t.album_artists.is_empty() { t.artists.iter().filter(|a| !t.featured.contains(a)).cloned().collect() } else { t.album_artists.clone() },
                 year,
+                release_type: t.release_type,
                 tracks: Vec::new(),
                 unknown: title.is_none(),
                 genres: Vec::new(),
@@ -255,6 +319,28 @@ mod tests {
         assert_eq!(shown, ["Mercy"]);
         // Songs read the same list.
         assert_eq!(Property::AlbumArtist.value(&tracks[0]), Value::List(ids(&["Armand Hammer", "The Alchemist"])));
+    }
+
+    #[test]
+    fn release_types_read_from_the_tag_and_compilation_flag() {
+        let parse = ReleaseType::parse;
+        assert_eq!(parse(Some("EP"), None), ReleaseType::Ep);
+        assert_eq!(parse(Some("single"), Some("0")), ReleaseType::Single);
+        assert_eq!(parse(Some("Album"), Some("0")), ReleaseType::Album);
+        assert_eq!(parse(Some("album;remix"), None), ReleaseType::Album);
+        assert_eq!(parse(Some("album; compilation; remix"), None), ReleaseType::Compilation);
+        assert_eq!(parse(None, Some("1")), ReleaseType::Compilation);
+        assert_eq!(parse(Some("broadcast"), None), ReleaseType::Album);
+        assert_eq!(parse(None, None), ReleaseType::Album, "untagged counts as an album");
+    }
+
+    #[test]
+    fn an_album_takes_its_release_type_from_its_songs() {
+        let mut t = song("s1", Some("Lucky"), None, "Erika de Casier", Some(2019), None, 1);
+        t.release_type = ReleaseType::Single;
+        let albums = build(&[t]);
+        assert_eq!(albums[0].release_type, ReleaseType::Single);
+        assert_eq!(albums[0].value(Property::ReleaseType), Value::Text("Single".into()));
     }
 
     #[test]

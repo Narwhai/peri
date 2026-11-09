@@ -149,3 +149,40 @@ fn artist_song_rows_lead_with_the_album_cover() {
     let calypso = rt.state.tracks.iter().position(|t| t.title == "Calypso Gene").expect("Calypso Gene");
     assert!(rt.find(&format!("artist-songs-cover{calypso}")).is_some());
 }
+
+#[test]
+fn eps_and_singles_list_apart_from_albums_on_the_artist_page_and_in_search() {
+    let mut tracks = mercy();
+    let mut ep = tracks[0].clone();
+    ep.path = "/m/Shrines EP/01 Shrines.flac".into();
+    ep.title = "Shrines".into();
+    ep.album = Some("Shrines EP".into());
+    ep.year = Some(2020);
+    ep.album_artist = Some("Armand Hammer".into());
+    ep.tagged = TaggedArtists { artists: strings(&["Armand Hammer"]), ..TaggedArtists::default() };
+    ep.release_type = crate::album::ReleaseType::Ep;
+    tracks.push(ep);
+    let mut rt = runtime();
+    rt.update(|s, _| s.set_library(tracks, false));
+    settle(&mut rt);
+    let shrines = rt.state.albums.iter().position(|a| a.title == "Shrines EP").expect("Shrines EP");
+    let mercy = rt.state.albums.iter().position(|a| a.title == "Mercy").expect("Mercy");
+
+    rt.update(|s, tx| s.show_artist("Armand Hammer", tx));
+    settle(&mut rt);
+    assert!(rt.find(&format!("artist-albums{mercy}")).is_some());
+    assert!(rt.find(&format!("artist-eps{shrines}")).is_some(), "the EP lists under EPs");
+    assert!(rt.find(&format!("artist-albums{shrines}")).is_none());
+    assert_eq!(text_of(&rt, "artist-counts"), "1 album  •  1 EP  •  3 songs");
+
+    rt.update(|s, tx| {
+        s.search = rune::TextEdit::new("shrines");
+        s.searched(tx);
+    });
+    settle(&mut rt);
+    assert!(rt.find(&format!("search-eps{shrines}")).is_some(), "search results split by type too");
+
+    rt.update(|s, tx| s.show_album(shrines, tx));
+    settle(&mut rt);
+    assert_eq!(text_of(&rt, "page-kind"), "EP");
+}

@@ -33,6 +33,8 @@ pub enum Property {
     Album,
     Genre,
     Year,
+    /// Album, EP, single or compilation.
+    ReleaseType,
     Composer,
     Lyricist,
     Writer,
@@ -79,7 +81,7 @@ pub enum Value {
 }
 
 impl Property {
-    pub const ALL: [Property; 25] = [
+    pub const ALL: [Property; 26] = [
         Property::Title,
         Property::Artist,
         Property::Featured,
@@ -87,6 +89,7 @@ impl Property {
         Property::Album,
         Property::Genre,
         Property::Year,
+        Property::ReleaseType,
         Property::Composer,
         Property::Lyricist,
         Property::Writer,
@@ -110,13 +113,14 @@ impl Property {
     /// The properties a mode offers. Albums drop the per-song ones and add a track count;
     /// "Title" is the album's title there.
     pub fn for_mode(mode: Mode) -> &'static [Property] {
-        const ALBUM: [Property; 23] = [
+        const ALBUM: [Property; 24] = [
             Property::Title,
             Property::AlbumArtist,
             Property::Artist,
             Property::Featured,
             Property::Genre,
             Property::Year,
+            Property::ReleaseType,
             Property::Composer,
             Property::Lyricist,
             Property::Writer,
@@ -162,6 +166,7 @@ impl Property {
             | Property::Album
             | Property::Genre
             | Property::Year
+            | Property::ReleaseType
             | Property::Label
             | Property::Track
             | Property::Disc
@@ -182,6 +187,7 @@ impl Property {
             Property::Album => "Album",
             Property::Genre => "Genre",
             Property::Year => "Year",
+            Property::ReleaseType => "Release type",
             Property::Label => "Label",
             Property::Track => "Track number",
             Property::Disc => "Disc number",
@@ -210,7 +216,7 @@ impl Property {
 
     pub fn kind(self) -> Kind {
         match self {
-            Property::Title | Property::Album | Property::Label | Property::Format | Property::Folder => Kind::Text,
+            Property::Title | Property::Album | Property::ReleaseType | Property::Label | Property::Format | Property::Folder => Kind::Text,
             Property::Artist | Property::Featured | Property::AlbumArtist | Property::Genre => Kind::List,
             Property::Composer
             | Property::Lyricist
@@ -243,6 +249,7 @@ impl Property {
             Property::Album => text(t.album.as_deref()),
             Property::Genre => list(&t.genres),
             Property::Year => number(t.year.map(f64::from)),
+            Property::ReleaseType => Value::Text(t.release_type.label().to_string()),
             Property::Label => text(t.label.as_deref()),
             Property::Track => number(t.number.map(f64::from)),
             Property::Disc => number(t.disc.map(f64::from)),

@@ -3,9 +3,10 @@
 
 use rune::{Cursor, El, ScrollSpec, col, el, icon, row, text};
 
-use super::albums::{album_strip, back_label, cover, cover_image, play_button};
+use super::albums::{album_strip, back_label, cover, cover_image, play_button, secondary_button};
 use super::table;
 use super::*;
+use crate::album::ReleaseType;
 use crate::artist::{ArtistPage, page};
 use crate::base::property::Property;
 use crate::credits::Role;
@@ -43,9 +44,7 @@ pub(super) fn artist_page(s: &App, name: &str, p: &Palette) -> El {
 /// Their albums, the songs they appear on, their credits, then their songs.
 pub(super) fn sections(s: &App, info: &ArtistPage, p: &Palette) -> Vec<El> {
     let mut out = Vec::new();
-    if !info.albums.is_empty() {
-        out.push(album_strip(s, "artist-albums", "Albums", &info.albums, false, p));
-    }
+    out.extend(release_strips(s, "artist", &info.albums, false, p));
     if !info.appears_on.is_empty() {
         out.push(songs(s, "appears-on", "Appears on", &info.appears_on, None, &info.name, p));
     }
@@ -64,14 +63,30 @@ pub(super) fn sections(s: &App, info: &ArtistPage, p: &Palette) -> Vec<El> {
     out
 }
 
+/// One strip per release type (Albums, EPs, Singles, Compilations) of `albums`, keeping
+/// their order; keyed `{key}-albums`, `{key}-eps`…
+pub(super) fn release_strips(s: &App, key: &str, albums: &[usize], artists: bool, p: &Palette) -> Vec<El> {
+    ReleaseType::ALL
+        .into_iter()
+        .filter_map(|kind| {
+            let of_kind: Vec<usize> = albums.iter().copied().filter(|&a| s.albums[a].release_type == kind).collect();
+            let section = format!("{key}-{}", kind.plural().to_lowercase());
+            (!of_kind.is_empty()).then(|| album_strip(s, &section, kind.plural(), &of_kind, artists, p))
+        })
+        .collect()
+}
+
 /// Picture (the first album's cover), name, counts, Play. In search results the name and
 /// picture open the artist's page.
 pub(super) fn head(s: &App, info: &ArtistPage, linked: bool, p: &Palette) -> El {
     let first = info.albums.first().copied().or_else(|| info.appears_on.first().and_then(|&i| s.album_of(i)));
     let mut art = cover("artist-cover".into(), first.and_then(|a| cover_image(s, &s.albums[a])), Some(160.0), 80.0, p);
     let mut counts = Vec::new();
-    if !info.albums.is_empty() {
-        counts.push(plural(info.albums.len(), "album"));
+    for kind in ReleaseType::ALL {
+        let n = info.albums.iter().filter(|&&a| s.albums[a].release_type == kind).count();
+        if n > 0 {
+            counts.push(kind.count(n));
+        }
     }
     if !info.songs.is_empty() {
         counts.push(plural(info.songs.len(), "song"));
@@ -97,12 +112,22 @@ pub(super) fn head(s: &App, info: &ArtistPage, linked: bool, p: &Palette) -> El 
         .child(name)
         .child(text(counts.join("  •  ")).key("artist-counts").font(BODY).color(p.tx3));
     let mut buttons = row().gap(8.0);
-    let playable = play_list(info);
-    if let Some(&first) = playable.first() {
+    if !info.play_list(&s.albums).is_empty() {
         let who = info.name.clone();
         buttons = buttons.child(play_button("artist-play", "Play", p).on_press_tx(move |s: &mut App, tx| {
-            let list = play_list(&page(&who, &s.tracks, &s.albums));
-            s.play_list(list, first, tx);
+            let list = page(&who, &s.tracks, &s.albums).play_list(&s.albums);
+            if let Some(&first) = list.first() {
+                s.play_list(list, first, tx);
+            }
+        }));
+    }
+    if !info.discography(&s.albums).is_empty() {
+        let who = info.name.clone();
+        buttons = buttons.child(secondary_button("artist-discography", &icons::PLAY, "Play Discography", p).on_press_tx(move |s: &mut App, tx| {
+            let list = page(&who, &s.tracks, &s.albums).discography(&s.albums);
+            if let Some(&first) = list.first() {
+                s.play_list(list, first, tx);
+            }
         }));
     }
     if linked {
@@ -113,16 +138,6 @@ pub(super) fn head(s: &App, info: &ArtistPage, linked: bool, p: &Palette) -> El 
     row().gap(28.0).center_y().child(art).child(details)
 }
 
-/// What Play plays: their songs, else the songs crediting them, in library order.
-fn play_list(info: &ArtistPage) -> Vec<usize> {
-    if !info.songs.is_empty() {
-        return info.songs.clone();
-    }
-    let mut all: Vec<usize> = info.credits.iter().flat_map(|(_, l)| l.iter().copied()).collect();
-    all.sort_unstable();
-    all.dedup();
-    all
-}
 
 /// An outlined button beside Play.
 fn link_button(key: &'static str, label: &'static str, p: &Palette) -> El {

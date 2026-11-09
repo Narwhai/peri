@@ -4,7 +4,7 @@ use rune::{Align, Cursor, El, Image, ScrollSpec, SurfaceFit, Tx, col, el, icon, 
 
 use super::table;
 use super::*;
-use crate::album::Album;
+use crate::album::{Album, ReleaseType};
 use crate::base::property::Property;
 use crate::credits::{self, Role};
 use crate::app::{App, album_key, grid_key};
@@ -39,9 +39,12 @@ pub fn grid_row_h(width: f32, columns: usize) -> f32 {
     card_w(width, columns) + CARD_TEXT_H + CARD_GAP + 16.0
 }
 
-/// "2024 • 11 tracks • 32:08", skipping what isn't known.
+/// "EP • 2024 • 4 tracks • 12:08", skipping what isn't known; albums don't say "Album".
 fn meta(a: &Album, with_length: bool) -> String {
     let mut parts = Vec::new();
+    if a.release_type != ReleaseType::Album {
+        parts.push(a.release_type.label().to_string());
+    }
     if let Some(y) = a.year {
         parts.push(y.to_string());
     }
@@ -215,7 +218,7 @@ pub(super) fn play_button(key: &'static str, label: &'static str, p: &Palette) -
         .child(text(label).font(TITLE).color(rune::Color::WHITE))
 }
 
-fn secondary_button(key: &'static str, glyph: &'static rune::Icon, label: &'static str, p: &Palette) -> El {
+pub(super) fn secondary_button(key: &'static str, glyph: &'static rune::Icon, label: &'static str, p: &Palette) -> El {
     row()
         .key(key)
         .h(32.0)
@@ -275,7 +278,7 @@ pub(super) fn album_page(s: &App, a: usize, p: &Palette) -> El {
         .gap(6.0)
         .grow(1.0)
         .shrink()
-        .child(text("Album").font(SMALL).color(p.tx3))
+        .child(text(album.release_type.label()).key("page-kind").font(SMALL).color(p.tx3))
         .child(text(album.title.clone()).key("page-title").font(PAGE_TITLE).color(p.tx).wrap())
         .child(album_artist(album, p.tx2).key("page-artist").font(HEADING))
         .child(text(meta(album, true)).font(BODY).color(p.tx3))
@@ -361,7 +364,9 @@ pub(super) fn album_strip(s: &App, key: &str, title: &str, albums: &[usize], art
         if artists {
             card = card.child(text(other.artist_name().to_string()).font(SMALL).color(p.tx2).truncate());
         }
-        strip = strip.child(card.child(text(other.year.map(|y| y.to_string()).unwrap_or_default()).font(SMALL).color(p.tx3)));
+        let year = other.year.map(|y| y.to_string()).unwrap_or_default();
+        let line = if other.release_type == ReleaseType::Album { year } else { [other.release_type.label().to_string(), year].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("  •  ") };
+        strip = strip.child(card.child(text(line).font(SMALL).color(p.tx3)));
     }
     let section = if key == "more" { "more-by".to_string() } else { key.to_string() };
     col()
