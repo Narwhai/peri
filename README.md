@@ -25,7 +25,7 @@ Views work like Obsidian's [Bases](https://help.obsidian.md/bases/views). By def
 
 - **Views** (top left): create, rename (double-click or ✎), duplicate, delete and switch views. Each view keeps its own filter, sorts and grouping.
 - **Sort:** add several sorts and reorder them with ↑. Each sorts A→Z / 0→9 / old→new or the reverse. Songs missing a value always go last.
-- **Group:** group by one property into sticky headers with counts. Click a header to collapse it. Songs with several artists, genres or composers show under each.
+- **Group:** group by one property into sticky headers with counts. Click a header to collapse it. Songs with several artists, album artists, genres or composers show under each, so a collaborative album shows under each of its artists.
 - **Filter:** add conditions (property, operator, value) to a group whose rule is *all*, *any* or *none* of the following are true. Groups nest up to three levels. The operators offered depend on the property type:
   - text: is, contains, starts with…
   - lists: has, does not have…

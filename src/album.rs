@@ -74,7 +74,7 @@ impl Record for Album {
     fn value(&self, p: Property) -> Value {
         match p {
             Property::Title | Property::Album => Value::Text(self.title.clone()),
-            Property::AlbumArtist => text(self.artist.as_deref()),
+            Property::AlbumArtist => list(&self.album_artists),
             Property::Artist => list(&self.artists),
             Property::Featured => list(&self.featured),
             Property::Genre => list(&self.genres),
@@ -208,6 +208,38 @@ mod tests {
         assert_ne!(albums[0].id(), albums[1].id());
         assert_eq!(albums[2].artists.len(), 2);
         assert_eq!(albums[2].duration, 200.0);
+    }
+
+    #[test]
+    fn a_collaborative_album_groups_and_filters_under_each_album_artist() {
+        use crate::base::filter::{Condition, Group, Node, Operator};
+        use crate::base::view::{Direction, GroupBy, View, evaluate};
+        use crate::library::TaggedArtists;
+        let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<String>>();
+        let mut mercy = song("c1", Some("Mercy"), Some("Armand Hammer & The Alchemist"), "Armand Hammer & The Alchemist", Some(2025), None, 1);
+        mercy.artists.clear();
+        mercy.tagged = TaggedArtists {
+            artists: ids(&["Armand Hammer", "The Alchemist"]),
+            artist_ids: ids(&["ah", "alc"]),
+            album_artists: Vec::new(),
+            album_artist_ids: ids(&["ah", "alc"]),
+        };
+        let mut tracks = vec![mercy, song("h1", Some("Haram"), Some("Armand Hammer"), "Armand Hammer", Some(2021), None, 1)];
+        crate::credits::resolve(&mut tracks);
+        let albums = build(&tracks);
+        assert_eq!(albums[0].value(Property::AlbumArtist), Value::List(ids(&["Armand Hammer", "The Alchemist"])));
+
+        let mut view = View::new("v");
+        view.group_by = Some(GroupBy { property: Property::AlbumArtist, direction: Direction::Asc });
+        let groups: Vec<(String, usize)> = evaluate(&view, &albums, "").sections.iter().map(|s| (s.title.clone(), s.items.len())).collect();
+        assert_eq!(groups, [("Armand Hammer".to_string(), 2), ("The Alchemist".to_string(), 1)]);
+
+        view.group_by = None;
+        view.filter = Group { children: vec![Node::Condition(Condition { property: Property::AlbumArtist, op: Operator::Has, value: "the alchemist".into() })], ..Group::default() };
+        let shown: Vec<&str> = evaluate(&view, &albums, "").order.iter().map(|&a| albums[a].title.as_str()).collect();
+        assert_eq!(shown, ["Mercy"]);
+        // Songs read the same list.
+        assert_eq!(Property::AlbumArtist.value(&tracks[0]), Value::List(ids(&["Armand Hammer", "The Alchemist"])));
     }
 
     #[test]

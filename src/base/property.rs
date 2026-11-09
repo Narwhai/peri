@@ -146,8 +146,8 @@ impl Property {
 
     pub fn kind(self) -> Kind {
         match self {
-            Property::Title | Property::AlbumArtist | Property::Album | Property::Label | Property::Format | Property::Folder => Kind::Text,
-            Property::Artist | Property::Featured | Property::Genre | Property::Composer | Property::Lyricist | Property::Producer => Kind::List,
+            Property::Title | Property::Album | Property::Label | Property::Format | Property::Folder => Kind::Text,
+            Property::Artist | Property::Featured | Property::AlbumArtist | Property::Genre | Property::Composer | Property::Lyricist | Property::Producer => Kind::List,
             Property::Year | Property::Track | Property::Disc | Property::Tracks => Kind::Number,
             Property::Duration => Kind::Duration,
             Property::Added => Kind::Date,
@@ -164,7 +164,7 @@ impl Property {
             Property::Title => Value::Text(t.title.clone()),
             Property::Artist => list(&t.artists),
             Property::Featured => list(&t.featured),
-            Property::AlbumArtist => text(t.album_artist.as_deref()),
+            Property::AlbumArtist => list(&t.album_artists),
             Property::Album => text(t.album.as_deref()),
             Property::Genre => list(&t.genres),
             Property::Year => number(t.year.map(f64::from)),
