@@ -5,9 +5,11 @@
 
 mod album;
 mod app;
+mod artist;
 mod audio;
 mod base;
 mod covers;
+mod credits;
 mod icons;
 mod library;
 mod palette;
@@ -16,6 +18,8 @@ mod view;
 
 #[cfg(test)]
 mod album_ui_tests;
+#[cfg(test)]
+mod artist_ui_tests;
 #[cfg(test)]
 mod base_ui_tests;
 #[cfg(test)]
@@ -54,7 +58,8 @@ fn demo_tracks() -> Vec<Track> {
             tracks.push(Track {
                 path: format!("/demo/{artist}/{album}/{n:02} {title}.flac").into(),
                 title: (*title).into(),
-                artists: artist.split(';').map(String::from).collect(),
+                credit: (!artist.contains(';')).then(|| artist.to_string()),
+                tagged: library::TaggedArtists { artists: if artist.contains(';') { artist.split(';').map(String::from).collect() } else { Vec::new() }, ..Default::default() },
                 album_artist: Some(artist.replace(';', " & ")),
                 album: Some(album.into()),
                 genres: genres.split(';').map(String::from).collect(),
@@ -156,6 +161,36 @@ fn scene_album_list(s: &mut App) {
     album_view(s, Layout::List);
 }
 
+/// The demo library plus Mercy's "Calypso Gene": a collaborative album with featured guests.
+fn scene_artist(s: &mut App) {
+    let mut tracks = demo_tracks();
+    let ids = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<String>>();
+    tracks.push(Track {
+        path: "/demo/Mercy/03 Calypso Gene.flac".into(),
+        title: "Calypso Gene".into(),
+        credit: Some("Armand Hammer & The Alchemist feat. Silka & Cleo Reed".into()),
+        album_artist: Some("Armand Hammer & The Alchemist".into()),
+        tagged: library::TaggedArtists {
+            artists: ids(&["Armand Hammer", "The Alchemist", "Silka", "Cleo Reed"]),
+            artist_ids: ids(&["ah", "alc", "silka", "cleo"]),
+            album_artists: Vec::new(),
+            album_artist_ids: ids(&["ah", "alc"]),
+        },
+        album: Some("Mercy".into()),
+        genres: vec!["Hip Hop".into()],
+        year: Some(2025),
+        number: Some(3),
+        duration: Some(201.0),
+        credits: vec![credits::Credit::parse(credits::Role::Producer, "The Alchemist"), credits::Credit::parse(credits::Role::Performer, "Cleo Reed (vocals)")],
+        ..Track::default()
+    });
+    s.set_library(tracks, false);
+    let i = s.tracks.iter().position(|t| t.title == "Calypso Gene").expect("demo has Calypso Gene");
+    s.current = Some(i);
+    s.playing = true;
+    s.page = app::Page::Artist("The Alchemist".into());
+}
+
 fn scene_album_page(s: &mut App) {
     album_view(s, Layout::Grid);
     let a = s.albums.iter().position(|a| a.title == "Day of Radiance").expect("demo has Day of Radiance");
@@ -176,6 +211,7 @@ fn main() {
             ("albums", scene_album_grid),
             ("album-list", scene_album_list),
             ("album", scene_album_page),
+            ("artist", scene_artist),
         ],
         min_size: Some((720.0, 420.0)),
         setup: Some(setup),

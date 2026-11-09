@@ -5,6 +5,7 @@ use std::cmp::Ordering;
 use serde::{Deserialize, Serialize};
 
 use crate::library::Track;
+use crate::credits::Role;
 
 /// What a view lists: songs, or albums built from them.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -27,11 +28,14 @@ pub trait Record {
 pub enum Property {
     Title,
     Artist,
+    Featured,
     AlbumArtist,
     Album,
     Genre,
     Year,
     Composer,
+    Lyricist,
+    Producer,
     Label,
     Track,
     Disc,
@@ -67,14 +71,17 @@ pub enum Value {
 }
 
 impl Property {
-    pub const ALL: [Property; 14] = [
+    pub const ALL: [Property; 17] = [
         Property::Title,
         Property::Artist,
+        Property::Featured,
         Property::AlbumArtist,
         Property::Album,
         Property::Genre,
         Property::Year,
         Property::Composer,
+        Property::Lyricist,
+        Property::Producer,
         Property::Label,
         Property::Track,
         Property::Disc,
@@ -87,13 +94,16 @@ impl Property {
     /// The properties a mode offers. Albums drop the per-song ones and add a track count;
     /// "Title" is the album's title there.
     pub fn for_mode(mode: Mode) -> &'static [Property] {
-        const ALBUM: [Property; 12] = [
+        const ALBUM: [Property; 15] = [
             Property::Title,
             Property::AlbumArtist,
             Property::Artist,
+            Property::Featured,
             Property::Genre,
             Property::Year,
             Property::Composer,
+            Property::Lyricist,
+            Property::Producer,
             Property::Label,
             Property::Tracks,
             Property::Duration,
@@ -111,11 +121,14 @@ impl Property {
         match self {
             Property::Title => "Title",
             Property::Artist => "Artist",
+            Property::Featured => "Featured artist",
             Property::AlbumArtist => "Album artist",
             Property::Album => "Album",
             Property::Genre => "Genre",
             Property::Year => "Year",
             Property::Composer => "Composer",
+            Property::Lyricist => "Lyricist",
+            Property::Producer => "Producer",
             Property::Label => "Label",
             Property::Track => "Track number",
             Property::Disc => "Disc number",
@@ -134,7 +147,7 @@ impl Property {
     pub fn kind(self) -> Kind {
         match self {
             Property::Title | Property::AlbumArtist | Property::Album | Property::Label | Property::Format | Property::Folder => Kind::Text,
-            Property::Artist | Property::Genre | Property::Composer => Kind::List,
+            Property::Artist | Property::Featured | Property::Genre | Property::Composer | Property::Lyricist | Property::Producer => Kind::List,
             Property::Year | Property::Track | Property::Disc | Property::Tracks => Kind::Number,
             Property::Duration => Kind::Duration,
             Property::Added => Kind::Date,
@@ -150,11 +163,14 @@ impl Property {
         match self {
             Property::Title => Value::Text(t.title.clone()),
             Property::Artist => list(&t.artists),
+            Property::Featured => list(&t.featured),
             Property::AlbumArtist => text(t.album_artist.as_deref()),
             Property::Album => text(t.album.as_deref()),
             Property::Genre => list(&t.genres),
             Property::Year => number(t.year.map(f64::from)),
-            Property::Composer => list(&t.composers),
+            Property::Composer => list(&t.credited(Role::Composer)),
+            Property::Lyricist => list(&t.credited(Role::Lyricist)),
+            Property::Producer => list(&t.credited(Role::Producer)),
             Property::Label => text(t.label.as_deref()),
             Property::Track => number(t.number.map(f64::from)),
             Property::Disc => number(t.disc.map(f64::from)),

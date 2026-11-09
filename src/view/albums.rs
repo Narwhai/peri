@@ -4,6 +4,7 @@ use rune::{Align, Cursor, El, Image, ScrollSpec, SurfaceFit, Tx, col, el, icon, 
 
 use super::*;
 use crate::album::Album;
+use crate::credits::{self, Role};
 use crate::app::{App, album_key, grid_key};
 use crate::icons;
 use crate::library::Track;
@@ -49,13 +50,20 @@ fn meta(a: &Album, with_length: bool) -> String {
     parts.join("  •  ")
 }
 
-fn cover_image(s: &App, a: &Album) -> Option<Image> {
+/// The album's artist line ("Armand Hammer & The Alchemist"), each act's name opening its page.
+fn album_artist(a: &Album, color: rune::Color) -> El {
+    let line = a.artist_name().to_string();
+    let links = if a.artist.is_some() { name_links(&line, &a.album_artists) } else { Vec::new() };
+    linked(line, links, color)
+}
+
+pub(super) fn cover_image(s: &App, a: &Album) -> Option<Image> {
     let first = *a.tracks.first()?;
     s.covers.as_ref()?.get(&s.tracks[first].path).filter(|i| i.error().is_none())
 }
 
 /// A square cover, or a placeholder with a note while it loads or when there is none.
-fn cover(key: String, image: Option<Image>, size: Option<f32>, radius: f32, p: &Palette) -> El {
+pub(super) fn cover(key: String, image: Option<Image>, size: Option<f32>, radius: f32, p: &Palette) -> El {
     let base = el().key(key).radius(radius).fill(p.ui).clip_rounded(radius);
     let base = match size {
         Some(px) => base.size(px, px),
@@ -119,7 +127,7 @@ fn grid_card(s: &App, a: usize, section: Option<usize>, w: f32, p: &Palette) -> 
         .child(el().h(6.0))
         .child(text(album.title.clone()).font(TITLE).color(title_color).truncate())
         .child(text(meta(album, false)).font(SMALL).color(p.tx3).truncate())
-        .child(text(album.artist_name().to_string()).font(SMALL).color(p.tx2).truncate())
+        .child(album_artist(album, p.tx2).key("artist").font(SMALL).truncate())
 }
 
 // List
@@ -133,7 +141,7 @@ pub(super) fn list_card(s: &App, a: usize, section: Option<usize>, p: &Palette) 
         .gap(4.0)
         .grow(1.0)
         .shrink()
-        .child(text(album.artist_name().to_string()).font(BODY).color(p.tx2).truncate())
+        .child(album_artist(album, p.tx2).key("artist").font(BODY).truncate())
         .child(text(album.title.clone()).key("title").font(ALBUM_TITLE).color(p.tx).truncate().cursor(Cursor::Pointer).on_press_tx(open))
         .child(text(meta(album, true)).font(BODY).color(p.tx3))
         .child(el().h(10.0))
@@ -188,10 +196,11 @@ fn track_line(s: &App, album: &Album, t: &Track, i: usize, n: usize, a: usize, p
     } else {
         text(t.number.map_or_else(|| format!("{}", n + 1), |x| x.to_string())).font(NUM).color(p.tx3).w(28.0).align(Align::End)
     };
-    let artist = t.artist().filter(|ar| album.artist.as_deref().is_none_or(|aa| !aa.eq_ignore_ascii_case(ar)));
-    let mut title = row().grow(1.0).shrink().gap(8.0).center_y().child(text(t.title.clone()).font(BODY).color(if current { p.blue } else { p.tx }).truncate().shrink());
-    if let Some(artist) = artist {
-        title = title.child(text(artist).font(BODY).color(p.tx3).truncate().shrink());
+    let other_artist = t.artist().is_some_and(|ar| album.artist.as_deref().is_none_or(|aa| !aa.eq_ignore_ascii_case(&ar)));
+    let title_el = song_title(t, if current { p.blue } else { p.tx }).key("title").font(BODY).truncate().shrink();
+    let mut title = row().grow(1.0).shrink().gap(8.0).center_y().child(title_el);
+    if let Some(artist) = song_artist(t, p.tx3).filter(|_| other_artist) {
+        title = title.child(artist.key("artist").font(BODY).truncate().shrink());
     }
     let format = t.path.extension().and_then(|e| e.to_str()).map(str::to_uppercase).unwrap_or_default();
     let selected = s.selected == Some(i);
@@ -215,7 +224,7 @@ fn track_line(s: &App, album: &Album, t: &Track, i: usize, n: usize, a: usize, p
         .child(text(t.duration.map(clock).unwrap_or_default()).font(NUM).color(p.tx3).w(48.0).align(Align::End))
 }
 
-fn play_button(key: &'static str, label: &'static str, p: &Palette) -> El {
+pub(super) fn play_button(key: &'static str, label: &'static str, p: &Palette) -> El {
     row()
         .key(key)
         .h(32.0)
@@ -265,18 +274,28 @@ pub(super) fn album_page(s: &App, a: usize, p: &Palette) -> El {
         .cursor(Cursor::Pointer)
         .label("Back")
         .help("Back (Esc)")
-        .on_press(|s: &mut App| s.show_library())
+        .on_press(|s: &mut App| s.go_back())
         .child(icon(&icons::BACK, 16.0).color(p.tx2))
-        .child(text(s.base.active().name.clone()).font(TITLE).color(p.tx2));
+        .child(text(back_label(s)).font(TITLE).color(p.tx2));
     let mut facts = col().gap(4.0);
     if !album.genres.is_empty() {
-        facts = facts.child(fact("Genre", album.genres.join(", "), p));
+        facts = facts.child(fact("Genre", text(album.genres.join(", ")), p));
     }
     if let Some(label) = &album.label {
-        facts = facts.child(fact("Label", label.clone(), p));
+        facts = facts.child(fact("Label", text(label.clone()), p));
     }
     if !album.formats.is_empty() {
-        facts = facts.child(fact("Format", album.formats.iter().map(|f| f.to_uppercase()).collect::<Vec<_>>().join(", "), p));
+        facts = facts.child(fact("Format", text(album.formats.iter().map(|f| f.to_uppercase()).collect::<Vec<_>>().join(", ")), p));
+    }
+    let featured: Vec<(String, Vec<String>)> = album.featured.iter().map(|f| (f.clone(), Vec::new())).collect();
+    if !featured.is_empty() {
+        facts = facts.child(fact("Featuring", name_list(&featured, p.tx2).key("fact-featuring"), p));
+    }
+    for role in Role::ALL {
+        let people = credits::people(&album.credits, role);
+        if !people.is_empty() {
+            facts = facts.child(fact(role.label(), name_list(&people, p.tx2).key(format!("fact-{}", role.label().to_lowercase())), p));
+        }
     }
     let head = col()
         .gap(6.0)
@@ -284,7 +303,7 @@ pub(super) fn album_page(s: &App, a: usize, p: &Palette) -> El {
         .shrink()
         .child(text("Album").font(SMALL).color(p.tx3))
         .child(text(album.title.clone()).key("page-title").font(PAGE_TITLE).color(p.tx).wrap())
-        .child(text(album.artist_name().to_string()).key("page-artist").font(HEADING).color(p.tx2))
+        .child(album_artist(album, p.tx2).key("page-artist").font(HEADING))
         .child(text(meta(album, true)).font(BODY).color(p.tx3))
         .child(el().h(6.0))
         .child(facts)
@@ -318,8 +337,17 @@ pub(super) fn album_page(s: &App, a: usize, p: &Palette) -> El {
         .child(page)
 }
 
-fn fact(label: &str, value: String, p: &Palette) -> El {
-    row().gap(10.0).child(text(label.to_string()).font(SMALL).color(p.tx3).w(52.0)).child(text(value).font(SMALL).color(p.tx2).truncate().shrink())
+/// What Back returns to: the previous page's name, else the view's.
+pub(super) fn back_label(s: &App) -> String {
+    match s.history.last() {
+        Some(crate::app::Page::Artist(name)) => name.clone(),
+        Some(crate::app::Page::Album(id)) => s.albums.iter().find(|a| &a.id() == id).map_or_else(|| "Back".to_string(), |a| a.title.clone()),
+        Some(crate::app::Page::Library) | None => s.base.active().name.clone(),
+    }
+}
+
+fn fact(label: &str, value: El, p: &Palette) -> El {
+    row().gap(10.0).items_start().child(text(label.to_string()).font(SMALL).color(p.tx3).w(64.0)).child(value.font(SMALL).color(p.tx2).wrap().grow(1.0).shrink())
 }
 
 /// "More by {artist}": the artist's other albums, newest first, as a scrolling row of covers.
@@ -333,31 +361,37 @@ fn more_by(s: &App, a: usize, p: &Palette) -> Option<El> {
         return None;
     }
     others.sort_by_key(|&o| std::cmp::Reverse(s.albums[o].year));
-    let mut strip = row().gap(CARD_GAP);
-    for o in others {
+    Some(album_strip(s, "more", &format!("More by {}", album.artist_name()), &others, false, p))
+}
+
+/// A titled, sideways-scrolling row of album covers keyed `{key}`, `{key}{album}` per card.
+/// With `artists`, each card names its artists too.
+pub(super) fn album_strip(s: &App, key: &str, title: &str, albums: &[usize], artists: bool, p: &Palette) -> El {
+    let mut strip = row().gap(CARD_GAP).items_start();
+    for &o in albums {
         let other = &s.albums[o];
-        strip = strip.child(
-            col()
-                .key(format!("more{o}"))
-                .w(150.0)
-                .gap(4.0)
-                .padding(6.0)
-                .radius(10.0)
-                .hover(p.ui.alpha(0.3))
-                .cursor(Cursor::Pointer)
-                .role("link")
-                .label(other.title.clone())
-                .on_press_tx(move |s: &mut App, tx| s.show_album(o, tx))
-                .child(cover(format!("more-cover{o}"), cover_image(s, other), Some(138.0), 8.0, p))
-                .child(text(other.title.clone()).font(TITLE).color(p.tx).truncate())
-                .child(text(other.year.map(|y| y.to_string()).unwrap_or_default()).font(SMALL).color(p.tx3)),
-        );
+        let mut card = col()
+            .key(format!("{key}{o}"))
+            .w(150.0)
+            .gap(4.0)
+            .padding(6.0)
+            .radius(10.0)
+            .hover(p.ui.alpha(0.3))
+            .cursor(Cursor::Pointer)
+            .role("link")
+            .label(other.title.clone())
+            .on_press_tx(move |s: &mut App, tx| s.show_album(o, tx))
+            .child(cover(format!("{key}-cover{o}"), cover_image(s, other), Some(138.0), 8.0, p))
+            .child(text(other.title.clone()).font(TITLE).color(p.tx).truncate());
+        if artists {
+            card = card.child(text(other.artist_name().to_string()).font(SMALL).color(p.tx2).truncate());
+        }
+        strip = strip.child(card.child(text(other.year.map(|y| y.to_string()).unwrap_or_default()).font(SMALL).color(p.tx3)));
     }
-    Some(
-        col()
-            .key("more-by")
-            .gap(10.0)
-            .child(text(format!("More by {}", album.artist_name())).font(HEADING).color(p.tx))
-            .child(col().key("more-strip").w_full().scroll_x().child(strip)),
-    )
+    let section = if key == "more" { "more-by".to_string() } else { key.to_string() };
+    col()
+        .key(section)
+        .gap(10.0)
+        .child(text(title.to_string()).font(HEADING).color(p.tx))
+        .child(col().key(format!("{key}-strip")).w_full().scroll_x().child(strip))
 }

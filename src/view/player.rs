@@ -24,15 +24,15 @@ pub(super) fn now_playing(s: &App, p: &Palette) -> El {
             .on_press_tx(move |s: &mut App, tx| s.show_album(a, tx));
     }
     let (title, artist) = match track {
-        Some(t) => (t.title.clone(), t.artist().unwrap_or_else(|| "Unknown artist".into())),
-        None => ("Not playing".into(), "Double-click a track to play it".into()),
+        Some(t) => (song_title(t, p.tx), song_artist(t, p.tx2).unwrap_or_else(|| text("Unknown artist").color(p.tx2))),
+        None => (text("Not playing").color(p.tx), text("Double-click a track to play it").color(p.tx2)),
     };
     let info = col()
         .w(220.0)
         .shrink()
         .gap(3.0)
-        .child(text(title).key("np-title").font(TITLE).color(p.tx).truncate())
-        .child(text(artist).key("np-artist").font(SMALL).color(p.tx2).truncate());
+        .child(title.key("np-title").font(TITLE).truncate())
+        .child(artist.key("np-artist").font(SMALL).truncate());
     let left = row().w(300.0).shrink().gap(12.0).center_y().child(cover).child(info);
 
     let shuffle = toggle_icon("shuffle", &icons::SHUFFLE, s.shuffle, "Shuffle (S)", p).on_press(|s: &mut App| s.toggle_shuffle());

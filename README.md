@@ -36,7 +36,7 @@ Views work like Obsidian's [Bases](https://help.obsidian.md/bases/views). By def
 
   A condition with no value yet, or one that can't be read (a word where a year goes, shown in red), filters nothing out.
 
-Properties: title, artist, album artist, album, genre, year, composer, label, track and disc number, duration, format, folder and date added. Year comes from the recording date tag, else year, release date or original release date. Date added is the file's creation time.
+Properties: title, artist, featured artist, album artist, album, genre, year, composer, lyricist, producer, label, track and disc number, duration, format, folder and date added. Year comes from the recording date tag, else year, release date or original release date. Date added is the file's creation time.
 
 Search narrows the current view further, and Next/Previous follow the view's order. In a grouped view, a song that appears in several groups plays once, in its first group.
 
@@ -62,6 +62,16 @@ Each view lists either **Songs** or **Albums**; switch with the toggle in the to
 - **Saved settings:** the mode and layout save with each view. Views saved before this change load as song views.
 
 ## Keys
+## Artists
+
+Every artist name is a link: in song rows, titles ("Calypso Gene (feat. Silka & Cleo Reed)"), the now-playing bar, album cards and album pages. It opens the artist's page: their albums, albums they appear on, their songs, and songs crediting them (composer, lyricist, producer, performer…). Back and Esc retrace the pages visited.
+
+- **Who's who:** the `ARTISTS` tag (one value per act) with the MusicBrainz artist IDs names each artist. The artist tag ("A & B feat. C") and the title ("(feat. C)") say who is featured.
+- **Collaborative albums:** MusicBrainz album artist IDs are matched to names anywhere in the library, so "Armand Hammer & The Alchemist" counts as an album of each.
+- **Files without those tags:** the artist text is split at `feat.`/`ft.`/`featuring`. Main artists split at `&`, `,`, `x`, `and` only when every piece is a name the library already knows, so "Simon & Garfunkel" stays whole.
+- **Credits:** composer, lyricist, writer, producer, arranger, conductor, performer (with instrument), engineer, mixer, remixer and DJ mixer tags. Album pages list them.
+
+## Keys
 
 | Key | Action |
 | --- | --- |
@@ -72,7 +82,7 @@ Each view lists either **Songs** or **Albums**; switch with the toggle in the to
 | Ctrl+F | Search (Esc clears it, Enter plays the first match) |
 | Ctrl+O | Open a folder |
 | S / R / M | Shuffle / repeat / mute |
-| Esc | Close a toolbar popover, or leave an album page |
+| Esc | Close a toolbar popover, or go back from an album or artist page |
 
 Double-click a row to play it. Ctrl is Cmd on macOS.
 
@@ -83,7 +93,7 @@ cargo test                                                   # unit + headless U
 RUNE_MUSIC_DIR=~/Music cargo test --release real_library -- --ignored --nocapture
 RUNE_MUSIC_FILE=song.flac cargo test --release real_output -- --ignored   # plays muted
 RUNE_MUSIC_DIR=~/Music cargo test --release real_library_groups -- --ignored --nocapture
-cargo run -- --snap out.png --scene playing --theme light    # scenes: library playing search error grouped filter views sort albums album-list album
+cargo run -- --snap out.png --scene playing --theme light    # scenes: library playing search error grouped filter views sort albums album-list album artist
 ```
 
 Headless runs (`--snap`, `--script`, `--tree`) never open the audio device and keep views in memory.

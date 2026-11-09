@@ -54,6 +54,9 @@ pub enum Page {
     Library,
     /// One album's page, by identity so it survives a rescan.
     Album(AlbumId),
+    /// One artist's page: their albums, the albums they appear on, their songs and credits.
+    /// By name, matched ignoring case.
+    Artist(String),
 }
 
 pub struct App {
@@ -61,6 +64,8 @@ pub struct App {
     /// The library gathered into albums, in library order.
     pub albums: Vec<Album>,
     pub page: Page,
+    /// The pages Back returns to, newest last; the library when empty.
+    pub history: Vec<Page>,
     /// Album covers for cards and lists; `None` until setup has a waker.
     pub covers: Option<Covers>,
     /// Indices into `tracks` the active view and search show, in play order. In an album view,
@@ -122,6 +127,7 @@ impl App {
             tracks: Vec::new(),
             albums: Vec::new(),
             page: Page::Library,
+            history: Vec::new(),
             covers: None,
             filtered: Vec::new(),
             shown_albums: Vec::new(),
@@ -251,6 +257,9 @@ impl App {
             library::sort(&mut all);
             tracks = all;
         }
+        // Names one song's tags pair with IDs, or that stand alone, help split every other's.
+        crate::credits::resolve(&mut tracks);
+        library::sort(&mut tracks);
         self.tracks = tracks;
         self.albums = album::build(&self.tracks);
         let find = |path: &Option<PathBuf>, tracks: &[Track]| path.as_ref().and_then(|p| tracks.iter().position(|t| &t.path == p));
@@ -307,20 +316,57 @@ impl App {
     pub fn open_album(&self) -> Option<usize> {
         match &self.page {
             Page::Album(id) => self.albums.iter().position(|a| &a.id() == id),
-            Page::Library => None,
+            Page::Library | Page::Artist(_) => None,
         }
     }
 
     pub fn show_album(&mut self, a: usize, tx: &mut Tx) {
         if let Some(album) = self.albums.get(a) {
-            self.page = Page::Album(album.id());
-            self.close_panel();
+            self.go_to(Page::Album(album.id()));
             tx.scroll_to_instant("album-page", 0.0, 0.0);
         }
     }
 
+    /// The artist shown on the artist page.
+    pub fn open_artist(&self) -> Option<&str> {
+        match &self.page {
+            Page::Artist(name) => Some(name),
+            Page::Library | Page::Album(_) => None,
+        }
+    }
+
+    pub fn show_artist(&mut self, name: &str, tx: &mut Tx) {
+        self.go_to(Page::Artist(name.to_string()));
+        tx.scroll_to_instant("artist-page", 0.0, 0.0);
+    }
+
+    /// Opens `page`, remembering the one it leaves for Back.
+    fn go_to(&mut self, page: Page) {
+        self.close_panel();
+        if page == self.page {
+            return;
+        }
+        let left = std::mem::replace(&mut self.page, page);
+        if left != Page::Library {
+            self.history.push(left);
+        }
+    }
+
+    /// Back: the page before this one, else the library.
+    pub fn go_back(&mut self) {
+        self.page = self.history.pop().unwrap_or(Page::Library);
+    }
+
     pub fn show_library(&mut self) {
+        self.history.clear();
         self.page = Page::Library;
+    }
+
+    /// Plays song `i` of `list`, queueing the rest of `list` (an artist's songs).
+    pub fn play_list(&mut self, list: Vec<usize>, i: usize, tx: &mut Tx) {
+        self.selected = Some(i);
+        self.queue = Some(Queue::new(list, i, self.shuffle, &mut self.rng));
+        self.load(i, tx);
     }
 
     /// The album a song belongs to.
@@ -711,7 +757,7 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         return false;
     }
     if ev.key == Key::Escape && s.page != Page::Library {
-        s.show_library();
+        s.go_back();
         return true;
     }
     if ev.is_command('f') {

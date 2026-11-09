@@ -1,16 +1,21 @@
 //! The window: a header with search, the track list, and the now-playing bar.
 
 mod albums;
+mod artists;
 mod filters;
 mod list;
 mod player;
 mod toolbar;
 
-use rune::{Cursor, Cx, El, Icon, Spring, TextStyle, col, el, icon, row, text};
+use std::ops::Range;
+
+use rune::{Color, Cursor, Cx, El, Icon, Link, LinkPaint, Spring, TextStyle, col, el, icon, row, text};
 use rune_kit::{Kit, PaletteSeed, TextInput};
 
 use crate::app::App;
+use crate::credits;
 use crate::icons;
+use crate::library::Track;
 use crate::palette::Palette;
 
 const ROW_H: f32 = 44.0;
@@ -36,9 +41,10 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         .fill(p.bg)
         .child(header(s, &p, &kit))
         .child(toolbar)
-        .child(match s.open_album() {
-            Some(a) => albums::album_page(s, a, &p),
-            None => list::list(s, &p, cx),
+        .child(match (s.open_album(), s.open_artist()) {
+            (Some(a), _) => albums::album_page(s, a, &p),
+            (None, Some(name)) => artists::artist_page(s, name, &p),
+            (None, None) => list::list(s, &p, cx),
         })
         .child(player::now_playing(s, &p))
         .on_drop_files(|s: &mut App, files, _tx| {
@@ -167,6 +173,58 @@ fn pill_button(key: &'static str, label: &'static str, p: &Palette) -> El {
         .cursor(Cursor::Pointer)
         .label(label)
         .child(text(label).font(TITLE).color(p.tx))
+}
+
+/// `content` in `color`, its `links` (byte ranges and the artist each names) opening that
+/// artist's page. Hovering a name underlines it.
+fn linked(content: String, links: Vec<(Range<usize>, String)>, color: Color) -> El {
+    let mut t = text(content).color(color);
+    if links.is_empty() {
+        return t;
+    }
+    for (range, name) in links {
+        t = t.link(Link::new(range, name).hover(LinkPaint::new().underline(color)));
+    }
+    t.on_link(|s: &mut App, name, tx| s.show_artist(name, tx))
+}
+
+/// Where each of `names` appears in `content`, as links.
+fn name_links(content: &str, names: &[String]) -> Vec<(Range<usize>, String)> {
+    credits::find_names(content, names).into_iter().map(|(r, n)| (r, n.to_string())).collect()
+}
+
+/// A song's title, the names in its "(feat. C)" opening their pages.
+fn song_title(t: &Track, color: Color) -> El {
+    let links = credits::feat(&t.title).map_or_else(Vec::new, |(_, names)| {
+        name_links(&t.title[names.clone()], &t.artists).into_iter().map(|(r, n)| (r.start + names.start..r.end + names.start, n)).collect()
+    });
+    linked(t.title.clone(), links, color)
+}
+
+/// A song's artist line as tagged ("A & B feat. C"), each name opening its page; `None` when
+/// the song names no artist.
+fn song_artist(t: &Track, color: Color) -> Option<El> {
+    let line = t.artist()?;
+    let links = name_links(&line, &t.artists);
+    Some(linked(line, links, color))
+}
+
+/// Names joined by ", ", each opening its page, with a performer's instruments in brackets
+/// after their name: "Elly (keyboard, sampler), AKAI SOLO (vocals)".
+fn name_list(people: &[(String, Vec<String>)], color: Color) -> El {
+    let mut content = String::new();
+    let mut links = Vec::new();
+    for (name, details) in people {
+        if !content.is_empty() {
+            content.push_str(", ");
+        }
+        links.push((content.len()..content.len() + name.len(), name.clone()));
+        content.push_str(name);
+        if !details.is_empty() {
+            content.push_str(&format!(" ({})", details.join(", ")));
+        }
+    }
+    linked(content, links, color)
 }
 
 trait Borders {

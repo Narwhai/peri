@@ -238,22 +238,30 @@ fn real_library_groups_by_every_property() {
     use crate::base::view::{Direction, GroupBy, View, evaluate};
     let dir = std::env::var("RUNE_MUSIC_DIR").expect("set RUNE_MUSIC_DIR to a music folder");
     let rx = crate::library::scan(vec![dir.into()], || {});
-    let tracks = loop {
+    let mut tracks = loop {
         if let crate::library::ScanMsg::Done { tracks, .. } = rx.recv().expect("the scan finishes") {
             break tracks;
         }
     };
+    crate::credits::resolve(&mut tracks);
+    use crate::credits::Role;
     let share = |f: &dyn Fn(&crate::library::Track) -> bool| 100 * tracks.iter().filter(|t| f(t)).count() / tracks.len();
     println!(
-        "{} tracks: genre {}%, year {}%, album artist {}%, label {}%, composer {}%, several artists {}%",
+        "{} tracks: genre {}%, year {}%, album artist {}%, label {}%, composer {}%, producer {}%, several artists {}%, featuring {}%, several album artists {}%",
         tracks.len(),
         share(&|t| !t.genres.is_empty()),
         share(&|t| t.year.is_some()),
         share(&|t| t.album_artist.is_some()),
         share(&|t| t.label.is_some()),
-        share(&|t| !t.composers.is_empty()),
+        share(&|t| !t.credited(Role::Composer).is_empty()),
+        share(&|t| !t.credited(Role::Producer).is_empty()),
         share(&|t| t.artists.len() > 1),
+        share(&|t| !t.featured.is_empty()),
+        share(&|t| t.album_artists.len() > 1),
     );
+    for t in tracks.iter().filter(|t| !t.featured.is_empty() || t.album_artists.len() > 1).take(25) {
+        println!("  {:?} by {:?}: artists {:?}, featured {:?}, album artists {:?}", t.title, t.artist(), t.artists, t.featured, t.album_artists);
+    }
     for property in Property::ALL {
         let mut view = View::new("v");
         view.group_by = Some(GroupBy { property, direction: Direction::Asc });

@@ -9,25 +9,51 @@ use lofty::picture::PictureType;
 use lofty::probe::Probe;
 use lofty::tag::{Accessor, ItemKey, Tag};
 
+use crate::credits::{self, Credit, Role};
+
 /// Extensions rodio (through symphonia) can decode.
 pub const AUDIO_EXTENSIONS: &[&str] = &["mp3", "flac", "ogg", "oga", "wav", "m4a", "mp4", "aac", "aif", "aiff", "caf"];
 
 /// File names checked next to a track when it embeds no cover.
 const FOLDER_COVERS: &[&str] = &["cover.jpg", "cover.jpeg", "cover.png", "folder.jpg", "folder.png", "front.jpg", "front.png"];
 
+/// Artist names and MusicBrainz artist IDs as the tags list them, one per act. Each ID list
+/// lines up with its names when the counts match.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TaggedArtists {
+    /// `ARTISTS`, else the artist tag when it holds several values.
+    pub artists: Vec<String>,
+    pub artist_ids: Vec<String>,
+    /// `ALBUMARTISTS`.
+    pub album_artists: Vec<String>,
+    pub album_artist_ids: Vec<String>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Track {
     pub path: PathBuf,
     pub title: String,
-    /// Track artists; a tag can hold several (separate items, or `;`-separated).
+    /// Every artist of the song, main then featured, one per act. [`crate::credits::resolve`]
+    /// fills it from `credit`, `tagged` and the title.
     pub artists: Vec<String>,
+    /// The artists the song features ("feat. C"), also in `artists`.
+    pub featured: Vec<String>,
+    /// The artist tag as written, as in "A & B feat. C". `None` when the file names several
+    /// artist values and no one line.
+    pub credit: Option<String>,
+    /// The album artist tag as written, as in "A & B".
     pub album_artist: Option<String>,
+    /// The album's artists one per act, filled with `artists`.
+    pub album_artists: Vec<String>,
+    /// The per-act names and MusicBrainz IDs the tags hold, as read.
+    pub tagged: TaggedArtists,
     pub album: Option<String>,
     /// Genres; split on `;` and `,`, and across separate tag items.
     pub genres: Vec<String>,
     /// From the recording date, else the year, release date or original release date.
     pub year: Option<u32>,
-    pub composers: Vec<String>,
+    /// Composers, lyricists, producers and the other people the tags credit.
+    pub credits: Vec<Credit>,
     pub label: Option<String>,
     pub disc: Option<u32>,
     pub number: Option<u32>,
@@ -38,9 +64,20 @@ pub struct Track {
 }
 
 impl Track {
-    /// The artists as one line, for display.
+    /// The artists as one line, for display: the artist tag as written, else the artists.
     pub fn artist(&self) -> Option<String> {
-        (!self.artists.is_empty()).then(|| self.artists.join(", "))
+        self.credit.clone().or_else(|| (!self.artists.is_empty()).then(|| self.artists.join(", ")))
+    }
+
+    /// The artists that aren't featured, as one line.
+    pub fn main_artist(&self) -> Option<String> {
+        let main: Vec<&str> = self.artists.iter().filter(|a| !self.featured.contains(a)).map(String::as_str).collect();
+        (!main.is_empty()).then(|| main.join(", "))
+    }
+
+    /// The names credited with `role`.
+    pub fn credited(&self, role: Role) -> Vec<String> {
+        credits::names(&self.credits, role)
     }
 
     /// Whether every word of `query` (already lowercased) appears in the title, artist or album.
@@ -48,7 +85,7 @@ impl Track {
         let haystack = format!(
             "{} {} {}",
             self.title.to_lowercase(),
-            self.artists.join(" ").to_lowercase(),
+            format!("{} {}", self.artist().unwrap_or_default(), self.artists.join(" ")).to_lowercase(),
             self.album.as_deref().map(str::to_lowercase).unwrap_or_default()
         );
         query.split_whitespace().all(|word| haystack.contains(word))
@@ -57,7 +94,7 @@ impl Track {
     /// Library order: artist, album, disc, track number, then title, ignoring case.
     fn sort_key(&self) -> (String, String, u32, u32, String) {
         (
-            self.artists.join(", ").to_lowercase(),
+            self.main_artist().unwrap_or_default().to_lowercase(),
             self.album.as_deref().map(str::to_lowercase).unwrap_or_default(),
             self.disc.unwrap_or(0),
             self.number.unwrap_or(0),
@@ -163,20 +200,39 @@ fn read_track(path: PathBuf) -> Track {
         split_values(values, separators)
     };
     let duration = tagged.properties().duration().as_secs_f64();
+    // One artist line ("A & B feat. C") is the credit; several values are a list of acts.
+    let artist_values = many(&[ItemKey::TrackArtist], &[';', '\0']);
+    let (credit, listed) = match artist_values.as_slice() {
+        [one] => (Some(one.clone()), Vec::new()),
+        _ => (None, artist_values),
+    };
+    let per_act = many(&[ItemKey::TrackArtists], &[';', '\0']);
+    let ids = |key: ItemKey| many(&[key], &[';', '/', '\0']);
+    let credits = Role::ALL
+        .into_iter()
+        .flat_map(|role| many(&[role.key()], &[';', '\0']).into_iter().map(move |v| Credit::parse(role, &v)))
+        .collect();
     Track {
         title: text(|t| t.title()).unwrap_or(stem),
-        artists: many(&[ItemKey::TrackArtist, ItemKey::TrackArtists], &[';', '\0']),
+        credit,
         album_artist: item(ItemKey::AlbumArtist),
+        tagged: TaggedArtists {
+            artists: if per_act.is_empty() { listed } else { per_act },
+            artist_ids: ids(ItemKey::MusicBrainzArtistId),
+            album_artists: many(&[ItemKey::AlbumArtists], &[';', '\0']),
+            album_artist_ids: ids(ItemKey::MusicBrainzReleaseArtistId),
+        },
         album: text(|t| t.album()),
         genres: many(&[ItemKey::Genre], &[';', ',', '\0']),
         year: tag.and_then(year),
-        composers: many(&[ItemKey::Composer], &[';', '\0']),
+        credits,
         label: item(ItemKey::Label).or_else(|| item(ItemKey::Publisher)),
         disc: tag.and_then(|t| t.disk()),
         number: tag.and_then(|t| t.track()),
         duration: (duration > 0.0).then_some(duration),
         added,
         path,
+        ..Track::default()
     }
 }
 
@@ -238,6 +294,7 @@ mod tests {
             path: PathBuf::from(format!("/music/{title}.mp3")),
             title: title.into(),
             artists: artist.into_iter().map(Into::into).collect(),
+            credit: artist.map(Into::into),
             album: album.map(Into::into),
             number,
             duration: Some(1.0),

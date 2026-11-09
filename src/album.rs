@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 
 use crate::base::property::{Property, Record, Value, list, number, text};
+use crate::credits::{self, Credit, Role};
 use crate::library::Track;
 
 pub const UNKNOWN_ALBUM: &str = "Unknown album";
@@ -14,15 +15,18 @@ pub struct Album {
     pub title: String,
     /// The album artist, else the first track's artists; `None` when no song names any.
     pub artist: Option<String>,
+    /// The album's artists one per act ("Armand Hammer", "The Alchemist"), from its first song.
+    pub album_artists: Vec<String>,
     pub year: Option<u32>,
     /// Indices into the library, in disc then track order.
     pub tracks: Vec<usize>,
     /// Whether these are the artist's songs that have no album tag.
     pub unknown: bool,
-    /// Every song's genres, artists and composers, without repeats.
+    /// Every song's genres, artists and credits, without repeats.
     pub genres: Vec<String>,
     pub artists: Vec<String>,
-    pub composers: Vec<String>,
+    pub featured: Vec<String>,
+    pub credits: Vec<Credit>,
     pub label: Option<String>,
     pub formats: Vec<String>,
     pub folder: Option<String>,
@@ -72,9 +76,12 @@ impl Record for Album {
             Property::Title | Property::Album => Value::Text(self.title.clone()),
             Property::AlbumArtist => text(self.artist.as_deref()),
             Property::Artist => list(&self.artists),
+            Property::Featured => list(&self.featured),
             Property::Genre => list(&self.genres),
             Property::Year => number(self.year.map(f64::from)),
-            Property::Composer => list(&self.composers),
+            Property::Composer => list(&credits::names(&self.credits, Role::Composer)),
+            Property::Lyricist => list(&credits::names(&self.credits, Role::Lyricist)),
+            Property::Producer => list(&credits::names(&self.credits, Role::Producer)),
             Property::Label => text(self.label.as_deref()),
             Property::Tracks => Value::Number(self.tracks.len() as f64),
             Property::Duration => number((self.duration > 0.0).then_some(self.duration)),
@@ -97,7 +104,7 @@ pub fn build(tracks: &[Track]) -> Vec<Album> {
     let mut index: HashMap<(String, String, Option<u32>), usize> = HashMap::new();
     for (i, t) in tracks.iter().enumerate() {
         let title = t.album.as_deref().map(str::trim).filter(|a| !a.is_empty());
-        let artist = t.album_artist.clone().or_else(|| t.artist());
+        let artist = t.album_artist.clone().or_else(|| t.main_artist());
         // Songs without an album gather per artist whatever their year.
         let year = if title.is_some() { t.year } else { None };
         let key = (artist.as_deref().unwrap_or_default().to_lowercase(), title.map(str::to_lowercase).unwrap_or_default(), year);
@@ -105,12 +112,14 @@ pub fn build(tracks: &[Track]) -> Vec<Album> {
             albums.push(Album {
                 title: title.unwrap_or(UNKNOWN_ALBUM).to_string(),
                 artist: artist.clone(),
+                album_artists: if t.album_artists.is_empty() { t.artists.iter().filter(|a| !t.featured.contains(a)).cloned().collect() } else { t.album_artists.clone() },
                 year,
                 tracks: Vec::new(),
                 unknown: title.is_none(),
                 genres: Vec::new(),
                 artists: Vec::new(),
-                composers: Vec::new(),
+                featured: Vec::new(),
+                credits: Vec::new(),
                 label: None,
                 formats: Vec::new(),
                 folder: None,
@@ -123,7 +132,12 @@ pub fn build(tracks: &[Track]) -> Vec<Album> {
         a.tracks.push(i);
         merge(&mut a.genres, &t.genres);
         merge(&mut a.artists, &t.artists);
-        merge(&mut a.composers, &t.composers);
+        merge(&mut a.featured, &t.featured);
+        for c in &t.credits {
+            if !a.credits.contains(c) {
+                a.credits.push(c.clone());
+            }
+        }
         if a.label.is_none() {
             a.label = t.label.clone();
         }

@@ -161,11 +161,15 @@ fn track_row(t: &Track, i: usize, section: Option<usize>, number: usize, selecte
         text(format!("{number}")).font(NUM).color(p.tx3).align(Align::End).w(28.0)
     };
     let title_color = if current { p.blue } else { p.tx };
+    // "Artist · Album", each artist's name opening their page.
     let subtitle = match (t.artist(), &t.album) {
-        (Some(a), Some(b)) => format!("{a} · {b}"),
-        (Some(a), None) => a,
-        (None, Some(b)) => b.clone(),
-        (None, None) => "Unknown artist".into(),
+        (Some(a), album) => {
+            let links = name_links(&a, &t.artists);
+            let line = album.as_ref().map_or_else(|| a.clone(), |b| format!("{a} · {b}"));
+            linked(line, links, p.tx2)
+        }
+        (None, Some(b)) => text(b.clone()).color(p.tx2),
+        (None, None) => text("Unknown artist").color(p.tx2),
     };
     let fill = if selected { p.ui.alpha(if p.dark { 0.7 } else { 0.55 }) } else { p.bg.alpha(0.0) };
     row()
@@ -189,8 +193,8 @@ fn track_row(t: &Track, i: usize, section: Option<usize>, number: usize, selecte
                 .grow(1.0)
                 .shrink()
                 .gap(2.0)
-                .child(text(t.title.clone()).font(TITLE).color(title_color).truncate())
-                .child(text(subtitle).font(SMALL).color(p.tx2).truncate()),
+                .child(song_title(t, title_color).key("title").font(TITLE).truncate())
+                .child(subtitle.key("subtitle").font(SMALL).truncate()),
         )
         .child(text(t.duration.map(clock).unwrap_or_default()).font(NUM).color(p.tx3))
 }
