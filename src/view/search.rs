@@ -45,7 +45,7 @@ pub(super) fn search_page(s: &App, p: &Palette) -> El {
     }
     body = body.children(artists::release_strips(s, "search", &found.albums, true, p));
     if !found.songs.is_empty() {
-        body = body.child(artists::songs(s, "search-songs", "Songs", &found.songs, None, "", p));
+        body = body.child(artists::songs(s, "search-songs", "Songs", &found.songs, p));
     }
     col().key("search-page").w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: false }).child(body)
 }

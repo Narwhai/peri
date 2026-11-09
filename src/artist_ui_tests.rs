@@ -76,7 +76,11 @@ fn a_featured_artists_name_in_a_song_row_opens_their_page() {
     assert_eq!(text_of(&rt, "artist-name"), "Cleo Reed");
     assert!(rt.find("appears-on").is_some(), "Mercy is an album Cleo Reed appears on");
     assert!(rt.find("artist-albums").is_none(), "Cleo Reed has no albums of their own");
-    assert!(rt.find("credits-performer").is_some(), "their performer credits list too");
+    assert!(rt.find("credits").is_some(), "their performer credits list too");
+    let calypso = rt.state.tracks.iter().position(|t| t.title == "Calypso Gene").expect("Calypso Gene");
+    let pill = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("tag-performer-·-vocals"));
+    assert!(pill.is_some(), "the credit's pill says what they played");
+    assert!(rt.find(&format!("credits-t{calypso}")).is_some());
     assert!(rt.state.selected.is_none(), "clicking a name doesn't select the row under it");
 }
 
@@ -93,7 +97,7 @@ fn each_artist_of_a_collaborative_album_opens_from_the_album_page_and_back_retra
     click(&mut rt, "The Alchemist");
     assert_eq!(rt.state.page, Page::Artist("The Alchemist".into()));
     assert!(rt.find("artist-albums").is_some(), "Mercy counts as The Alchemist's album");
-    assert!(rt.find("credits-producer").is_some());
+    assert!(rt.find("credits").is_some());
     // From the artist page into a guest's page, then Back twice to the album.
     click(&mut rt, "Silka");
     assert_eq!(rt.state.page, Page::Artist("Silka".into()));
@@ -129,7 +133,7 @@ fn songs_start_collapsed_under_the_credits_when_the_artist_has_credits() {
     rt.update(|s, tx| s.show_artist("The Alchemist", tx));
     settle(&mut rt);
     let y = |rt: &Runtime<App>, key: &str| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).unwrap_or_else(|| panic!("no {key}")).rect[1];
-    assert!(y(&rt, "credits-producer") < y(&rt, "artist-songs"), "credits come before songs");
+    assert!(y(&rt, "credits") < y(&rt, "artist-songs"), "credits come before songs");
     assert!(rt.find("artist-songs-table").is_none(), "songs start collapsed");
     click(&mut rt, "artist-songs-toggle");
     assert!(rt.find("artist-songs-table").is_some());
@@ -185,4 +189,42 @@ fn eps_and_singles_list_apart_from_albums_on_the_artist_page_and_in_search() {
     rt.update(|s, tx| s.show_album(shrines, tx));
     settle(&mut rt);
     assert!(text_of(&rt, "page-meta").starts_with("EP  •"));
+}
+
+#[test]
+fn a_song_with_several_of_the_artists_credits_lists_once_with_a_pill_per_role() {
+    let mut tracks = mercy();
+    tracks[0].credits.extend([Credit::parse(Role::Composer, "The Alchemist"), Credit::parse(Role::Mixer, "The Alchemist")]);
+    let mut rt = runtime();
+    rt.update(|s, _| s.set_library(tracks, false));
+    settle(&mut rt);
+    rt.update(|s, tx| s.show_artist("The Alchemist", tx));
+    settle(&mut rt);
+    let laraaji = rt.state.tracks.iter().position(|t| t.title == "Laraaji").expect("Laraaji");
+    let calypso = rt.state.tracks.iter().position(|t| t.title == "Calypso Gene").expect("Calypso Gene");
+    let keys: Vec<String> = rt.elements().into_iter().filter_map(|e| e.key).collect();
+    assert_eq!(keys.iter().filter(|k| *k == &format!("credits-t{laraaji}")).count(), 1, "Laraaji lists once");
+    assert!(keys.iter().any(|k| k == &format!("credits-t{calypso}")));
+    for role in ["tag-composer", "tag-producer", "tag-mixer"] {
+        assert!(keys.iter().any(|k| k == role), "a {role} pill");
+    }
+    assert!(!keys.iter().any(|k| k.starts_with("credits-producer")), "no per-role sections");
+    assert_eq!(text_of(&rt, "artist-counts"), "1 album  •  2 songs  •  credited on 2 songs");
+}
+
+#[test]
+fn a_roles_pills_line_up_down_the_credits_table() {
+    let mut tracks = mercy();
+    // Laraaji: producer only. Calypso Gene: composer and producer, so its producer pill sits
+    // after a composer pill; Laraaji's must still sit under it.
+    tracks[1].credits.push(Credit::parse(Role::Composer, "The Alchemist"));
+    let mut rt = runtime();
+    rt.update(|s, _| s.set_library(tracks, false));
+    settle(&mut rt);
+    rt.update(|s, tx| s.show_artist("The Alchemist", tx));
+    settle(&mut rt);
+    let xs: Vec<f32> = rt.elements().into_iter().filter(|e| e.key.as_deref() == Some("tag-producer")).map(|e| e.rect[0]).collect();
+    assert_eq!(xs.len(), 2, "both songs have a producer pill");
+    assert!((xs[0] - xs[1]).abs() < 0.5, "producer pills share a column: {xs:?}");
+    assert!(rt.find("credits-header-col-roles").is_some(), "the table heads the pills Roles");
 }

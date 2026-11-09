@@ -66,7 +66,7 @@ pub fn search(query: &str, tracks: &[Track], albums: &[Album]) -> SearchResults 
     let listed = |i: &usize| {
         top.songs.contains(i)
             || top.appears_on.contains(i)
-            || top.credits.iter().any(|(_, l)| l.contains(i))
+            || top.credits.iter().any(|(c, _)| c == i)
             || top.albums.iter().chain(&found).any(|&a| albums[a].tracks.contains(i))
     };
     let songs = (0..tracks.len()).filter(|i| tracks[*i].matches(&query) && !listed(i)).collect();

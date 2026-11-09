@@ -85,7 +85,7 @@ fn a_credit_columns_names_open_the_artist_page() {
     settle(&mut rt);
     click(&mut rt, "Brian Eno");
     assert_eq!(rt.state.page, Page::Artist("Brian Eno".into()));
-    assert!(rt.find("credits-producer").is_some());
+    assert!(rt.find("credits").is_some());
 }
 
 #[test]
@@ -214,7 +214,7 @@ fn page_tables_keep_their_own_widths() {
     let mut rt = runtime();
     rt.update(|s, tx| s.show_artist("Laraaji", tx));
     settle(&mut rt);
-    drag(&mut rt, "credits-composer-header-col-artist-resize", 50.0);
+    drag(&mut rt, "credits-header-col-artist-resize", 50.0);
     assert!(rt.state.base.page_widths.contains_key(&Property::Artist));
     assert!(rt.state.base.active().widths.is_empty(), "the view's widths are its own");
 }

@@ -3,6 +3,8 @@
 use rune::Color;
 use rune::color::srgb_decode;
 
+use crate::credits::Role;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Palette {
     pub dark: bool,
@@ -29,7 +31,30 @@ fn rgb(hex: u32) -> Color {
     Color { r: channel(16), g: channel(8), b: channel(0), a: 1.0 }
 }
 
+/// A role's pill: (fill, text), in Tailwind's 500 tint behind its 700 (light) or 300 (dark).
+fn role_hues(r: Role) -> (u32, u32, u32) {
+    match r {
+        Role::Composer => (0x8b5cf6, 0x6d28d9, 0xc4b5fd),
+        Role::Lyricist => (0xd946ef, 0xa21caf, 0xf0abfc),
+        Role::Writer => (0xec4899, 0xbe185d, 0xf9a8d4),
+        Role::Producer => (0xf97316, 0xc2410c, 0xfdba74),
+        Role::Arranger => (0xf59e0b, 0xb45309, 0xfcd34d),
+        Role::Conductor => (0x84cc16, 0x4d7c0f, 0xbef264),
+        Role::Performer => (0x10b981, 0x047857, 0x6ee7b7),
+        Role::Engineer => (0x06b6d4, 0x0e7490, 0x67e8f9),
+        Role::Mixer => (0x3b82f6, 0x1d4ed8, 0x93c5fd),
+        Role::Remixer => (0xef4444, 0xb91c1c, 0xfca5a5),
+        Role::DjMixer => (0xeab308, 0xa16207, 0xfde047),
+    }
+}
+
 impl Palette {
+    /// A credit role's pill colours: (fill, text).
+    pub fn role(&self, r: Role) -> (Color, Color) {
+        let (base, light, dark) = role_hues(r);
+        (rgb(base).alpha(if self.dark { 0.22 } else { 0.18 }), rgb(if self.dark { dark } else { light }))
+    }
+
     pub fn new(dark: bool) -> Palette {
         if dark {
             Palette {

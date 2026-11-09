@@ -9,6 +9,7 @@ use super::*;
 use crate::album::ReleaseType;
 use crate::artist::{ArtistPage, page};
 use crate::credits::Role;
+use crate::library::Track;
 use crate::palette::Palette;
 
 const PAGE_TITLE: TextStyle = TextStyle::new(28.0, 700.0);
@@ -45,17 +46,18 @@ pub(super) fn sections(s: &App, info: &ArtistPage, p: &Palette) -> Vec<El> {
     let mut out = Vec::new();
     out.extend(release_strips(s, "artist", &info.albums, false, p));
     if !info.appears_on.is_empty() {
-        out.push(songs(s, "appears-on", "Appears on", &info.appears_on, None, &info.name, p));
+        out.push(songs(s, "appears-on", "Appears on", &info.appears_on, p));
     }
-    // Credits come first; the Songs section starts collapsed when there are any.
-    for (role, list) in &info.credits {
-        out.push(songs(s, &format!("credits-{}", role.label().to_lowercase()), &format!("{} credits", role.label()), list, Some(*role), &info.name, p));
+    // Credits come first, each song once with a pill per role; the Songs section starts
+    // collapsed when there are any.
+    if !info.credits.is_empty() {
+        out.push(credits(s, info, p));
     }
     if !info.songs.is_empty() {
         let open = s.artist_songs_open.unwrap_or(info.credits.is_empty());
         let mut section = col().key("artist-songs").w_full().gap(8.0).child(songs_toggle(info.songs.len(), open, p));
         if open {
-            section = section.child(song_table(s, "artist-songs", &info.songs, None, &info.name, p));
+            section = section.child(song_table(s, "artist-songs", untagged(&info.songs), &[], &info.songs, p));
         }
         out.push(section);
     }
@@ -93,9 +95,8 @@ pub(super) fn head(s: &App, info: &ArtistPage, linked: bool, p: &Palette) -> El 
     if !info.featured_on.is_empty() {
         counts.push(format!("featured on {}", info.featured_on.len()));
     }
-    let credited: usize = info.credits.iter().map(|(_, l)| l.len()).sum();
-    if credited > 0 {
-        counts.push(plural(credited, "credit"));
+    if !info.credits.is_empty() {
+        counts.push(format!("credited on {}", plural(info.credits.len(), "song")));
     }
     let mut name = text(info.name.clone()).key("artist-name").font(PAGE_TITLE).color(p.tx).wrap();
     if linked {
@@ -155,23 +156,54 @@ fn link_button(key: &'static str, label: &'static str, p: &Palette) -> El {
 }
 
 /// A titled song table with the page columns. Double-click plays the table from that song.
-/// `artist` names whose performer credits the notes describe.
-pub(super) fn songs(s: &App, key: &str, title: &str, list: &[usize], role: Option<Role>, artist: &str, p: &Palette) -> El {
-    col()
-        .key(key.to_string())
-        .w_full()
-        .gap(8.0)
-        .child(text(title.to_string()).font(HEADING).color(p.tx))
-        .child(song_table(s, key, list, role, artist, p))
+pub(super) fn songs(s: &App, key: &str, title: &str, list: &[usize], p: &Palette) -> El {
+    titled(key, title, song_table(s, key, untagged(list), &[], list, p), p)
 }
 
-fn song_table(s: &App, key: &str, list: &[usize], role: Option<Role>, artist: &str, p: &Palette) -> El {
-    let columns = table::Columns { shown: &s.base.page_columns, widths: &s.base.page_widths };
-    let mut rows = col().child(table::header(&format!("{key}-header"), "", columns, 8.0, p));
-    for &i in list {
-        rows = rows.child(song_line(s, key, i, list, role, artist, columns, p));
+fn titled(key: &str, title: &str, table: El, p: &Palette) -> El {
+    col().key(key.to_string()).w_full().gap(8.0).child(text(title.to_string()).font(HEADING).color(p.tx)).child(table)
+}
+
+fn untagged(list: &[usize]) -> Vec<(usize, Vec<Option<table::Pill>>)> {
+    list.iter().map(|&i| (i, Vec::new())).collect()
+}
+
+/// Each song crediting the artist once, with a Roles column: one slot per role any of the
+/// songs credits them with, so a role's pills line up down the table.
+fn credits(s: &App, info: &ArtistPage, p: &Palette) -> El {
+    let used: Vec<Role> = Role::ALL.into_iter().filter(|r| info.credits.iter().any(|(_, roles)| roles.contains(r))).collect();
+    let rows: Vec<(usize, Vec<Option<table::Pill>>)> = info
+        .credits
+        .iter()
+        .map(|(i, roles)| {
+            let pills = used.iter().map(|r| roles.contains(r).then(|| role_pill(&s.tracks[*i], *r, &info.name, p))).collect();
+            (*i, pills)
+        })
+        .collect();
+    // Each slot is as wide as its widest pill.
+    let slots: Vec<f32> = (0..used.len())
+        .map(|k| rows.iter().filter_map(|(_, pills)| pills[k].as_ref()).map(|pill| table::pill_width(&pill.label)).fold(0.0, f32::max))
+        .collect();
+    titled("credits", "Credits", song_table(s, "credits", rows, &slots, &info.credited(), p), p)
+}
+
+/// `artist`'s `role` on a song: "Producer"; a performer's says what they played:
+/// "Performer · vocals".
+fn role_pill(t: &Track, role: Role, artist: &str, p: &Palette) -> table::Pill {
+    let played: Vec<&str> = t.credits.iter().filter(|c| c.role == role && c.name.eq_ignore_ascii_case(artist)).filter_map(|c| c.detail.as_deref()).collect();
+    let label = if played.is_empty() { role.label().to_string() } else { format!("{} · {}", role.label(), played.join(", ")) };
+    let (fill, color) = p.role(role);
+    table::Pill { label, fill, color }
+}
+
+/// `rows` are the songs with what fills their Roles slots; `list` is what double-click plays.
+fn song_table(s: &App, key: &str, rows: Vec<(usize, Vec<Option<table::Pill>>)>, pills: &[f32], list: &[usize], p: &Palette) -> El {
+    let columns = table::Columns { shown: &s.base.page_columns, widths: &s.base.page_widths, pills };
+    let mut body = col().child(table::header(&format!("{key}-header"), "", columns, 8.0, p));
+    for (i, pills) in rows {
+        body = body.child(song_line(s, key, i, list, pills, columns, p));
     }
-    table::scrolling(format!("{key}-table"), columns, 8.0, rows)
+    table::scrolling(format!("{key}-table"), columns, 8.0, body)
 }
 
 /// The Songs heading, which opens and closes the section.
@@ -195,8 +227,7 @@ fn songs_toggle(count: usize, open: bool, p: &Palette) -> El {
         .child(text(format!("{count}")).key("count").font(NUM).color(p.tx3))
 }
 
-#[allow(clippy::too_many_arguments)]
-fn song_line(s: &App, key: &str, i: usize, list: &[usize], role: Option<Role>, artist: &str, columns: table::Columns, p: &Palette) -> El {
+fn song_line(s: &App, key: &str, i: usize, list: &[usize], pills: Vec<Option<table::Pill>>, columns: table::Columns, p: &Palette) -> El {
     let t = &s.tracks[i];
     let current = s.current == Some(i);
     // The song's album cover, dimmed under the playing icon for the current song.
@@ -208,12 +239,8 @@ fn song_line(s: &App, key: &str, i: usize, list: &[usize], role: Option<Role>, a
                 .child(icon(if s.playing { &icons::BARS } else { &icons::PAUSE }, 13.0).color(rune::Color::WHITE)),
         );
     }
-    // A performer's credit says what they played.
-    let note = role.filter(|r| *r == Role::Performer).map(|_| {
-        t.credits.iter().filter(|c| c.role == Role::Performer && c.name.eq_ignore_ascii_case(artist)).filter_map(|c| c.detail.clone()).collect::<Vec<_>>().join(", ")
-    });
     let list = list.to_vec();
-    let look = table::RowLook { lead, selected: s.selected == Some(i), current, height: SONG_ROW_H, px: 8.0, note };
+    let look = table::RowLook { lead, selected: s.selected == Some(i), current, height: SONG_ROW_H, px: 8.0, pills };
     table::song_row(t, i, columns, look, p)
         .key(format!("{key}-t{i}"))
         .label(format!("{} by {}", t.title, t.artist().unwrap_or_else(|| "unknown artist".into())))

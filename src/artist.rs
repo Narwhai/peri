@@ -18,8 +18,8 @@ pub struct ArtistPage {
     pub songs: Vec<usize>,
     /// Of `songs`, the ones that feature them.
     pub featured_on: Vec<usize>,
-    /// Songs crediting them per role, in [`Role::ALL`] order, roles without songs left out.
-    pub credits: Vec<(Role, Vec<usize>)>,
+    /// Songs crediting them, in library order, each with their roles on it in [`Role::ALL`] order.
+    pub credits: Vec<(usize, Vec<Role>)>,
 }
 
 impl ArtistPage {
@@ -34,10 +34,12 @@ impl ArtistPage {
         if !list.is_empty() {
             return list;
         }
-        let mut credited: Vec<usize> = self.credits.iter().flat_map(|(_, l)| l.iter().copied()).collect();
-        credited.sort_unstable();
-        credited.dedup();
-        credited
+        self.credited()
+    }
+
+    /// The songs crediting them, in library order.
+    pub fn credited(&self) -> Vec<usize> {
+        self.credits.iter().map(|&(i, _)| i).collect()
     }
 
     /// What Play Discography plays: their own releases oldest first, undated last, each in
@@ -61,10 +63,9 @@ pub fn page(name: &str, tracks: &[Track], albums: &[Album]) -> ArtistPage {
     let mut own: Vec<usize> = (0..albums.len()).filter(|&a| has(&albums[a].album_artists, name)).collect();
     let appears_on = songs.iter().copied().filter(|i| !own.iter().any(|&a| albums[a].tracks.contains(i))).collect();
     own.sort_by_key(|&a| std::cmp::Reverse(albums[a].year));
-    let credits = Role::ALL
-        .into_iter()
-        .map(|role| (role, (0..tracks.len()).filter(|&i| has(&tracks[i].credited(role), name)).collect::<Vec<usize>>()))
-        .filter(|(_, songs)| !songs.is_empty())
+    let credits = (0..tracks.len())
+        .map(|i| (i, Role::ALL.into_iter().filter(|&role| has(&tracks[i].credited(role), name)).collect::<Vec<Role>>()))
+        .filter(|(_, roles)| !roles.is_empty())
         .collect();
     ArtistPage { name: spelling(name, tracks), albums: own, appears_on, songs, featured_on, credits }
 }
@@ -142,7 +143,7 @@ mod tests {
         assert_eq!(song_titles(&p.songs), ["Calypso Gene"]);
         assert_eq!(p.featured_on, p.songs);
         assert_eq!(p.credits.len(), 1);
-        assert_eq!((p.credits[0].0, tracks[p.credits[0].1[0]].title.as_str()), (Role::Lyricist, "Wrote It"), "credits match ignoring case");
+        assert_eq!((tracks[p.credits[0].0].title.as_str(), p.credits[0].1.as_slice()), ("Wrote It", [Role::Lyricist].as_slice()), "credits match ignoring case");
     }
 
     #[test]
@@ -163,7 +164,18 @@ mod tests {
     fn producers_get_their_credited_songs() {
         let (tracks, albums) = library();
         let p = page("The Alchemist", &tracks, &albums);
-        assert_eq!(p.credits.iter().map(|(r, s)| (*r, s.len())).collect::<Vec<_>>(), [(Role::Producer, 2)]);
+        assert_eq!(p.credits.iter().map(|(i, r)| (tracks[*i].title.as_str(), r.as_slice())).collect::<Vec<_>>(), [("Calypso Gene", [Role::Producer].as_slice()), ("Laraaji", [Role::Producer].as_slice())]);
         assert!(page("Nobody", &tracks, &albums).is_empty());
+    }
+
+    #[test]
+    fn a_song_with_several_of_their_credits_lists_once_with_each_role() {
+        let (mut tracks, _) = library();
+        tracks[3].credits.extend([Credit::parse(Role::Producer, "Cleo Reed"), Credit::parse(Role::Composer, "Cleo Reed")]);
+        let albums = crate::album::build(&tracks);
+        let p = page("Cleo Reed", &tracks, &albums);
+        assert_eq!(p.credits.len(), 1, "one entry per song");
+        assert_eq!(p.credits[0].1, [Role::Composer, Role::Lyricist, Role::Producer], "roles in credit order");
+        assert_eq!(p.credited(), [3]);
     }
 }

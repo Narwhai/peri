@@ -202,6 +202,33 @@ fn scene_artist(s: &mut App) {
     s.page = app::Page::Artist("The Alchemist".into());
 }
 
+/// An artist credited on songs in several roles: their pills line up by role.
+fn scene_credits(s: &mut App) {
+    use credits::{Credit, Role};
+    let mut tracks = demo_tracks();
+    let roles: [(&str, &[&str]); 6] = [
+        ("New Jeans", &["Composer", "Lyricist"]),
+        ("Super Shy", &["Composer", "Lyricist", "Producer"]),
+        ("ETA", &["Producer", "Mixer"]),
+        ("Cool With You", &["Lyricist"]),
+        ("Says", &["Performer (synthesizer)", "Mixer"]),
+        ("Mary", &["Composer", "Producer", "Remixer"]),
+    ];
+    for t in &mut tracks {
+        for (title, list) in roles {
+            if t.title == title {
+                for r in list {
+                    let (role, detail) = r.split_once(' ').map_or((*r, ""), |(a, b)| (a, b));
+                    let role = Role::ALL.into_iter().find(|x| x.label() == role).expect("a role");
+                    t.credits.push(Credit::parse(role, &format!("Erika de Casier {detail}")));
+                }
+            }
+        }
+    }
+    s.set_library(tracks, false);
+    s.page = app::Page::Artist("Erika de Casier".into());
+}
+
 fn scene_album_page(s: &mut App) {
     album_view(s, Layout::Grid);
     let a = s.albums.iter().position(|a| a.title == "Day of Radiance").expect("demo has Day of Radiance");
@@ -242,6 +269,7 @@ fn main() {
             ("album-list", scene_album_list),
             ("album", scene_album_page),
             ("artist", scene_artist),
+            ("credits", scene_credits),
             ("label", scene_label),
             ("settings", scene_settings),
         ],

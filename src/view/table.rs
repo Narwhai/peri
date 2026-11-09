@@ -4,7 +4,7 @@
 //! Dragging a header's right edge sets that column's width; double-clicking it lets the
 //! column size itself again.
 
-use rune::{Align, Cursor, Drag, El, Phase, Tx, col, el, icon, row, text};
+use rune::{Align, Color, Cursor, Drag, El, Phase, Tx, col, el, icon, row, text};
 
 use super::*;
 use crate::base::property::{Kind, Property, Value};
@@ -29,6 +29,8 @@ const HANDLE_W: f32 = 8.0;
 pub struct Columns<'a> {
     pub shown: &'a [Property],
     pub widths: &'a Widths,
+    /// The widths of the pill slots in a Roles column after the title; none, no such column.
+    pub pills: &'a [f32],
 }
 
 impl<'a> Columns<'a> {
@@ -81,7 +83,13 @@ fn sized(e: El, c: Property, widths: &Widths) -> El {
 /// How wide a table with `columns` must be before it scrolls sideways.
 pub fn min_width(columns: Columns, px: f32) -> f32 {
     let cells: f32 = columns.shown.iter().map(|&c| width_in(columns.widths, c) + GAP).sum();
-    2.0 * px + LEAD_W + GAP + TITLE_MIN + cells + GAP + DETAILS_W
+    let pills = if columns.pills.is_empty() { 0.0 } else { pills_width(columns.pills) + GAP };
+    2.0 * px + LEAD_W + GAP + TITLE_MIN + pills + cells + GAP + DETAILS_W
+}
+
+/// The Roles column's width: its slots side by side.
+fn pills_width(slots: &[f32]) -> f32 {
+    slots.iter().sum::<f32>() + PILL_GAP * slots.len().saturating_sub(1) as f32
 }
 
 fn numeric(p: Property) -> bool {
@@ -102,6 +110,9 @@ pub fn header(key: &str, lead: &str, columns: Columns, px: f32, p: &Palette) -> 
     let mut r = row().key(key.to_string()).w_full().h(28.0).px(px).gap(GAP).center_y();
     r = r.child(text(lead.to_string()).font(SMALL).color(p.tx3).w(LEAD_W).align(Align::End));
     r = r.child(text("Title").font(SMALL).color(p.tx3).grow(1.0).min_w(TITLE_MIN).shrink());
+    if !columns.pills.is_empty() {
+        r = r.child(text("Roles").key(format!("{key}-col-roles")).font(SMALL).color(p.tx3).w(pills_width(columns.pills)));
+    }
     for &c in columns.shown {
         let label = text(c.label()).font(SMALL).color(p.tx3).truncate().w_full();
         let cell = el()
@@ -167,8 +178,8 @@ pub struct RowLook {
     pub current: bool,
     pub height: f32,
     pub px: f32,
-    /// A quiet note after the title, as in what a performer played.
-    pub note: Option<String>,
+    /// What fills each slot of the Roles column, if the table has one.
+    pub pills: Vec<Option<Pill>>,
 }
 
 /// A song row: lead, title with "feat." links, the columns, and the details button. The caller
@@ -194,13 +205,50 @@ pub fn song_row(t: &Track, i: usize, columns: Columns, look: RowLook, p: &Palett
                 .shrink()
                 .gap(8.0)
                 .center_y()
-                .child(title.shrink())
-                .children(look.note.filter(|n| !n.is_empty()).map(|n| text(n).key("note").font(SMALL).color(p.tx3).truncate().shrink())),
+                .child(title.shrink()),
         );
+    if !columns.pills.is_empty() {
+        let mut slots = row().key("roles").w(pills_width(columns.pills)).gap(PILL_GAP).center_y();
+        for (k, &w) in columns.pills.iter().enumerate() {
+            let slot = el().w(w).center_y();
+            slots = slots.child(match look.pills.get(k).cloned().flatten() {
+                Some(pill) => slot.child(pill_el(pill)),
+                None => slot,
+            });
+        }
+        r = r.child(slots);
+    }
     for &c in columns.shown {
         r = r.child(sized(cell(t, c, p), c, columns.widths).key(column_key(c)));
     }
     r.child(details_button(i, p))
+}
+
+/// A small coloured label in the Roles column: "Producer", "Performer · vocals".
+#[derive(Clone, Debug, PartialEq)]
+pub struct Pill {
+    pub label: String,
+    pub fill: Color,
+    pub color: Color,
+}
+
+const PILL_PX: f32 = 7.0;
+const PILL_GAP: f32 = 6.0;
+
+/// How wide `label`'s pill draws.
+pub fn pill_width(label: &str) -> f32 {
+    rune::text::measure(label, &[], SMALL, None).0 + 2.0 * PILL_PX
+}
+
+fn pill_el(pill: Pill) -> El {
+    row()
+        .key(format!("tag-{}", pill.label.to_lowercase().replace(' ', "-")))
+        .h(18.0)
+        .px(PILL_PX)
+        .radius(9.0)
+        .center_y()
+        .fill(pill.fill)
+        .child(text(pill.label).font(SMALL).color(pill.color))
 }
 
 /// One column's value: names link to their pages, numbers align right.

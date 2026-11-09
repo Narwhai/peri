@@ -89,7 +89,7 @@ pub(super) fn list(s: &App, p: &Palette, cx: &mut Cx<App>) -> El {
                     let playing = current && s.playing;
                     let number = number_in(s, track, section);
                     let view = s.base.active();
-                    let columns = table::Columns { shown: &view.columns, widths: &view.widths };
+                    let columns = table::Columns { shown: &view.columns, widths: &view.widths, pills: &[] };
                     memo(row_key(track, section), (s.list_version, number, selected, current, playing, p.dark, columns.version()), || {
                         track_row(&s.tracks[track], track, section, number, selected, current, playing, columns, &p)
                     })
@@ -121,7 +121,7 @@ pub(super) fn list(s: &App, p: &Palette, cx: &mut Cx<App>) -> El {
     // Songs: a table as wide as its columns need, scrolling sideways when the window is
     // narrower. The column header sits above the viewport and follows its sideways scroll.
     let view = s.base.active();
-    let columns = table::Columns { shown: &view.columns, widths: &view.widths };
+    let columns = table::Columns { shown: &view.columns, widths: &view.widths, pills: &[] };
     // A viewport scrolling both ways lays its content out at its natural width, so the table
     // fills the viewport itself, and is wider when its columns need it.
     let min_w = table::min_width(columns, LIST_PX).max(width + 2.0 * pad);
@@ -189,7 +189,7 @@ fn track_row(t: &Track, i: usize, section: Option<usize>, number: usize, selecte
     } else {
         text(format!("{number}")).font(NUM).color(p.tx3).align(Align::End).w(28.0)
     };
-    let look = table::RowLook { lead, selected, current, height: ROW_H, px: 10.0, note: None };
+    let look = table::RowLook { lead, selected, current, height: ROW_H, px: 10.0, pills: Vec::new() };
     table::song_row(t, i, columns, look, p)
         .key(row_key(i, section))
         .press(p.ui.alpha(0.5))
