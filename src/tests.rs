@@ -2,7 +2,7 @@
 
 use rune::{Env, Key, KeyEvent, Mods, Runtime};
 
-use crate::app::{App, Output};
+use crate::app::{App, Output, Page};
 use crate::queue::Repeat;
 use crate::view::view;
 
@@ -115,22 +115,61 @@ fn next_and_previous_walk_the_list_and_stop_at_the_end() {
 }
 
 #[test]
-fn searching_filters_the_list_and_plays_within_it() {
+fn searching_opens_results_that_back_returns_to_and_clearing_leaves() {
     let mut rt = runtime(true);
-    rt.update(|s, _| {
-        s.search = rune::TextEdit::new("nils");
-        s.refilter();
+    click(&mut rt, "search");
+    for c in "nils".chars() {
+        key(&mut rt, Key::Text(c.to_string()));
+    }
+    assert_eq!(rt.state.page, Page::Search, "typing opens the results");
+    assert_eq!(text_of(&rt, "artist-name"), "Nils Frahm");
+    assert!(rt.find("artist-albums").is_some(), "her albums show like on the artist page");
+    assert!(rt.find("artist-songs").is_some());
+    // Results update as the query changes.
+    key(&mut rt, Key::Backspace);
+    key(&mut rt, Key::Backspace);
+    key(&mut rt, Key::Backspace);
+    key(&mut rt, Key::Backspace);
+    for c in "radiance".chars() {
+        key(&mut rt, Key::Text(c.to_string()));
+    }
+    assert!(rt.find("artist-name").is_none(), "no artist is named radiance");
+    assert!(rt.find("search-albums").is_some());
+    // An album opened from the results goes back to them.
+    let a = rt.state.albums.iter().position(|a| a.title == "Day of Radiance").expect("Day of Radiance");
+    rt.update(|s, tx| s.show_album(a, tx));
+    settle(&mut rt);
+    assert_eq!(text_of(&rt, "page-title"), "Day of Radiance");
+    click(&mut rt, "back");
+    assert_eq!(rt.state.page, Page::Search);
+    // Typing on another page returns to the results instead of stacking more.
+    rt.update(|s, tx| s.show_artist("Laraaji", tx));
+    settle(&mut rt);
+    click(&mut rt, "search");
+    key(&mut rt, Key::Text("x".into()));
+    assert_eq!(rt.state.page, Page::Search);
+    assert!(rt.state.history.is_empty());
+    // Esc clears the search and leaves the results.
+    key(&mut rt, Key::Escape);
+    assert_eq!(rt.state.search.text, "");
+    assert_eq!(rt.state.page, Page::Library);
+    assert_eq!(text_of(&rt, "count"), "13 tracks", "the view isn't filtered by the search");
+}
+
+#[test]
+fn home_returns_to_the_views_and_clears_the_search() {
+    let mut rt = runtime(true);
+    rt.update(|s, tx| {
+        s.search = rune::TextEdit::new("laraaji");
+        s.searched(tx);
     });
     settle(&mut rt);
-    assert_eq!(text_of(&rt, "count"), "4 of 13 tracks");
-    assert!(rt.find("t0").is_none(), "Laraaji is filtered out");
-    let first = rt.state.filtered[0];
-    click_row(&mut rt, &crate::app::row_key(first, None));
-    key(&mut rt, Key::Enter);
-    for _ in 0..3 {
-        click(&mut rt, "next");
-    }
-    assert!(rt.state.current.is_some_and(|i| rt.state.tracks[i].artist().as_deref() == Some("Nils Frahm")));
+    click(&mut rt, "open-artist");
+    assert_eq!(rt.state.page, Page::Artist("Laraaji".into()));
+    click(&mut rt, "home");
+    assert_eq!(rt.state.page, Page::Library);
+    assert!(rt.state.history.is_empty());
+    assert_eq!(rt.state.search.text, "");
 }
 
 #[test]
@@ -230,7 +269,7 @@ fn clicking_the_search_field_takes_typing_and_letters_do_not_trigger_shortcuts()
     }
     assert_eq!(rt.state.search.text, "nils r");
     assert_eq!(rt.state.repeat, Repeat::Off, "typing doesn't hit the R shortcut");
-    assert_eq!(text_of(&rt, "count"), "4 of 13 tracks");
+    assert_eq!(rt.state.page, Page::Search);
 }
 
 #[test]

@@ -58,6 +58,8 @@ pub enum Page {
     /// One artist's page: their albums, the albums they appear on, their songs and credits.
     /// By name, matched ignoring case.
     Artist(String),
+    /// Artists, albums and songs matching the search field, which holds the query.
+    Search,
 }
 
 /// The song details dialog: which song, and what was read from its file when it opened.
@@ -81,7 +83,7 @@ pub struct App {
     pub artist_songs_open: Option<bool>,
     /// Album covers for cards and lists; `None` until setup has a waker.
     pub covers: Option<Covers>,
-    /// Indices into `tracks` the active view and search show, in play order. In an album view,
+    /// Indices into `tracks` the active view shows, in play order. In an album view,
     /// every song of the shown albums, album by album.
     pub filtered: Vec<usize>,
     /// Album views: indices into `albums` the view shows, in order.
@@ -296,27 +298,18 @@ impl App {
         }
     }
 
-    /// Re-evaluates the active view and search over the library.
+    /// Re-evaluates the active view over the library.
     pub fn refilter(&mut self) {
-        let query = self.search.text.trim().to_lowercase();
         let view = self.base.active();
         match view.mode {
             Mode::Songs => {
-                let Evaluated { order, sections } = evaluate(view, &self.tracks, &query);
+                let Evaluated { order, sections } = evaluate(view, &self.tracks, "");
                 self.filtered = order;
                 self.sections = sections;
                 self.shown_albums.clear();
             }
             Mode::Albums => {
-                // Search finds albums by title and artist, and albums holding a matching song.
-                let holds_match: Vec<bool> = self.albums.iter().map(|a| !query.is_empty() && a.tracks.iter().any(|&i| self.tracks[i].matches(&query))).collect();
-                let mut unsearched = evaluate(view, &self.albums, "");
-                let keep = |i: usize| query.is_empty() || holds_match[i] || crate::base::property::Record::matches(&self.albums[i], &query);
-                unsearched.order.retain(|&i| keep(i));
-                for section in &mut unsearched.sections {
-                    section.items.retain(|&i| keep(i));
-                }
-                unsearched.sections.retain(|s| !s.items.is_empty());
+                let unsearched = evaluate(view, &self.albums, "");
                 self.filtered = unsearched.order.iter().flat_map(|&a| self.albums[a].tracks.iter().copied()).collect();
                 self.shown_albums = unsearched.order;
                 self.sections = unsearched.sections;
@@ -333,7 +326,7 @@ impl App {
     pub fn open_album(&self) -> Option<usize> {
         match &self.page {
             Page::Album(id) => self.albums.iter().position(|a| &a.id() == id),
-            Page::Library | Page::Artist(_) => None,
+            Page::Library | Page::Artist(_) | Page::Search => None,
         }
     }
 
@@ -348,7 +341,7 @@ impl App {
     pub fn shown_columns(&self) -> &[Property] {
         match self.page {
             Page::Library => &self.base.active().columns,
-            Page::Album(_) | Page::Artist(_) => &self.base.page_columns,
+            Page::Album(_) | Page::Artist(_) | Page::Search => &self.base.page_columns,
         }
     }
 
@@ -356,7 +349,7 @@ impl App {
     pub fn shown_columns_mut(&mut self) -> &mut Vec<Property> {
         match self.page {
             Page::Library => &mut self.base.active_mut().columns,
-            Page::Album(_) | Page::Artist(_) => &mut self.base.page_columns,
+            Page::Album(_) | Page::Artist(_) | Page::Search => &mut self.base.page_columns,
         }
     }
 
@@ -364,7 +357,7 @@ impl App {
     pub fn open_artist(&self) -> Option<&str> {
         match &self.page {
             Page::Artist(name) => Some(name),
-            Page::Library | Page::Album(_) => None,
+            Page::Library | Page::Album(_) | Page::Search => None,
         }
     }
 
@@ -396,6 +389,47 @@ impl App {
     pub fn show_library(&mut self) {
         self.history.clear();
         self.page = Page::Library;
+    }
+
+    /// Home: the active view, the search cleared.
+    pub fn go_home(&mut self) {
+        self.close_panel();
+        self.details = None;
+        self.search.clear();
+        self.artist_songs_open = None;
+        self.show_library();
+    }
+
+    /// Follows the search field: a query opens the results (returning to them when they're
+    /// further back); clearing it leaves them for the page searched from.
+    pub fn searched(&mut self, tx: &mut Tx) {
+        let searching = !self.search.text.trim().is_empty();
+        let back_at = self.history.iter().position(|p| *p == Page::Search);
+        if searching {
+            if self.page == Page::Search {
+                return;
+            }
+            match back_at {
+                Some(at) => {
+                    self.history.truncate(at);
+                    self.page = Page::Search;
+                    self.artist_songs_open = None;
+                }
+                None => self.go_to(Page::Search),
+            }
+            tx.scroll_to_instant("search-page", 0.0, 0.0);
+        } else if self.page == Page::Search {
+            self.go_back();
+        } else if let Some(at) = back_at {
+            // Pages opened from the results go back past where the results were.
+            self.history.remove(at);
+        }
+    }
+
+    /// Clears the search, leaving the results.
+    pub fn clear_search(&mut self, tx: &mut Tx) {
+        self.search.clear();
+        self.searched(tx);
     }
 
     /// Plays song `i` of `list`, queueing the rest of `list` (an artist's songs).
@@ -854,6 +888,10 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
             return true;
         }
         return false;
+    }
+    if ev.key == Key::Escape && s.page == Page::Search {
+        s.clear_search(tx);
+        return true;
     }
     if ev.key == Key::Escape && s.page != Page::Library {
         s.go_back();

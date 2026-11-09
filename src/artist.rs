@@ -1,4 +1,4 @@
-//! What an artist page lists: the artist's own albums, the albums they appear on, their songs
+//! What an artist page lists: the artist's own albums, the songs they appear on, their songs
 //! (as main or featured artist), and the songs that credit them (composer, producer…).
 //! Names match ignoring case.
 
@@ -12,7 +12,7 @@ pub struct ArtistPage {
     pub name: String,
     /// Albums whose album artists include them, newest first.
     pub albums: Vec<usize>,
-    /// Other albums holding songs they play on, newest first.
+    /// Their songs on other artists' albums, in library order.
     pub appears_on: Vec<usize>,
     /// Songs they're an artist of, in library order.
     pub songs: Vec<usize>,
@@ -38,10 +38,8 @@ pub fn page(name: &str, tracks: &[Track], albums: &[Album]) -> ArtistPage {
     let songs: Vec<usize> = (0..tracks.len()).filter(|&i| has(&tracks[i].artists, name)).collect();
     let featured_on = songs.iter().copied().filter(|&i| has(&tracks[i].featured, name)).collect();
     let mut own: Vec<usize> = (0..albums.len()).filter(|&a| has(&albums[a].album_artists, name)).collect();
-    let mut appears_on: Vec<usize> = (0..albums.len()).filter(|&a| !own.contains(&a) && albums[a].tracks.iter().any(|i| songs.contains(i))).collect();
-    let newest_first = |list: &mut Vec<usize>| list.sort_by_key(|&a| std::cmp::Reverse(albums[a].year));
-    newest_first(&mut own);
-    newest_first(&mut appears_on);
+    let appears_on = songs.iter().copied().filter(|i| !own.iter().any(|&a| albums[a].tracks.contains(i))).collect();
+    own.sort_by_key(|&a| std::cmp::Reverse(albums[a].year));
     let credits = Role::ALL
         .into_iter()
         .map(|role| (role, (0..tracks.len()).filter(|&i| has(&tracks[i].credited(role), name)).collect::<Vec<usize>>()))
@@ -118,9 +116,9 @@ mod tests {
         let (tracks, albums) = library();
         let p = page("Cleo Reed", &tracks, &albums);
         assert!(p.albums.is_empty());
-        assert_eq!(titles(&albums, &p.appears_on), ["Mercy"]);
-        let song_titles: Vec<&str> = p.songs.iter().map(|&i| tracks[i].title.as_str()).collect();
-        assert_eq!(song_titles, ["Calypso Gene"]);
+        let song_titles = |list: &[usize]| list.iter().map(|&i| tracks[i].title.clone()).collect::<Vec<String>>();
+        assert_eq!(song_titles(&p.appears_on), ["Calypso Gene"], "the song they're on, not all of Mercy");
+        assert_eq!(song_titles(&p.songs), ["Calypso Gene"]);
         assert_eq!(p.featured_on, p.songs);
         assert_eq!(p.credits.len(), 1);
         assert_eq!((p.credits[0].0, tracks[p.credits[0].1[0]].title.as_str()), (Role::Lyricist, "Wrote It"), "credits match ignoring case");

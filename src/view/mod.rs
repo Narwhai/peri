@@ -6,6 +6,7 @@ mod details;
 mod filters;
 mod list;
 mod player;
+mod search;
 mod table;
 mod toolbar;
 
@@ -46,6 +47,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         .child(match (s.open_album(), s.open_artist()) {
             (Some(a), _) => albums::album_page(s, a, &p),
             (None, Some(name)) => artists::artist_page(s, name, &p),
+            (None, None) if s.page == crate::app::Page::Search => search::search_page(s, &p),
             (None, None) => list::list(s, &p, cx),
         })
         .child(player::now_playing(s, &p))
@@ -83,30 +85,22 @@ fn header(s: &App, p: &Palette, kit: &Kit) -> El {
         (None, n) => format!("{} of {}", s.filtered.len(), plural(n, "track")),
     };
     let search = TextInput::new(&s.search)
-        .placeholder("Search title, artist, album")
+        .placeholder("Search artists, albums, songs")
         .label("Search")
         .leading_icon(&rune_kit::glyphs::SEARCH)
         .width(Some(260.0))
         .clear_button()
         .on_edit(|s: &mut App| &mut s.search)
-        .on_change(|s: &mut App, _tx| s.refilter())
+        .on_change(|s: &mut App, tx| s.searched(tx))
+        .on_action(|s: &mut App, tx| s.clear_search(tx))
         .on_key(|s: &mut App, ev, tx| match ev.key {
             rune::Key::Escape => {
-                s.search.clear();
-                s.refilter();
+                s.clear_search(tx);
                 tx.blur();
                 true
             }
-            rune::Key::Down => {
+            rune::Key::Enter | rune::Key::Down => {
                 tx.blur();
-                s.move_selection(1, tx);
-                true
-            }
-            rune::Key::Enter => {
-                tx.blur();
-                if let Some(&i) = s.filtered.first() {
-                    s.play_index(i, tx);
-                }
                 true
             }
             _ => false,
@@ -122,8 +116,24 @@ fn header(s: &App, p: &Palette, kit: &Kit) -> El {
         .center_y()
         .fill(p.bg2)
         .border_bottom(p)
-        .child(icon(&icons::NOTE, 18.0).color(p.ui3))
-        .child(text("Library").font(HEADING).color(p.tx))
+        .child(
+            row()
+                .key("home")
+                .h(32.0)
+                .pl(6.0)
+                .pr(10.0)
+                .gap(8.0)
+                .radius(8.0)
+                .center_y()
+                .hover(p.ui.alpha(0.45))
+                .cursor(Cursor::Pointer)
+                .role("button")
+                .label("Library")
+                .help("Back to the library's views")
+                .on_press(|s: &mut App| s.go_home())
+                .child(icon(&icons::NOTE, 18.0).color(p.ui3))
+                .child(text("Library").font(HEADING).color(p.tx)),
+        )
         .child(text(count).key("count").font(SMALL).color(p.tx3).grow(1.0).shrink().truncate())
         .child(search)
         .child(pill_button("open", "Open folder…", p).on_press_tx(|s: &mut App, tx| s.open_folder(tx)))

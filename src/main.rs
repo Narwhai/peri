@@ -15,6 +15,7 @@ mod icons;
 mod library;
 mod palette;
 mod queue;
+mod search;
 mod view;
 
 #[cfg(test)]
@@ -96,8 +97,8 @@ fn scene_playing(s: &mut App) {
 
 fn scene_search(s: &mut App) {
     scene_playing(s);
-    s.search = rune::TextEdit::new("nils");
-    s.refilter();
+    s.search = rune::TextEdit::new("laraaji");
+    s.page = app::Page::Search;
 }
 
 fn scene_error(s: &mut App) {

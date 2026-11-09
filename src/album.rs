@@ -41,6 +41,13 @@ impl Album {
         self.artist.as_deref().unwrap_or(UNKNOWN_ARTIST)
     }
 
+    /// Whether every word of `query` (lowercased) appears in the title or the album's own
+    /// artists, so not only in a featured artist's name or a song.
+    pub fn primary_match(&self, query: &str) -> bool {
+        let haystack = format!("{} {} {}", self.title, self.artist.as_deref().unwrap_or_default(), self.album_artists.join(" ")).to_lowercase();
+        query.split_whitespace().all(|word| haystack.contains(word))
+    }
+
     /// A key that names the album across rescans, for the album page.
     pub fn id(&self) -> AlbumId {
         AlbumId {
@@ -283,5 +290,18 @@ mod tests {
         assert!(album.matches("alchemist"));
         assert!(album.matches("silka"), "featured artists are searchable");
         assert!(!album.matches("c1"), "song titles are matched separately");
+    }
+
+    #[test]
+    fn only_title_and_album_artists_are_a_primary_match() {
+        let mut mercy = song("c1", Some("Mercy"), Some("Armand Hammer & The Alchemist"), "Armand Hammer & The Alchemist", Some(2025), None, 1);
+        mercy.artists.push("Silka".into());
+        mercy.featured = vec!["Silka".into()];
+        let tracks = vec![mercy];
+        let album = &build(&tracks)[0];
+        assert!(album.matches("silka"));
+        assert!(album.primary_match("mercy"));
+        assert!(album.primary_match("alchemist"));
+        assert!(!album.primary_match("silka"), "a featured artist is not the album's own");
     }
 }

@@ -151,21 +151,26 @@ fn the_now_playing_cover_opens_the_playing_album() {
 }
 
 #[test]
-fn search_finds_albums_by_title_artist_or_one_of_their_songs() {
+fn search_results_lead_with_the_artists_own_albums() {
     let mut rt = runtime();
-    click(&mut rt, "mode/albums");
-    let search = |rt: &mut Runtime<App>, q: &str| {
-        rt.update(|s, _| {
-            s.search = rune::TextEdit::new(q);
-            s.refilter();
-        });
-        settle(rt);
-        shown_titles(rt)
-    };
-    assert_eq!(search(&mut rt, "radiance"), ["Day of Radiance"]);
-    assert_eq!(search(&mut rt, "laraaji"), ["Live Sessions", "Day of Radiance"], "artist, and a guest on Live Sessions");
-    assert_eq!(search(&mut rt, "hammers"), ["Spaces"], "a song title finds its album");
-    assert_eq!(text_of(&rt, "count"), "1 of 4 albums");
+    rt.update(|s, tx| {
+        s.search = rune::TextEdit::new("laraaji");
+        s.searched(tx);
+    });
+    settle(&mut rt);
+    assert_eq!(text_of(&rt, "artist-name"), "Laraaji");
+    let day = album(&rt, "Day of Radiance");
+    let live = album(&rt, "Live Sessions");
+    assert!(rt.find(&format!("artist-albums{day}")).is_some());
+    assert!(rt.find(&format!("artist-albums{live}")).is_some(), "Live Sessions lists Laraaji as an album artist");
+    // A song title finds its album.
+    rt.update(|s, tx| {
+        s.search = rune::TextEdit::new("hammers");
+        s.searched(tx);
+    });
+    settle(&mut rt);
+    assert!(rt.find(&format!("search-albums{}", album(&rt, "Spaces"))).is_none(), "an album only shows when its title or artist matches");
+    assert!(rt.find("search-songs").is_some());
 }
 
 #[test]

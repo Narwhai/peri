@@ -27,13 +27,8 @@ pub(super) fn list(s: &App, p: &Palette, cx: &mut Cx<App>) -> El {
     let grid = albums && s.base.active().layout == Layout::Grid;
     let empty = if albums { s.shown_albums.is_empty() } else { s.filtered.is_empty() };
     if empty {
-        let search = s.search.text.trim();
         let what = if albums { "albums" } else { "songs" };
-        let detail = if search.is_empty() {
-            format!("No {what} match the filters of “{}”.", s.base.active().name)
-        } else {
-            format!("Nothing in “{}” matches “{search}”.", s.base.active().name)
-        };
+        let detail = format!("No {what} match the filters of “{}”.", s.base.active().name);
         return col()
             .key("no-results")
             .w_full()
