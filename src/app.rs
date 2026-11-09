@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
-use rune::{FileDialogOptions, Image, ImageCache, Key, KeyEvent, TextEdit, Tx, Waker};
+use rune::{FileDialogOptions, Image, ImageCache, Key, KeyEvent, Live, TextEdit, Tx, Waker};
 
 use crate::album::{self, Album, AlbumId};
 use crate::audio::{self, Engine};
@@ -85,6 +85,10 @@ pub struct App {
     /// The artist page's Songs section, when toggled: `None` shows it collapsed if the artist
     /// has credits (so they come first), else open. Reset on every page change.
     pub artist_songs_open: Option<bool>,
+    /// Where the library list is scrolled to (x, y), kept current while it shows.
+    pub library_scroll: Live<[f32; 2]>,
+    /// `library_scroll` when a page last opened from the library, where Back returns to.
+    library_scroll_saved: [f32; 2],
     /// Album covers for cards and lists; `None` until setup has a waker.
     pub covers: Option<Covers>,
     /// Indices into `tracks` the active view shows, in play order. In an album view,
@@ -154,6 +158,8 @@ impl App {
             page: Page::Library,
             history: Vec::new(),
             artist_songs_open: None,
+            library_scroll: Live::new([0.0, 0.0]),
+            library_scroll_saved: [0.0, 0.0],
             covers: None,
             filtered: Vec::new(),
             shown_albums: Vec::new(),
@@ -488,15 +494,21 @@ impl App {
         }
         self.artist_songs_open = None;
         let left = std::mem::replace(&mut self.page, page);
-        if left != Page::Library {
+        if left == Page::Library {
+            self.library_scroll_saved = self.library_scroll.get();
+        } else {
             self.history.push(left);
         }
     }
 
-    /// Back: the page before this one, else the library.
-    pub fn go_back(&mut self) {
+    /// Back: the page before this one, else the library, scrolled to where it was left.
+    pub fn go_back(&mut self, tx: &mut Tx) {
         self.page = self.history.pop().unwrap_or(Page::Library);
         self.artist_songs_open = None;
+        if self.page == Page::Library {
+            let [x, y] = self.library_scroll_saved;
+            tx.scroll_to_instant("tracks", x, y);
+        }
     }
 
     pub fn show_library(&mut self) {
@@ -534,7 +546,7 @@ impl App {
             }
             tx.scroll_to_instant("search-page", 0.0, 0.0);
         } else if self.page == Page::Search {
-            self.go_back();
+            self.go_back(tx);
         } else if let Some(at) = back_at {
             // Pages opened from the results go back past where the results were.
             self.history.remove(at);
@@ -1009,7 +1021,7 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         return true;
     }
     if ev.key == Key::Escape && s.page != Page::Library {
-        s.go_back();
+        s.go_back(tx);
         return true;
     }
     if ev.is_command('f') {

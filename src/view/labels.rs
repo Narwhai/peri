@@ -24,7 +24,7 @@ pub(super) fn label_page(s: &App, name: &str, p: &Palette) -> El {
         .cursor(Cursor::Pointer)
         .label("Back")
         .help("Back (Esc)")
-        .on_press(|s: &mut App| s.go_back())
+        .on_press_tx(|s: &mut App, tx| s.go_back(tx))
         .child(icon(&icons::BACK, 16.0).color(p.tx2))
         .child(text(back_label(s)).font(TITLE).color(p.tx2));
 

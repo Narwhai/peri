@@ -30,7 +30,7 @@ pub(super) fn artist_page(s: &App, name: &str, p: &Palette) -> El {
         .cursor(Cursor::Pointer)
         .label("Back")
         .help("Back (Esc)")
-        .on_press(|s: &mut App| s.go_back())
+        .on_press_tx(|s: &mut App, tx| s.go_back(tx))
         .child(icon(&icons::BACK, 16.0).color(p.tx2))
         .child(text(back_label(s)).font(TITLE).color(p.tx2));
     let mut body = col().key("artist-page-body").w_full().px(28.0).py(16.0).gap(22.0).child(back).child(head(s, &info, false, p));

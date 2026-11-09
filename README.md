@@ -75,7 +75,7 @@ A label name opens the label's page wherever it's shown: the album page's facts,
 
 ## Artists
 
-Every artist name is a link: in song rows, titles ("Calypso Gene (feat. Silka & Cleo Reed)"), the now-playing bar, album cards and album pages. It opens the artist's page: their albums, albums they appear on, songs crediting them (composer, lyricist, producer, performer…), then their own songs. When they have credits, their songs start collapsed under a Songs heading; click it to open. Song rows there lead with the album cover. Back and Esc retrace the pages visited.
+Every artist name is a link: in song rows, titles ("Calypso Gene (feat. Silka & Cleo Reed)"), the now-playing bar, album cards and album pages. It opens the artist's page: their albums, albums they appear on, songs crediting them (composer, lyricist, producer, performer…), then their own songs. When they have credits, their songs start collapsed under a Songs heading; click it to open. Song rows there lead with the album cover. Back and Esc retrace the pages visited, and returning to the library puts the list back where it was scrolled (Home opens it at the top).
 
 - **Who's who:** the `ARTISTS` tag (one value per act) with the MusicBrainz artist IDs names each artist. The artist tag ("A & B feat. C") and the title ("(feat. C)") say who is featured.
 - **Collaborative albums:** MusicBrainz album artist IDs are matched to names anywhere in the library, so "Armand Hammer & The Alchemist" counts as an album of each.

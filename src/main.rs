@@ -30,6 +30,8 @@ mod base_ui_tests;
 #[cfg(test)]
 mod label_ui_tests;
 #[cfg(test)]
+mod scroll_ui_tests;
+#[cfg(test)]
 mod settings_ui_tests;
 #[cfg(test)]
 mod tests;

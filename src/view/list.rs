@@ -104,6 +104,12 @@ pub(super) fn list(s: &App, p: &Palette, cx: &mut Cx<App>) -> El {
         .min_h(0.0)
         .scroll(ScrollSpec { stick_bottom: false })
         .scroll_margin(HEADER_H)
+        .on_scroll_offset({
+            let at = s.library_scroll.clone();
+            move |pos: ScrollPos| {
+                at.set(pos.offset);
+            }
+        })
         .on_layout(move |s: &mut App, r| {
             if s.mode() == Mode::Albums && s.base.active().layout == Layout::Grid {
                 s.set_columns(columns_for(r[2] - 2.0 * GRID_PX));
@@ -121,8 +127,11 @@ pub(super) fn list(s: &App, p: &Palette, cx: &mut Cx<App>) -> El {
     let min_w = table::min_width(columns, LIST_PX).max(width + 2.0 * pad);
     let shift = Live::new([0.0f32, 0.0]);
     let follow = shift.clone();
+    // Replaces the viewport's scroll handler, so it remembers the offset too.
+    let remember = s.library_scroll.clone();
     let viewport = viewport.scroll_xy().on_scroll_offset(move |at: ScrollPos| {
         follow.set([-at.offset[0], 0.0]);
+        remember.set(at.offset);
     });
     let head = table::header("table-header", "#", columns, LIST_PX + 10.0, &p).min_w(min_w).live_offset(&shift);
     col()
