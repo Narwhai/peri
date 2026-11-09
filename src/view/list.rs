@@ -127,7 +127,7 @@ pub(super) fn list(s: &App, p: &Palette, cx: &mut Cx<App>) -> El {
     let viewport = viewport.scroll_xy().on_scroll_offset(move |at: ScrollPos| {
         follow.set([-at.offset[0], 0.0]);
     });
-    let head = table::header("table-header", columns, LIST_PX + 10.0, &p).min_w(min_w).live_offset(&shift);
+    let head = table::header("table-header", "#", columns, LIST_PX + 10.0, &p).min_w(min_w).live_offset(&shift);
     col()
         .key("song-table")
         .w_full()

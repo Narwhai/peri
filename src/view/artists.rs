@@ -13,6 +13,8 @@ use crate::palette::Palette;
 
 const PAGE_TITLE: TextStyle = TextStyle::new(28.0, 700.0);
 const SONG_ROW_H: f32 = 40.0;
+/// Song rows' covers, as wide as the table's lead column.
+const COVER_W: f32 = table::LEAD_W;
 
 pub(super) fn artist_page(s: &App, name: &str, p: &Palette) -> El {
     let info = page(name, &s.tracks, &s.albums);
@@ -41,11 +43,17 @@ pub(super) fn artist_page(s: &App, name: &str, p: &Palette) -> El {
     if !info.appears_on.is_empty() {
         body = body.child(album_strip(s, "appears-on", "Appears on", &info.appears_on, true, p));
     }
-    if !info.songs.is_empty() {
-        body = body.child(songs(s, "artist-songs", "Songs", &info.songs, None, p));
-    }
+    // Credits come first; the Songs section starts collapsed when there are any.
     for (role, list) in &info.credits {
         body = body.child(songs(s, &format!("credits-{}", role.label().to_lowercase()), &format!("{} credits", role.label()), list, Some(*role), p));
+    }
+    if !info.songs.is_empty() {
+        let open = s.artist_songs_open.unwrap_or(info.credits.is_empty());
+        let mut section = col().key("artist-songs").w_full().gap(8.0).child(songs_toggle(info.songs.len(), open, p));
+        if open {
+            section = section.child(song_table(s, "artist-songs", &info.songs, None, p));
+        }
+        body = body.child(section);
     }
     col().key("artist-page").w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: false }).child(body)
 }
@@ -100,27 +108,56 @@ fn play_list(info: &ArtistPage) -> Vec<usize> {
 
 /// A titled song table with the page columns. Double-click plays the table from that song.
 fn songs(s: &App, key: &str, title: &str, list: &[usize], role: Option<Role>, p: &Palette) -> El {
-    let columns = &s.base.page_columns;
-    let mut rows = col().child(table::header(&format!("{key}-header"), columns, 8.0, p));
-    for &i in list {
-        rows = rows.child(song_line(s, key, i, list, role, columns, p));
-    }
     col()
         .key(key.to_string())
         .w_full()
         .gap(8.0)
         .child(text(title.to_string()).font(HEADING).color(p.tx))
-        .child(table::scrolling(format!("{key}-table"), columns, 8.0, rows))
+        .child(song_table(s, key, list, role, p))
+}
+
+fn song_table(s: &App, key: &str, list: &[usize], role: Option<Role>, p: &Palette) -> El {
+    let columns = &s.base.page_columns;
+    let mut rows = col().child(table::header(&format!("{key}-header"), "", columns, 8.0, p));
+    for &i in list {
+        rows = rows.child(song_line(s, key, i, list, role, columns, p));
+    }
+    table::scrolling(format!("{key}-table"), columns, 8.0, rows)
+}
+
+/// The Songs heading, which opens and closes the section.
+fn songs_toggle(count: usize, open: bool, p: &Palette) -> El {
+    let chevron = icon(&rune_kit::glyphs::TRIANGLE_RIGHT, 12.0).color(p.tx3).icon_rotation(if open { std::f32::consts::FRAC_PI_2 } else { 0.0 }).motion(SNAPPY);
+    row()
+        .key("artist-songs-toggle")
+        .h(32.0)
+        .pr(10.0)
+        .gap(8.0)
+        .center_y()
+        .radius(6.0)
+        .hover(p.ui.alpha(0.3))
+        .cursor(Cursor::Pointer)
+        .role("button")
+        .expanded(open)
+        .label(format!("Songs, {count}"))
+        .on_press(move |s: &mut App| s.artist_songs_open = Some(!open))
+        .child(el().w(16.0).center().child(chevron))
+        .child(text("Songs").font(HEADING).color(p.tx))
+        .child(text(format!("{count}")).key("count").font(NUM).color(p.tx3))
 }
 
 fn song_line(s: &App, key: &str, i: usize, list: &[usize], role: Option<Role>, columns: &[Property], p: &Palette) -> El {
     let t = &s.tracks[i];
     let current = s.current == Some(i);
-    let lead: El = if current {
-        icon(if s.playing { &icons::BARS } else { &icons::PAUSE }, 13.0).color(p.blue)
-    } else {
-        icon(&icons::NOTE, 13.0).color(p.ui2)
-    };
+    // The song's album cover, dimmed under the playing icon for the current song.
+    let image = s.album_of(i).and_then(|a| cover_image(s, &s.albums[a]));
+    let mut lead = cover(format!("{key}-cover{i}"), image, Some(COVER_W), 4.0, p);
+    if current {
+        lead = lead.child(
+            el().pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0)).radius(4.0).fill(rune::Color::BLACK.alpha(0.55)).center()
+                .child(icon(if s.playing { &icons::BARS } else { &icons::PAUSE }, 13.0).color(rune::Color::WHITE)),
+        );
+    }
     // A performer's credit says what they played.
     let note = role.filter(|r| *r == Role::Performer).map(|_| {
         let name = s.open_artist().unwrap_or_default();

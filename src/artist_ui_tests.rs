@@ -121,3 +121,31 @@ fn the_now_playing_bar_links_the_playing_songs_artists() {
     assert!(rt.state.playing);
 }
 
+
+#[test]
+fn songs_start_collapsed_under_the_credits_when_the_artist_has_credits() {
+    let mut rt = runtime();
+    // The Alchemist plays on Mercy and produced it: credits first, songs folded.
+    rt.update(|s, tx| s.show_artist("The Alchemist", tx));
+    settle(&mut rt);
+    let y = |rt: &Runtime<App>, key: &str| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).unwrap_or_else(|| panic!("no {key}")).rect[1];
+    assert!(y(&rt, "credits-producer") < y(&rt, "artist-songs"), "credits come before songs");
+    assert!(rt.find("artist-songs-table").is_none(), "songs start collapsed");
+    click(&mut rt, "artist-songs-toggle");
+    assert!(rt.find("artist-songs-table").is_some());
+    click(&mut rt, "artist-songs-toggle");
+    assert!(rt.find("artist-songs-table").is_none());
+    // Silka has no credits, so her songs show open.
+    rt.update(|s, tx| s.show_artist("Silka", tx));
+    settle(&mut rt);
+    assert!(rt.find("artist-songs-table").is_some());
+}
+
+#[test]
+fn artist_song_rows_lead_with_the_album_cover() {
+    let mut rt = runtime();
+    rt.update(|s, tx| s.show_artist("Silka", tx));
+    settle(&mut rt);
+    let calypso = rt.state.tracks.iter().position(|t| t.title == "Calypso Gene").expect("Calypso Gene");
+    assert!(rt.find(&format!("artist-songs-cover{calypso}")).is_some());
+}

@@ -177,7 +177,7 @@ fn track_table(s: &App, a: usize, columns: &[Property], p: &Palette) -> El {
         rows = rows.child(track_line(s, t, i, n, a, columns, p));
     }
     let body = col()
-        .child(table::header("tracks-header", columns, 8.0, p))
+        .child(table::header("tracks-header", "#", columns, 8.0, p))
         .child(el().w_full().h(1.0).fill(p.ui.alpha(0.7)))
         .child(rows);
     table::scrolling("tracks".into(), columns, 8.0, body)

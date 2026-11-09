@@ -65,9 +65,10 @@ pub fn scrolling(key: String, columns: &[Property], px: f32, body: El) -> El {
 }
 
 /// The header row: "#", "Title" and each column's name.
-pub fn header(key: &str, columns: &[Property], px: f32, p: &Palette) -> El {
+/// `lead` heads the lead column: "#" over numbers, "" over covers.
+pub fn header(key: &str, lead: &str, columns: &[Property], px: f32, p: &Palette) -> El {
     let mut r = row().key(key.to_string()).w_full().h(28.0).px(px).gap(GAP).center_y();
-    r = r.child(text("#").font(SMALL).color(p.tx3).w(LEAD_W).align(Align::End));
+    r = r.child(text(lead.to_string()).font(SMALL).color(p.tx3).w(LEAD_W).align(Align::End));
     r = r.child(text("Title").font(SMALL).color(p.tx3).grow(1.0).min_w(TITLE_MIN).shrink());
     for &c in columns {
         let label = sized(text(c.label()).font(SMALL).color(p.tx3).truncate(), c);

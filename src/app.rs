@@ -76,6 +76,9 @@ pub struct App {
     pub page: Page,
     /// The pages Back returns to, newest last; the library when empty.
     pub history: Vec<Page>,
+    /// The artist page's Songs section, when toggled: `None` shows it collapsed if the artist
+    /// has credits (so they come first), else open. Reset on every page change.
+    pub artist_songs_open: Option<bool>,
     /// Album covers for cards and lists; `None` until setup has a waker.
     pub covers: Option<Covers>,
     /// Indices into `tracks` the active view and search show, in play order. In an album view,
@@ -140,6 +143,7 @@ impl App {
             albums: Vec::new(),
             page: Page::Library,
             history: Vec::new(),
+            artist_songs_open: None,
             covers: None,
             filtered: Vec::new(),
             shown_albums: Vec::new(),
@@ -376,6 +380,7 @@ impl App {
         if page == self.page {
             return;
         }
+        self.artist_songs_open = None;
         let left = std::mem::replace(&mut self.page, page);
         if left != Page::Library {
             self.history.push(left);
@@ -385,6 +390,7 @@ impl App {
     /// Back: the page before this one, else the library.
     pub fn go_back(&mut self) {
         self.page = self.history.pop().unwrap_or(Page::Library);
+        self.artist_songs_open = None;
     }
 
     pub fn show_library(&mut self) {
