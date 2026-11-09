@@ -7,10 +7,11 @@ use super::albums::{album_strip, back_label, cover, cover_image, play_button, se
 use super::table;
 use super::*;
 use crate::album::ReleaseType;
-use crate::artist::{ArtistPage, page};
+use crate::artist::{ArtistPage, known, page};
 use crate::credits::Role;
 use crate::library::Track;
 use crate::palette::Palette;
+use crate::relations::Relation;
 
 const PAGE_TITLE: TextStyle = TextStyle::new(28.0, 700.0);
 const SONG_ROW_H: f32 = 40.0;
@@ -18,7 +19,7 @@ const SONG_ROW_H: f32 = 40.0;
 const COVER_W: f32 = table::LEAD_W;
 
 pub(super) fn artist_page(s: &App, name: &str, p: &Palette) -> El {
-    let info = page(name, &s.tracks, &s.albums);
+    let info = page(name, &s.tracks, &s.albums, &s.relations);
     let back = row()
         .key("back")
         .h(28.0)
@@ -41,7 +42,7 @@ pub(super) fn artist_page(s: &App, name: &str, p: &Palette) -> El {
     col().key("artist-page").w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: false }).child(body.children(sections(s, &info, p)))
 }
 
-/// Their albums, the songs they appear on, their credits, then their songs.
+/// Their albums, the songs they appear on, their credits, their songs, then related artists.
 pub(super) fn sections(s: &App, info: &ArtistPage, p: &Palette) -> Vec<El> {
     let mut out = Vec::new();
     let pills: Vec<(usize, Vec<table::Pill>)> = info.album_credits.iter().map(|(a, roles)| (*a, album_pills(s.albums[*a].tracks.len(), roles, p))).collect();
@@ -68,6 +69,9 @@ pub(super) fn sections(s: &App, info: &ArtistPage, p: &Palette) -> Vec<El> {
             section = section.child(song_table(s, "artist-songs", untagged(&info.songs), &[], &info.songs, p));
         }
         out.push(section);
+    }
+    if !info.related.is_empty() {
+        out.push(related(s, info, p));
     }
     out
 }
@@ -119,11 +123,14 @@ pub(super) fn head(s: &App, info: &ArtistPage, linked: bool, p: &Palette) -> El 
         .child(text("Artist").font(SMALL).color(p.tx3))
         .child(name)
         .child(text(counts.join("  •  ")).key("artist-counts").font(BODY).color(p.tx3));
+    if info.names.len() > 1 {
+        details = details.child(text(format!("Also credited as {}", info.names[1..].join(", "))).key("artist-aka").font(BODY).color(p.tx3).wrap());
+    }
     let mut buttons = row().gap(8.0);
     if !info.play_list(&s.albums).is_empty() {
         let who = info.name.clone();
         buttons = buttons.child(play_button("artist-play", "Play", p).on_press_tx(move |s: &mut App, tx| {
-            let list = page(&who, &s.tracks, &s.albums).play_list(&s.albums);
+            let list = page(&who, &s.tracks, &s.albums, &s.relations).play_list(&s.albums);
             if let Some(&first) = list.first() {
                 s.play_list(list, first, tx);
             }
@@ -132,7 +139,7 @@ pub(super) fn head(s: &App, info: &ArtistPage, linked: bool, p: &Palette) -> El 
     if !info.discography(&s.albums).is_empty() {
         let who = info.name.clone();
         buttons = buttons.child(secondary_button("artist-discography", &icons::PLAY, "Play Discography", p).on_press_tx(move |s: &mut App, tx| {
-            let list = page(&who, &s.tracks, &s.albums).discography(&s.albums);
+            let list = page(&who, &s.tracks, &s.albums, &s.relations).discography(&s.albums);
             if let Some(&first) = list.first() {
                 s.play_list(list, first, tx);
             }
@@ -146,6 +153,35 @@ pub(super) fn head(s: &App, info: &ArtistPage, linked: bool, p: &Palette) -> El 
     row().gap(28.0).center_y().child(art).child(details)
 }
 
+
+/// The artists linked to this one, a row of names per relation; names in the library open
+/// their pages.
+fn related(s: &App, info: &ArtistPage, p: &Palette) -> El {
+    let mut section = col().key("artist-related").w_full().gap(10.0).child(text("Related").font(HEADING).color(p.tx));
+    for relation in Relation::ALL {
+        let names: Vec<&String> = info.related.iter().filter(|(r, _)| *r == relation).map(|(_, n)| n).collect();
+        if names.is_empty() {
+            continue;
+        }
+        let list = names.into_iter().fold(row().gap(8.0).wrap(), |list, name| list.child(artist_pill(name, known(name, &s.tracks), p)));
+        section = section.child(col().gap(6.0).child(text(relation.title()).font(SMALL).color(p.tx3)).child(list));
+    }
+    section
+}
+
+/// An artist's name as a pill, keyed `artist-pill-{name}`, opening their page when `linked`.
+pub(super) fn artist_pill(name: &str, linked: bool, p: &Palette) -> El {
+    let pill = row().key(format!("artist-pill-{name}")).h(30.0).px(12.0).radius(15.0).center_y().fill(p.ui.alpha(0.5)).label(name.to_string());
+    if !linked {
+        return pill.child(text(name.to_string()).font(TITLE).color(p.tx3));
+    }
+    let who = name.to_string();
+    pill.hover(p.ui.alpha(0.8))
+        .cursor(Cursor::Pointer)
+        .role("link")
+        .on_press_tx(move |s: &mut App, tx| s.show_artist(&who, tx))
+        .child(text(name.to_string()).font(TITLE).color(p.tx))
+}
 
 /// An outlined button beside Play.
 fn link_button(key: &'static str, label: &'static str, p: &Palette) -> El {
@@ -184,7 +220,7 @@ fn credits(s: &App, info: &ArtistPage, p: &Palette) -> El {
         .credits
         .iter()
         .map(|(i, roles)| {
-            let pills = used.iter().map(|r| roles.contains(r).then(|| role_pill(&s.tracks[*i], *r, &info.name, p))).collect();
+            let pills = used.iter().map(|r| roles.contains(r).then(|| role_pill(&s.tracks[*i], *r, &info.names, p))).collect();
             (*i, pills)
         })
         .collect();
@@ -208,10 +244,10 @@ fn album_pills(songs: usize, roles: &[(Role, usize)], p: &Palette) -> Vec<table:
         .collect()
 }
 
-/// `artist`'s `role` on a song: "Producer"; a performer's says what they played:
+/// The `role` on a song of the artist with these `names`: "Producer"; a performer's says what they played:
 /// "Performer · vocals".
-fn role_pill(t: &Track, role: Role, artist: &str, p: &Palette) -> table::Pill {
-    let played: Vec<&str> = t.credits.iter().filter(|c| c.role == role && c.name.eq_ignore_ascii_case(artist)).filter_map(|c| c.detail.as_deref()).collect();
+fn role_pill(t: &Track, role: Role, names: &[String], p: &Palette) -> table::Pill {
+    let played: Vec<&str> = t.credits.iter().filter(|c| c.role == role && names.iter().any(|n| c.name.eq_ignore_ascii_case(n))).filter_map(|c| c.detail.as_deref()).collect();
     let label = if played.is_empty() { role.label().to_string() } else { format!("{} · {}", role.label(), played.join(", ")) };
     let (fill, color) = p.role(role);
     table::Pill { label, fill, color }

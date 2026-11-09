@@ -82,6 +82,24 @@ Every artist name is a link: in song rows, titles ("Calypso Gene (feat. Silka & 
 - **Files without those tags:** the artist text is split at `feat.`/`ft.`/`featuring`. Main artists split at `&`, `,`, `x`, `and` only when every piece is a name the library already knows, so "Simon & Garfunkel" stays whole.
 - **Credits:** composer, lyricist, writer, producer, arranger, conductor, performer (with instrument), engineer, mixer, remixer and DJ mixer tags. Album pages list them.
 
+### Related artists
+
+Artist relations live under `artists` in `prefs.json`, edited by hand for now (the app reads them at launch):
+
+```json
+"artists": {
+  "merges": [["Earl Sweatshirt", "Thebe Kgositsile"]],
+  "links": [
+    { "from": "MF DOOM", "kind": "alias", "to": "Viktor Vaughn" },
+    { "from": "Thom Yorke", "kind": "member_of", "to": "Radiohead" }
+  ]
+}
+```
+
+- **Merges:** names of one artist. Any of them opens one page gathering everything each is credited with. It's named after the most prominent name (album artist outweighs artist, then featured, then other credits), with "Also credited as" listing the rest. Merges only affect artist pages, not views, filters or grouping.
+- **Links:** artists that keep their own pages. Each page lists the other under **Related**: `alias` shows as "Also releases as" on both, and `member_of` as "Member of" on the person's page and "Members" on the band's. Names the library doesn't have show but don't open a page.
+- Names match ignoring case. If the `artists` entry can't be read (a typo in a key or kind), the app says so and ignores it.
+
 ## Keys
 
 | Key | Action |
@@ -105,7 +123,7 @@ cargo test                                                   # unit + headless U
 RUNE_MUSIC_DIR=~/Music cargo test --release real_library -- --ignored --nocapture
 RUNE_MUSIC_FILE=song.flac cargo test --release real_output -- --ignored   # plays muted
 RUNE_MUSIC_DIR=~/Music cargo test --release real_library_groups -- --ignored --nocapture
-cargo run -- --snap out.png --scene playing --theme light    # scenes: library playing search error grouped filter views sort albums album-list album artist
+cargo run -- --snap out.png --scene playing --theme light    # scenes: library playing search error grouped filter views sort albums album-list album artist related
 ```
 
 Headless runs (`--snap`, `--script`, `--tree`) never open the audio device and keep views in memory.

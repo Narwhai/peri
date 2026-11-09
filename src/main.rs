@@ -16,6 +16,7 @@ mod label;
 mod library;
 mod palette;
 mod queue;
+mod relations;
 mod search;
 mod view;
 
@@ -202,6 +203,20 @@ fn scene_artist(s: &mut App) {
     s.page = app::Page::Artist("The Alchemist".into());
 }
 
+/// The Alchemist merged with another name, linked to a band and an alias.
+fn scene_related(s: &mut App) {
+    scene_artist(s);
+    s.relations = relations::Relations {
+        merges: vec![vec!["The Alchemist".into(), "Alan Maman".into()]],
+        links: vec![
+            relations::Link { from: "The Alchemist".into(), kind: relations::LinkKind::MemberOf, to: "Step Brothers".into() },
+            relations::Link { from: "Armand Hammer".into(), kind: relations::LinkKind::Alias, to: "the alchemist".into() },
+        ],
+    };
+    let i = s.tracks.iter().position(|t| t.title == "Calypso Gene").expect("demo has Calypso Gene");
+    s.tracks[i].credits.push(credits::Credit::parse(credits::Role::Composer, "Alan Maman"));
+}
+
 /// An artist credited on songs in several roles: their pills line up by role.
 fn scene_credits(s: &mut App) {
     use credits::{Credit, Role};
@@ -289,6 +304,7 @@ fn main() {
             ("album", scene_album_page),
             ("artist", scene_artist),
             ("credits", scene_credits),
+            ("related", scene_related),
             ("label", scene_label),
             ("settings", scene_settings),
         ],

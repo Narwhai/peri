@@ -1,15 +1,22 @@
 //! What an artist page lists: the artist's own albums, the songs they appear on, their songs
 //! (as main or featured artist), and the songs that credit them (composer, producer…).
-//! Names match ignoring case.
+//! Names match ignoring case, and an artist merged with other names (see
+//! [`crate::relations`]) gathers what each of them is credited with.
 
 use crate::album::Album;
 use crate::credits::Role;
 use crate::library::Track;
+use crate::relations::{Relation, Relations};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ArtistPage {
-    /// The name as the library spells it most often.
+    /// Of their names, the one the library credits most prominently, spelled as it does
+    /// most often.
     pub name: String,
+    /// Every name merged into this page, `name` first; just `name` when there's no merge.
+    pub names: Vec<String>,
+    /// Artists linked to them, in the order the links list them.
+    pub related: Vec<(Relation, String)>,
     /// Albums whose album artists include them, newest first.
     pub albums: Vec<usize>,
     /// Their songs on other artists' albums, in library order.
@@ -55,19 +62,20 @@ impl ArtistPage {
     }
 }
 
-fn has(names: &[String], name: &str) -> bool {
-    names.iter().any(|n| n.eq_ignore_ascii_case(name))
+fn has(names: &[String], of: &[String]) -> bool {
+    names.iter().any(|n| of.iter().any(|o| n.eq_ignore_ascii_case(o)))
 }
 
-/// Gathers everything the library holds by or crediting `name`.
-pub fn page(name: &str, tracks: &[Track], albums: &[Album]) -> ArtistPage {
-    let name = name.trim();
-    let songs: Vec<usize> = (0..tracks.len()).filter(|&i| has(&tracks[i].artists, name)).collect();
-    let featured_on = songs.iter().copied().filter(|&i| has(&tracks[i].featured, name)).collect();
-    let mut own: Vec<usize> = (0..albums.len()).filter(|&a| has(&albums[a].album_artists, name)).collect();
+/// Gathers everything the library holds by or crediting `name`, or any name merged with it.
+pub fn page(name: &str, tracks: &[Track], albums: &[Album], relations: &Relations) -> ArtistPage {
+    let merged = relations.merged(name);
+    let of = merged.as_slice();
+    let songs: Vec<usize> = (0..tracks.len()).filter(|&i| has(&tracks[i].artists, of)).collect();
+    let featured_on = songs.iter().copied().filter(|&i| has(&tracks[i].featured, of)).collect();
+    let mut own: Vec<usize> = (0..albums.len()).filter(|&a| has(&albums[a].album_artists, of)).collect();
     let appears_on = songs.iter().copied().filter(|i| !own.iter().any(|&a| albums[a].tracks.contains(i))).collect();
     own.sort_by_key(|&a| std::cmp::Reverse(albums[a].year));
-    let roles = |i: usize| Role::ALL.into_iter().filter(|&role| has(&tracks[i].credited(role), name)).collect::<Vec<Role>>();
+    let roles = |i: usize| Role::ALL.into_iter().filter(|&role| has(&tracks[i].credited(role), of)).collect::<Vec<Role>>();
     let on_own = |i: usize| own.iter().any(|&a| albums[a].tracks.contains(&i));
     let credits = (0..tracks.len()).filter(|&i| !on_own(i)).map(|i| (i, roles(i))).filter(|(_, roles)| !roles.is_empty()).collect();
     let album_credits = own
@@ -79,20 +87,55 @@ pub fn page(name: &str, tracks: &[Track], albums: &[Album]) -> ArtistPage {
         })
         .filter(|(_, counts)| !counts.is_empty())
         .collect();
-    ArtistPage { name: spelling(name, tracks), albums: own, appears_on, songs, featured_on, credits, album_credits }
+    let names = spellings(of, tracks);
+    let related = relations.related(of);
+    ArtistPage { name: names[0].clone(), names, related, albums: own, appears_on, songs, featured_on, credits, album_credits }
 }
 
-/// The library's most common spelling of `name` (ignoring case), else `name`.
-fn spelling(name: &str, tracks: &[Track]) -> String {
+/// Whether any song names `name` as an artist, album artist or credit, ignoring case.
+pub fn known(name: &str, tracks: &[Track]) -> bool {
+    let name = name.trim();
+    tracks.iter().any(|t| t.artists.iter().chain(&t.album_artists).chain(t.credits.iter().map(|c| &c.name)).any(|n| n.eq_ignore_ascii_case(name)))
+}
+
+/// How much one mention of a name counts towards it leading the page: album artist, then
+/// artist, featured artist, and any other credit.
+const ALBUM_ARTIST: usize = 4;
+const MAIN_ARTIST: usize = 3;
+const FEATURED: usize = 2;
+const CREDIT: usize = 1;
+
+/// `names` as the library spells each most often (as given when it doesn't), the one with the
+/// most prominent credits first, ties going to the earlier name.
+fn spellings(names: &[String], tracks: &[Track]) -> Vec<String> {
+    // Per spelling, its weight; spellings of one name (ignoring case) add up per name.
     let mut counts: Vec<(&str, usize)> = Vec::new();
-    let all = tracks.iter().flat_map(|t| t.artists.iter().chain(&t.album_artists).map(String::as_str).chain(t.credits.iter().map(|c| c.name.as_str())));
-    for n in all.filter(|n| n.eq_ignore_ascii_case(name)) {
-        match counts.iter_mut().find(|(s, _)| *s == n) {
-            Some((_, c)) => *c += 1,
-            None => counts.push((n, 1)),
+    for t in tracks {
+        let mentions = t
+            .album_artists
+            .iter()
+            .map(|n| (n, ALBUM_ARTIST))
+            .chain(t.artists.iter().map(|n| (n, if t.featured.contains(n) { FEATURED } else { MAIN_ARTIST })))
+            .chain(t.credits.iter().map(|c| (&c.name, CREDIT)));
+        for (n, weight) in mentions.filter(|(n, _)| names.iter().any(|m| n.eq_ignore_ascii_case(m))) {
+            match counts.iter_mut().find(|(s, _)| *s == n.as_str()) {
+                Some((_, c)) => *c += weight,
+                None => counts.push((n.as_str(), weight)),
+            }
         }
     }
-    counts.into_iter().max_by_key(|&(_, c)| c).map_or_else(|| name.to_string(), |(s, _)| s.to_string())
+    let mut out: Vec<(String, usize)> = names
+        .iter()
+        .map(|name| {
+            let of_name = counts.iter().filter(|(s, _)| s.eq_ignore_ascii_case(name));
+            let total = of_name.clone().map(|&(_, c)| c).sum();
+            let spelling = of_name.max_by_key(|&&(_, c)| c).map_or_else(|| name.clone(), |&(s, _)| s.to_string());
+            (spelling, total)
+        })
+        .collect();
+    // Stable, so ties keep the merge's order.
+    out.sort_by_key(|&(_, total)| std::cmp::Reverse(total));
+    out.into_iter().map(|(s, _)| s).collect()
 }
 
 #[cfg(test)]
@@ -138,17 +181,17 @@ mod tests {
     #[test]
     fn a_collaborative_album_belongs_to_each_of_its_artists() {
         let (tracks, albums) = library();
-        let p = page("armand hammer", &tracks, &albums);
+        let p = page("armand hammer", &tracks, &albums, &Relations::default());
         assert_eq!(p.name, "Armand Hammer");
         assert_eq!(titles(&albums, &p.albums), ["Mercy", "Haram"], "own albums, newest first");
         assert!(p.appears_on.is_empty());
-        assert_eq!(titles(&albums, &page("The Alchemist", &tracks, &albums).albums), ["Mercy"]);
+        assert_eq!(titles(&albums, &page("The Alchemist", &tracks, &albums, &Relations::default()).albums), ["Mercy"]);
     }
 
     #[test]
     fn a_featured_artist_appears_on_the_album_and_has_their_credits() {
         let (tracks, albums) = library();
-        let p = page("Cleo Reed", &tracks, &albums);
+        let p = page("Cleo Reed", &tracks, &albums, &Relations::default());
         assert!(p.albums.is_empty());
         let song_titles = |list: &[usize]| list.iter().map(|&i| tracks[i].title.clone()).collect::<Vec<String>>();
         assert_eq!(song_titles(&p.appears_on), ["Calypso Gene"], "the song they're on, not all of Mercy");
@@ -162,13 +205,13 @@ mod tests {
     fn play_takes_own_releases_newest_first_then_appearances_and_discography_oldest_first() {
         let (tracks, albums) = library();
         let names = |list: Vec<usize>| list.into_iter().map(|i| tracks[i].title.clone()).collect::<Vec<String>>();
-        let p = page("Armand Hammer", &tracks, &albums);
+        let p = page("Armand Hammer", &tracks, &albums, &Relations::default());
         assert_eq!(names(p.play_list(&albums)), ["Calypso Gene", "Laraaji", "Solo"], "Mercy (2025) in album order, then Haram (2021)");
         assert_eq!(names(p.discography(&albums)), ["Solo", "Calypso Gene", "Laraaji"], "Haram (2021), then Mercy (2025)");
-        let guest = page("Cleo Reed", &tracks, &albums);
+        let guest = page("Cleo Reed", &tracks, &albums, &Relations::default());
         assert_eq!(names(guest.play_list(&albums)), ["Calypso Gene"], "with no releases of their own, their appearances");
         assert!(guest.discography(&albums).is_empty());
-        let writer = page("Somebody", &tracks, &albums);
+        let writer = page("Somebody", &tracks, &albums, &Relations::default());
         assert_eq!(names(writer.play_list(&albums)), ["Wrote It"]);
     }
 
@@ -178,11 +221,11 @@ mod tests {
         // He also produced Somebody's "Wrote It".
         tracks[3].credits.push(Credit::parse(Role::Producer, "The Alchemist"));
         let albums = crate::album::build(&tracks);
-        let p = page("The Alchemist", &tracks, &albums);
+        let p = page("The Alchemist", &tracks, &albums, &Relations::default());
         assert_eq!(p.credits.iter().map(|(i, r)| (tracks[*i].title.as_str(), r.as_slice())).collect::<Vec<_>>(), [("Wrote It", [Role::Producer].as_slice())]);
         let mercy = albums.iter().position(|a| a.title == "Mercy").expect("Mercy");
         assert_eq!(p.album_credits, [(mercy, vec![(Role::Producer, 2)])], "both Mercy songs");
-        assert!(page("Nobody", &tracks, &albums).is_empty());
+        assert!(page("Nobody", &tracks, &albums, &Relations::default()).is_empty());
     }
 
     #[test]
@@ -192,7 +235,7 @@ mod tests {
         tracks[1].credits.push(Credit::parse(Role::Mixer, "Armand Hammer"));
         tracks[1].credits.push(Credit::parse(Role::Composer, "Armand Hammer"));
         let albums = crate::album::build(&tracks);
-        let p = page("Armand Hammer", &tracks, &albums);
+        let p = page("Armand Hammer", &tracks, &albums, &Relations::default());
         let at = |t: &str| albums.iter().position(|a| a.title == t).expect("album");
         let mut got = p.album_credits.clone();
         got.sort_by_key(|(a, _)| *a);
@@ -207,9 +250,39 @@ mod tests {
         let (mut tracks, _) = library();
         tracks[3].credits.extend([Credit::parse(Role::Producer, "Cleo Reed"), Credit::parse(Role::Composer, "Cleo Reed")]);
         let albums = crate::album::build(&tracks);
-        let p = page("Cleo Reed", &tracks, &albums);
+        let p = page("Cleo Reed", &tracks, &albums, &Relations::default());
         assert_eq!(p.credits.len(), 1, "one entry per song");
         assert_eq!(p.credits[0].1, [Role::Composer, Role::Lyricist, Role::Producer], "roles in credit order");
         assert_eq!(p.credited(), [3]);
+    }
+
+    #[test]
+    fn merged_names_share_one_page_led_by_the_most_prominent_name() {
+        let (mut tracks, _) = library();
+        // Under his legal name he produced and wrote Somebody's song; as Armand Hammer he's
+        // the album artist of two albums.
+        tracks[3].credits.extend([Credit::parse(Role::Producer, "Billy Woods"), Credit::parse(Role::Lyricist, "Billy Woods")]);
+        let albums = crate::album::build(&tracks);
+        let relations = Relations { merges: vec![strings(&["billy woods", "Armand Hammer"])], links: Vec::new() };
+        let p = page("billy woods", &tracks, &albums, &relations);
+        assert_eq!(p.name, "Armand Hammer", "album artist outweighs producer, whichever name opened the page");
+        assert_eq!(p.names, ["Armand Hammer", "Billy Woods"], "each spelled as the library does");
+        assert_eq!(titles(&albums, &p.albums), ["Mercy", "Haram"]);
+        assert_eq!(p.credits.iter().map(|(i, r)| (tracks[*i].title.as_str(), r.as_slice())).collect::<Vec<_>>(), [("Wrote It", [Role::Lyricist, Role::Producer].as_slice())]);
+        assert_eq!(page("Armand Hammer", &tracks, &albums, &relations), p, "either name opens the same page");
+    }
+
+    #[test]
+    fn a_page_lists_the_artists_linked_to_any_of_its_names() {
+        use crate::relations::{Link, LinkKind};
+        let (tracks, albums) = library();
+        let relations = Relations {
+            merges: vec![strings(&["Armand Hammer", "AH"])],
+            links: vec![Link { from: "ah".into(), kind: LinkKind::Alias, to: "Somebody".into() }, Link { from: "Cleo Reed".into(), kind: LinkKind::MemberOf, to: "Armand Hammer".into() }],
+        };
+        let p = page("Armand Hammer", &tracks, &albums, &relations);
+        assert_eq!(p.related, [(Relation::Alias, "Somebody".to_string()), (Relation::Member, "Cleo Reed".to_string())]);
+        assert_eq!(page("Cleo Reed", &tracks, &albums, &relations).related, [(Relation::MemberOf, "Armand Hammer".to_string())]);
+        assert!(page("Cleo Reed", &tracks, &albums, &relations).albums.is_empty(), "a link doesn't merge pages");
     }
 }

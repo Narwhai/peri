@@ -292,3 +292,65 @@ fn credits_on_their_own_album_show_on_its_card() {
     assert!(rt.find(&format!("credits-t{dry}")).is_none(), "own-album songs stay out of Credits");
     assert_eq!(text_of(&rt, "artist-counts"), "1 album  •  3 songs  •  credited on 2 songs");
 }
+
+/// A prefs file under the temp folder with these `artists` relations, removed on drop.
+struct Prefs(std::path::PathBuf);
+
+impl Prefs {
+    fn new(name: &str, json: &str) -> Prefs {
+        let dir = std::env::temp_dir().join(format!("rune-music-relations-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("prefs.json"), format!(r#"{{ "artists": {json} }}"#)).unwrap();
+        Prefs(dir)
+    }
+
+    fn runtime(&self) -> Runtime<App> {
+        let mut app = App::new(Output::Silent, Store::at(self.0.join("prefs.json")));
+        let mut tracks = mercy();
+        tracks.extend(elsewhere());
+        app.set_library(tracks, false);
+        let mut rt = Runtime::new(app, view, (1500.0, 1100.0), Env::new(true, 1.0));
+        rt.on_key = Some(crate::app::on_key);
+        rt.frame(0.0);
+        settle(&mut rt);
+        rt
+    }
+}
+
+impl Drop for Prefs {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+#[test]
+fn merged_names_open_one_page_and_links_lead_to_related_artists() {
+    let prefs = Prefs::new(
+        "merge",
+        r#"{ "merges": [["Somebody", "The Alchemist"]], "links": [{ "from": "Cleo Reed", "kind": "member_of", "to": "the alchemist" }, { "from": "Somebody", "kind": "alias", "to": "Nobody Known" }] }"#,
+    );
+    let mut rt = prefs.runtime();
+    assert!(rt.state.error.is_none());
+    rt.update(|s, tx| s.show_artist("Somebody", tx));
+    settle(&mut rt);
+    assert_eq!(text_of(&rt, "artist-name"), "The Alchemist", "the album artist of Mercy outweighs Somebody's one album");
+    assert_eq!(text_of(&rt, "artist-aka"), "Also credited as Somebody");
+    assert!(rt.find("artist-albums").is_some());
+    assert!(rt.find("credits").is_none(), "Elsewhere's producer credit is on one of the merged artist's own albums now");
+    assert!(rt.find("artist-related").is_some());
+    click(&mut rt, "artist-pill-Nobody Known");
+    assert_eq!(text_of(&rt, "artist-name"), "The Alchemist", "a name the library lacks doesn't open a page");
+    click(&mut rt, "artist-pill-Cleo Reed");
+    assert_eq!(rt.state.page, Page::Artist("Cleo Reed".into()));
+    assert!(rt.find("artist-pill-the alchemist").is_some(), "Cleo Reed's page lists the band she's a member of");
+    assert!(rt.find("artist-aka").is_none());
+}
+
+#[test]
+fn unreadable_relations_say_so_instead_of_vanishing() {
+    let prefs = Prefs::new("typo", r#"{ "merges": [["A", "B"]], "linkz": [] }"#);
+    let rt = prefs.runtime();
+    assert!(rt.state.error.as_deref().is_some_and(|e| e.contains("\"artists\"")), "{:?}", rt.state.error);
+    assert!(rt.state.relations.merges.is_empty());
+}

@@ -110,6 +110,8 @@ pub struct App {
     pub base: Base,
     /// The folders and files the library is made of, saved and scanned at launch.
     pub library: Vec<PathBuf>,
+    /// Merges and links between artists, from the preferences file (edited by hand for now).
+    pub relations: crate::relations::Relations,
     store: Store,
     /// Collapsed group titles in the active view (this run only).
     pub collapsed: std::collections::HashSet<String>,
@@ -154,6 +156,10 @@ pub struct App {
 
 impl App {
     pub fn new(output: Output, store: Store) -> App {
+        let (relations, relations_error) = match store.load_relations() {
+            Ok(r) => (r, None),
+            Err(e) => (Default::default(), Some(e)),
+        };
         App {
             tracks: Vec::new(),
             albums: Vec::new(),
@@ -172,6 +178,7 @@ impl App {
             list_version: 0,
             base: store.load(),
             library: store.load_library(),
+            relations,
             store,
             collapsed: Default::default(),
             panel: None,
@@ -192,7 +199,7 @@ impl App {
             shuffle: false,
             repeat: Repeat::Off,
             cover: None,
-            error: None,
+            error: relations_error,
             scan: None,
             drop_hover: false,
             details: None,

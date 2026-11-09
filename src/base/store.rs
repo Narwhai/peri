@@ -11,6 +11,7 @@ use super::view::View;
 const APP_ID: &str = "rune-music";
 const KEY: &str = "base";
 const LIBRARY_KEY: &str = "library";
+const ARTISTS_KEY: &str = "artists";
 /// Bumped when the saved shape changes incompatibly.
 const VERSION: u32 = 1;
 
@@ -95,5 +96,14 @@ impl Store {
 
     pub fn save_library(&mut self, roots: &[std::path::PathBuf]) -> Result<(), String> {
         self.prefs.set(LIBRARY_KEY, roots).map_err(|e| format!("Couldn't save the library folders: {e}"))
+    }
+
+    /// The merges and links between artists, hand-edited under `artists`; none when unset,
+    /// an error when set but unreadable, so a typo isn't silently dropped.
+    pub fn load_relations(&self) -> Result<crate::relations::Relations, String> {
+        if !self.prefs.contains(ARTISTS_KEY) {
+            return Ok(Default::default());
+        }
+        self.prefs.get(ARTISTS_KEY).ok_or_else(|| format!("Couldn't read \"{ARTISTS_KEY}\" in the preferences: check its merges and links"))
     }
 }

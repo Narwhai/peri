@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use crate::album::Album;
 use crate::artist::{self, ArtistPage};
 use crate::library::Track;
+use crate::relations::Relations;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SearchResults {
@@ -34,7 +35,7 @@ fn has_words(haystack: &str, query: &str) -> bool {
 }
 
 /// Searches the library for `query` (any case); empty when the query is blank.
-pub fn search(query: &str, tracks: &[Track], albums: &[Album]) -> SearchResults {
+pub fn search(query: &str, tracks: &[Track], albums: &[Album], relations: &Relations) -> SearchResults {
     let query = query.trim().to_lowercase();
     if query.is_empty() {
         return SearchResults::default();
@@ -56,8 +57,9 @@ pub fn search(query: &str, tracks: &[Track], albums: &[Album]) -> SearchResults 
     let mut ranked: Vec<(String, (String, usize))> = names.into_iter().collect();
     ranked.sort_by(|(ka, (_, ca)), (kb, (_, cb))| (*kb == query).cmp(&(*ka == query)).then(cb.cmp(ca)).then(ka.cmp(kb)));
     let mut ranked = ranked.into_iter().map(|(_, (name, _))| name);
-    let artist = ranked.next().map(|name| artist::page(&name, tracks, albums));
-    let artists: Vec<String> = ranked.collect();
+    let artist = ranked.next().map(|name| artist::page(&name, tracks, albums, relations));
+    // A name merged into the top artist's page is already shown.
+    let artists: Vec<String> = ranked.filter(|n| !artist.as_ref().is_some_and(|a| a.names.iter().any(|m| m.eq_ignore_ascii_case(n)))).collect();
 
     let empty = ArtistPage::default();
     let top = artist.as_ref().unwrap_or(&empty);
@@ -113,7 +115,7 @@ mod tests {
     #[test]
     fn the_matching_artist_leads_with_their_albums_songs_appearances_and_credits() {
         let (tracks, albums) = library();
-        let r = search("erika de casier", &tracks, &albums);
+        let r = search("erika de casier", &tracks, &albums, &Relations::default());
         let top = r.artist.expect("an artist matches");
         assert_eq!(top.name, "Erika de Casier");
         let mut own: Vec<&str> = top.albums.iter().map(|&a| albums[a].title.as_str()).collect();
@@ -129,7 +131,7 @@ mod tests {
     #[test]
     fn other_matching_artists_albums_and_songs_follow() {
         let (tracks, albums) = library();
-        let r = search("Erika", &tracks, &albums);
+        let r = search("Erika", &tracks, &albums, &Relations::default());
         assert_eq!(r.artist.map(|a| a.name), Some("Erika de Casier".to_string()), "the artist with the most songs leads");
         assert_eq!(r.artists, ["Erika Two"]);
         assert_eq!(r.albums.iter().map(|&a| albums[a].title.as_str()).collect::<Vec<_>>(), ["Hello"]);
@@ -147,23 +149,23 @@ mod tests {
         tracks[2].year = Some(2024);
         resolve(&mut tracks);
         let albums = crate::album::build(&tracks);
-        let r = search("sessions", &tracks, &albums);
+        let r = search("sessions", &tracks, &albums, &Relations::default());
         assert_eq!(r.albums.iter().map(|&a| albums[a].title.as_str()).collect::<Vec<_>>(), ["New Sessions", "Old Sessions", "Undated Sessions"]);
     }
 
     #[test]
     fn an_exact_name_beats_a_busier_artist() {
         let (tracks, albums) = library();
-        assert_eq!(search("erika two", &tracks, &albums).artist.map(|a| a.name), Some("Erika Two".to_string()));
+        assert_eq!(search("erika two", &tracks, &albums, &Relations::default()).artist.map(|a| a.name), Some("Erika Two".to_string()));
     }
 
     #[test]
     fn titles_match_without_an_artist() {
         let (tracks, albums) = library();
-        let r = search("daggers", &tracks, &albums);
+        let r = search("daggers", &tracks, &albums, &Relations::default());
         assert!(r.artist.is_none());
         assert_eq!(r.albums.iter().map(|&a| albums[a].title.as_str()).collect::<Vec<_>>(), ["Speak Daggers"]);
         assert!(r.songs.is_empty(), "its songs are on the album found");
-        assert!(search("  ", &tracks, &albums).is_empty());
+        assert!(search("  ", &tracks, &albums, &Relations::default()).is_empty());
     }
 }
