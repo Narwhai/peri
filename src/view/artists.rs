@@ -1,11 +1,13 @@
 //! The artist page: their albums, the albums they appear on, their songs, and the songs
 //! that credit them.
 
-use rune::{Align, Cursor, El, ScrollSpec, col, el, icon, row, text};
+use rune::{Cursor, El, ScrollSpec, col, el, icon, row, text};
 
 use super::albums::{album_strip, back_label, cover, cover_image, play_button};
+use super::table;
 use super::*;
 use crate::artist::{ArtistPage, page};
+use crate::base::property::Property;
 use crate::credits::Role;
 use crate::palette::Palette;
 
@@ -96,17 +98,22 @@ fn play_list(info: &ArtistPage) -> Vec<usize> {
     all
 }
 
-/// A titled table of songs: title (with "feat." names), artist and album, length.
-/// Double-click plays the table from that song.
+/// A titled song table with the page columns. Double-click plays the table from that song.
 fn songs(s: &App, key: &str, title: &str, list: &[usize], role: Option<Role>, p: &Palette) -> El {
-    let mut table = col().key(key.to_string()).w_full().child(text(title.to_string()).font(HEADING).color(p.tx)).child(el().h(8.0));
+    let columns = &s.base.page_columns;
+    let mut rows = col().child(table::header(&format!("{key}-header"), columns, 8.0, p));
     for &i in list {
-        table = table.child(song_line(s, key, i, list, role, p));
+        rows = rows.child(song_line(s, key, i, list, role, columns, p));
     }
-    table
+    col()
+        .key(key.to_string())
+        .w_full()
+        .gap(8.0)
+        .child(text(title.to_string()).font(HEADING).color(p.tx))
+        .child(table::scrolling(format!("{key}-table"), columns, 8.0, rows))
 }
 
-fn song_line(s: &App, key: &str, i: usize, list: &[usize], role: Option<Role>, p: &Palette) -> El {
+fn song_line(s: &App, key: &str, i: usize, list: &[usize], role: Option<Role>, columns: &[Property], p: &Palette) -> El {
     let t = &s.tracks[i];
     let current = s.current == Some(i);
     let lead: El = if current {
@@ -114,32 +121,16 @@ fn song_line(s: &App, key: &str, i: usize, list: &[usize], role: Option<Role>, p
     } else {
         icon(&icons::NOTE, 13.0).color(p.ui2)
     };
-    let artist = song_artist(t, p.tx2).unwrap_or_else(|| text("Unknown artist").color(p.tx2));
-    let album = t.album.clone().unwrap_or_default();
     // A performer's credit says what they played.
-    let detail = role.filter(|r| *r == Role::Performer).map(|_| {
+    let note = role.filter(|r| *r == Role::Performer).map(|_| {
         let name = s.open_artist().unwrap_or_default();
         t.credits.iter().filter(|c| c.role == Role::Performer && c.name.eq_ignore_ascii_case(name)).filter_map(|c| c.detail.clone()).collect::<Vec<_>>().join(", ")
     });
     let list = list.to_vec();
-    let mut middle = col().grow(1.0).shrink().gap(2.0).child(song_title(t, if current { p.blue } else { p.tx }).key("title").font(BODY).truncate());
-    middle = middle.child(row().gap(6.0).child(artist.key("artist").font(SMALL).truncate().shrink()).child(text(if album.is_empty() { String::new() } else { format!("· {album}") }).font(SMALL).color(p.tx3).truncate().shrink()));
-    row()
+    let look = table::RowLook { lead, selected: s.selected == Some(i), current, height: SONG_ROW_H, px: 8.0, note };
+    table::song_row(t, i, columns, look, p)
         .key(format!("{key}-t{i}"))
-        .w_full()
-        .h(SONG_ROW_H)
-        .px(8.0)
-        .gap(12.0)
-        .center_y()
-        .radius(6.0)
-        .fill(if s.selected == Some(i) { p.ui.alpha(0.55) } else { p.bg.alpha(0.0) })
-        .hover(p.ui.alpha(0.3))
-        .role("row")
         .label(format!("{} by {}", t.title, t.artist().unwrap_or_else(|| "unknown artist".into())))
         .on_press(move |s: &mut App| s.selected = Some(i))
         .on_double_press_tx(move |s: &mut App, tx| s.play_list(list.clone(), i, tx))
-        .child(el().w(20.0).center().child(lead))
-        .child(middle)
-        .children(detail.filter(|d| !d.is_empty()).map(|d| text(d).font(SMALL).color(p.tx3).shrink().truncate()))
-        .child(text(t.duration.map(clock).unwrap_or_default()).font(NUM).color(p.tx3).w(48.0).align(Align::End))
 }

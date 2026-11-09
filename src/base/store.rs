@@ -5,6 +5,7 @@
 use rune::prefs::Prefs;
 use serde::{Deserialize, Serialize};
 
+use super::property::Property;
 use super::view::View;
 
 const APP_ID: &str = "rune-music";
@@ -18,11 +19,19 @@ pub struct Base {
     /// Never empty: the first view is "All songs" until the user renames or reorders it.
     pub views: Vec<View>,
     pub active: usize,
+    /// The columns of album pages' and artist pages' song tables, which belong to no view.
+    #[serde(default = "page_columns")]
+    pub page_columns: Vec<Property>,
+}
+
+/// What album and artist pages' song tables show after the title by default.
+pub fn page_columns() -> Vec<Property> {
+    vec![Property::Artist, Property::Format, Property::Duration]
 }
 
 impl Default for Base {
     fn default() -> Base {
-        Base { version: VERSION, views: vec![View::new("All songs")], active: 0 }
+        Base { version: VERSION, views: vec![View::new("All songs")], active: 0, page_columns: page_columns() }
     }
 }
 

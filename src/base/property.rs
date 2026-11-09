@@ -35,7 +35,15 @@ pub enum Property {
     Year,
     Composer,
     Lyricist,
+    Writer,
     Producer,
+    Arranger,
+    Conductor,
+    Performer,
+    Engineer,
+    Mixer,
+    Remixer,
+    DjMixer,
     Label,
     Track,
     Disc,
@@ -71,7 +79,7 @@ pub enum Value {
 }
 
 impl Property {
-    pub const ALL: [Property; 17] = [
+    pub const ALL: [Property; 25] = [
         Property::Title,
         Property::Artist,
         Property::Featured,
@@ -81,7 +89,15 @@ impl Property {
         Property::Year,
         Property::Composer,
         Property::Lyricist,
+        Property::Writer,
         Property::Producer,
+        Property::Arranger,
+        Property::Conductor,
+        Property::Performer,
+        Property::Engineer,
+        Property::Mixer,
+        Property::Remixer,
+        Property::DjMixer,
         Property::Label,
         Property::Track,
         Property::Disc,
@@ -94,7 +110,7 @@ impl Property {
     /// The properties a mode offers. Albums drop the per-song ones and add a track count;
     /// "Title" is the album's title there.
     pub fn for_mode(mode: Mode) -> &'static [Property] {
-        const ALBUM: [Property; 15] = [
+        const ALBUM: [Property; 23] = [
             Property::Title,
             Property::AlbumArtist,
             Property::Artist,
@@ -103,7 +119,15 @@ impl Property {
             Property::Year,
             Property::Composer,
             Property::Lyricist,
+            Property::Writer,
             Property::Producer,
+            Property::Arranger,
+            Property::Conductor,
+            Property::Performer,
+            Property::Engineer,
+            Property::Mixer,
+            Property::Remixer,
+            Property::DjMixer,
             Property::Label,
             Property::Tracks,
             Property::Duration,
@@ -117,6 +141,38 @@ impl Property {
         }
     }
 
+    /// The credit role a property reads, for the credit properties.
+    pub fn role(self) -> Option<Role> {
+        Some(match self {
+            Property::Composer => Role::Composer,
+            Property::Lyricist => Role::Lyricist,
+            Property::Writer => Role::Writer,
+            Property::Producer => Role::Producer,
+            Property::Arranger => Role::Arranger,
+            Property::Conductor => Role::Conductor,
+            Property::Performer => Role::Performer,
+            Property::Engineer => Role::Engineer,
+            Property::Mixer => Role::Mixer,
+            Property::Remixer => Role::Remixer,
+            Property::DjMixer => Role::DjMixer,
+            Property::Title
+            | Property::Artist
+            | Property::Featured
+            | Property::AlbumArtist
+            | Property::Album
+            | Property::Genre
+            | Property::Year
+            | Property::Label
+            | Property::Track
+            | Property::Disc
+            | Property::Duration
+            | Property::Format
+            | Property::Folder
+            | Property::Added
+            | Property::Tracks => return None,
+        })
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Property::Title => "Title",
@@ -126,9 +182,6 @@ impl Property {
             Property::Album => "Album",
             Property::Genre => "Genre",
             Property::Year => "Year",
-            Property::Composer => "Composer",
-            Property::Lyricist => "Lyricist",
-            Property::Producer => "Producer",
             Property::Label => "Label",
             Property::Track => "Track number",
             Property::Disc => "Disc number",
@@ -137,6 +190,17 @@ impl Property {
             Property::Folder => "Folder",
             Property::Added => "Date added",
             Property::Tracks => "Track count",
+            Property::Writer => "Writer",
+            Property::Arranger => "Arranger",
+            Property::Conductor => "Conductor",
+            Property::Performer => "Performer",
+            Property::Engineer => "Engineer",
+            Property::Mixer => "Mixer",
+            Property::Remixer => "Remixer",
+            Property::DjMixer => "DJ mixer",
+            Property::Composer => "Composer",
+            Property::Lyricist => "Lyricist",
+            Property::Producer => "Producer",
         }
     }
 
@@ -147,7 +211,18 @@ impl Property {
     pub fn kind(self) -> Kind {
         match self {
             Property::Title | Property::Album | Property::Label | Property::Format | Property::Folder => Kind::Text,
-            Property::Artist | Property::Featured | Property::AlbumArtist | Property::Genre | Property::Composer | Property::Lyricist | Property::Producer => Kind::List,
+            Property::Artist | Property::Featured | Property::AlbumArtist | Property::Genre => Kind::List,
+            Property::Composer
+            | Property::Lyricist
+            | Property::Writer
+            | Property::Producer
+            | Property::Arranger
+            | Property::Conductor
+            | Property::Performer
+            | Property::Engineer
+            | Property::Mixer
+            | Property::Remixer
+            | Property::DjMixer => Kind::List,
             Property::Year | Property::Track | Property::Disc | Property::Tracks => Kind::Number,
             Property::Duration => Kind::Duration,
             Property::Added => Kind::Date,
@@ -168,9 +243,6 @@ impl Property {
             Property::Album => text(t.album.as_deref()),
             Property::Genre => list(&t.genres),
             Property::Year => number(t.year.map(f64::from)),
-            Property::Composer => list(&t.credited(Role::Composer)),
-            Property::Lyricist => list(&t.credited(Role::Lyricist)),
-            Property::Producer => list(&t.credited(Role::Producer)),
             Property::Label => text(t.label.as_deref()),
             Property::Track => number(t.number.map(f64::from)),
             Property::Disc => number(t.disc.map(f64::from)),
@@ -179,6 +251,17 @@ impl Property {
             Property::Folder => text(t.path.parent().and_then(|p| p.to_str())),
             Property::Added => number(t.added.map(|s| s as f64)),
             Property::Tracks => Value::None,
+            Property::Composer
+            | Property::Lyricist
+            | Property::Writer
+            | Property::Producer
+            | Property::Arranger
+            | Property::Conductor
+            | Property::Performer
+            | Property::Engineer
+            | Property::Mixer
+            | Property::Remixer
+            | Property::DjMixer => self.role().map_or(Value::None, |role| list(&t.credited(role))),
         }
     }
 

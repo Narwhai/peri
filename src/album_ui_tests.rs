@@ -20,6 +20,12 @@ fn runtime() -> Runtime<App> {
     rt
 }
 
+/// A point on row `key` clear of its links: just inside its left edge, past the number.
+fn row_point(rt: &Runtime<App>, key: &str) -> (f32, f32) {
+    let r = rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).unwrap_or_else(|| panic!("no row {key}")).rect;
+    (r[0] + 6.0, r[1] + r[3] / 2.0)
+}
+
 fn settle(rt: &mut Runtime<App>) {
     for _ in 0..30 {
         rt.frame(1.0 / 60.0);
@@ -122,7 +128,7 @@ fn double_clicking_a_track_plays_its_album_from_there() {
     let a = album(&rt, "Get Up");
     click(&mut rt, &album_key(a, None));
     let shy = rt.state.tracks.iter().position(|t| t.title == "Super Shy").unwrap();
-    let (x, y) = rt.find(&format!("t{shy}")).unwrap();
+    let (x, y) = row_point(&rt, &format!("t{shy}"));
     for _ in 0..2 {
         rt.pointer_down(x, y);
         rt.pointer_up(x, y);

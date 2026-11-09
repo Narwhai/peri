@@ -72,11 +72,19 @@ pub struct View {
     pub sorts: Vec<Sort>,
     #[serde(default)]
     pub group_by: Option<GroupBy>,
+    /// The columns song tables show after the title, in order.
+    #[serde(default = "default_columns")]
+    pub columns: Vec<Property>,
+}
+
+/// What a new view's song tables show after the title.
+pub fn default_columns() -> Vec<Property> {
+    vec![Property::Artist, Property::Album, Property::Duration]
 }
 
 impl View {
     pub fn new(name: impl Into<String>) -> View {
-        View { name: name.into(), mode: Mode::Songs, layout: Layout::Grid, filter: Group::default(), sorts: Vec::new(), group_by: None }
+        View { name: name.into(), mode: Mode::Songs, layout: Layout::Grid, filter: Group::default(), sorts: Vec::new(), group_by: None, columns: default_columns() }
     }
 
     /// Switches what the view lists, dropping sorts, grouping and conditions on properties

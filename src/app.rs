@@ -8,7 +8,7 @@ use rune::{FileDialogOptions, Image, ImageCache, Key, KeyEvent, TextEdit, Tx, Wa
 
 use crate::album::{self, Album, AlbumId};
 use crate::audio::{self, Engine};
-use crate::base::property::Mode;
+use crate::base::property::{Mode, Property};
 use crate::covers::Covers;
 use crate::base::store::{Base, Store};
 use crate::base::view::{Evaluated, Layout, Section, evaluate};
@@ -45,6 +45,7 @@ pub enum Panel {
     Sort,
     Group,
     Filter,
+    Columns,
 }
 
 /// What fills the space between the toolbar and the player.
@@ -57,6 +58,15 @@ pub enum Page {
     /// One artist's page: their albums, the albums they appear on, their songs and credits.
     /// By name, matched ignoring case.
     Artist(String),
+}
+
+/// The song details dialog: which song, and what was read from its file when it opened.
+pub struct DetailsDialog {
+    /// The song's file, so the dialog follows it across rescans.
+    pub path: PathBuf,
+    pub details: Result<crate::details::Details, String>,
+    /// Whether "All tags" is expanded.
+    pub raw_open: bool,
 }
 
 pub struct App {
@@ -115,6 +125,8 @@ pub struct App {
     pub error: Option<String>,
     pub scan: Option<Scan>,
     pub drop_hover: bool,
+    /// The open song details dialog.
+    pub details: Option<DetailsDialog>,
     output: Output,
     rng: Rng,
     waker: Option<Waker>,
@@ -158,6 +170,7 @@ impl App {
             error: None,
             scan: None,
             drop_hover: false,
+            details: None,
             output,
             rng: Rng::from_time(),
             waker: None,
@@ -327,6 +340,22 @@ impl App {
         }
     }
 
+    /// The song table columns on screen: the album or artist page's, else the view's.
+    pub fn shown_columns(&self) -> &[Property] {
+        match self.page {
+            Page::Library => &self.base.active().columns,
+            Page::Album(_) | Page::Artist(_) => &self.base.page_columns,
+        }
+    }
+
+    /// The columns the Columns popover edits: the ones on screen.
+    pub fn shown_columns_mut(&mut self) -> &mut Vec<Property> {
+        match self.page {
+            Page::Library => &mut self.base.active_mut().columns,
+            Page::Album(_) | Page::Artist(_) => &mut self.base.page_columns,
+        }
+    }
+
     /// The artist shown on the artist page.
     pub fn open_artist(&self) -> Option<&str> {
         match &self.page {
@@ -343,6 +372,7 @@ impl App {
     /// Opens `page`, remembering the one it leaves for Back.
     fn go_to(&mut self, page: Page) {
         self.close_panel();
+        self.details = None;
         if page == self.page {
             return;
         }
@@ -360,6 +390,37 @@ impl App {
     pub fn show_library(&mut self) {
         self.history.clear();
         self.page = Page::Library;
+    }
+
+    /// Plays song `i` of `list`, queueing the rest of `list` (an artist's songs).
+    /// Opens song `i`'s details, reading its file now.
+    pub fn show_details(&mut self, i: usize, _tx: &mut Tx) {
+        let Some(path) = self.tracks.get(i).map(|t| t.path.clone()) else { return };
+        self.close_panel();
+        self.selected = Some(i);
+        let details = crate::details::read(&path);
+        self.details = Some(DetailsDialog { path, details, raw_open: false });
+    }
+
+    pub fn close_details(&mut self) {
+        self.details = None;
+    }
+
+    /// The song the details dialog shows, if it's still in the library.
+    pub fn details_track(&self) -> Option<usize> {
+        let open = self.details.as_ref()?;
+        self.tracks.iter().position(|t| t.path == open.path)
+    }
+
+    /// Shows the details dialog's song in the system's file manager.
+    pub fn reveal_details_file(&mut self) {
+        let Some(path) = self.details.as_ref().map(|d| d.path.clone()) else { return };
+        if matches!(self.output, Output::Silent) {
+            return;
+        }
+        if let Err(e) = reveal(&path) {
+            self.error = Some(e);
+        }
     }
 
     /// Plays song `i` of `list`, queueing the rest of `list` (an artist's songs).
@@ -724,6 +785,38 @@ pub fn header_key(n: usize) -> String {
 }
 
 /// `AppSpec::poll`: take scan results, follow the playing track, and move on when it ends.
+/// Opens the folder holding `path` in the system's file manager, selecting the file where the
+/// platform can.
+fn reveal(path: &std::path::Path) -> Result<(), String> {
+    let Some(dir) = path.parent() else { return Err(format!("{} has no folder", path.display())) };
+    let mut cmd = if cfg!(target_os = "macos") {
+        let mut c = std::process::Command::new("open");
+        c.arg("-R").arg(path);
+        c
+    } else if cfg!(target_os = "windows") {
+        let mut c = std::process::Command::new("explorer");
+        c.arg(format!("/select,{}", path.display()));
+        c
+    } else {
+        // The file manager D-Bus interface selects the file; xdg-open only opens its folder.
+        let uri = format!("file://{}", path.display());
+        let shown = std::process::Command::new("dbus-send")
+            .args(["--session", "--dest=org.freedesktop.FileManager1", "--type=method_call", "/org/freedesktop/FileManager1", "org.freedesktop.FileManager1.ShowItems"])
+            .arg(format!("array:string:{uri}"))
+            .arg("string:")
+            .status()
+            .is_ok_and(|s| s.success());
+        if shown {
+            return Ok(());
+        }
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(dir);
+        c
+    };
+    cmd.spawn().map(drop).map_err(|e| format!("Couldn't open {}: {e}", dir.display()))
+}
+
+/// `AppSpec::poll`: take scan results, follow the playing track, and move on when it ends.
 pub fn poll(s: &mut App, _: f64, tx: &mut Tx) -> bool {
     let mut changed = s.drain_scan();
     if let Some(covers) = &s.covers {
@@ -784,6 +877,10 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
             "s" => s.toggle_shuffle(),
             "r" => s.cycle_repeat(),
             "m" => s.toggle_mute(),
+            "i" => match s.selected.or(s.current) {
+                Some(i) => s.show_details(i, tx),
+                None => return false,
+            },
             _ => return false,
         },
         _ => return false,

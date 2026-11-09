@@ -10,6 +10,7 @@ mod audio;
 mod base;
 mod covers;
 mod credits;
+mod details;
 mod icons;
 mod library;
 mod palette;
@@ -20,6 +21,8 @@ mod view;
 mod album_ui_tests;
 #[cfg(test)]
 mod artist_ui_tests;
+#[cfg(test)]
+mod table_ui_tests;
 #[cfg(test)]
 mod base_ui_tests;
 #[cfg(test)]

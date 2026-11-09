@@ -33,7 +33,19 @@ pub(super) fn now_playing(s: &App, p: &Palette) -> El {
         .gap(3.0)
         .child(title.key("np-title").font(TITLE).truncate())
         .child(artist.key("np-artist").font(SMALL).truncate());
-    let left = row().w(300.0).shrink().gap(12.0).center_y().child(cover).child(info);
+    let details = s.current.map(|i| {
+        el().key("np-details")
+            .size(28.0, 28.0)
+            .radius(14.0)
+            .center()
+            .hover(p.ui.alpha(0.6))
+            .cursor(Cursor::Pointer)
+            .label("Song details")
+            .help("Song details (I)")
+            .on_press_tx(move |s: &mut App, tx| s.show_details(i, tx))
+            .child(icon(&icons::INFO, 16.0).color(p.tx3))
+    });
+    let left = row().w(300.0).shrink().gap(12.0).center_y().child(cover).child(info).children(details);
 
     let shuffle = toggle_icon("shuffle", &icons::SHUFFLE, s.shuffle, "Shuffle (S)", p).on_press(|s: &mut App| s.toggle_shuffle());
     let repeat_icon = if s.repeat == Repeat::One { &icons::REPEAT_ONE } else { &icons::REPEAT };

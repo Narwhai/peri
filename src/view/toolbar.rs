@@ -38,6 +38,8 @@ pub(super) fn toolbar(s: &App, p: &Palette, kit: &Kit, layer: &mut Vec<El>) -> E
         tool_button("filter", &icons::FILTER, filter_label, view.filter.condition_count() > 0, filter_open, p).help(if view.filter.children.is_empty() { "Filter songs".to_string() } else { view.filter.summary() }),
         |layer| super::filters::filter_body(s, p, kit, layer),
     );
+    let columns_label = format!("Columns: {}", s.shown_columns().len());
+    let columns = panel(s, kit, layer, Panel::Columns, tool_button("columns", &icons::COLUMNS, columns_label, false, s.panel == Some(Panel::Columns), p), columns_body(s, p));
     let albums = view.mode == Mode::Albums;
     let mut bar = row()
         .key("toolbar")
@@ -71,7 +73,10 @@ pub(super) fn toolbar(s: &App, p: &Palette, kit: &Kit, layer: &mut Vec<El>) -> E
             }
         }));
     }
+    // Album grids show no song tables, unless an album page is open.
+    let tables = !(albums && view.layout == Layout::Grid) || s.page != crate::app::Page::Library;
     bar.child(el().grow(1.0))
+        .children(tables.then_some(columns))
         .child(sort)
         .child(group)
         .child(filter)
@@ -106,6 +111,7 @@ fn trigger_key(panel: Panel) -> &'static str {
         Panel::Sort => "sort",
         Panel::Group => "group",
         Panel::Filter => "filter",
+        Panel::Columns => "columns",
     }
 }
 
@@ -417,6 +423,65 @@ fn group_body<'a>(s: &'a App, p: &'a Palette, kit: &'a Kit) -> impl FnOnce(&mut 
             }
         }
         body
+    }
+}
+
+// Columns
+
+/// Which properties the view's song tables show after the title, and in what order. Album
+/// views use them for their track tables.
+fn columns_body<'a>(s: &'a App, p: &'a Palette) -> impl FnOnce(&mut Vec<El>) -> El + 'a {
+    move |_layer| {
+        let shown = s.shown_columns();
+        let page = s.page != crate::app::Page::Library;
+        let mut body = col().key("columns-body").w(300.0).padding(8.0).gap(2.0);
+        body = body.child(hint(if page { "Shown after the title in album and artist pages' song tables. Click to show or hide; ↑ moves a column left." } else { "Shown after the title in this view's song tables. Click to show or hide; ↑ moves a column left." }, p));
+        let mut list = col().key("column-list").w_full().gap(2.0);
+        // Shown columns first in their order, then the rest in property order.
+        let order = shown.iter().copied().chain(Property::ALL.into_iter().filter(|c| *c != Property::Title && !shown.contains(c)));
+        for c in order {
+            let at = shown.iter().position(|x| *x == c);
+            let key = format!("column-{}", c.label().to_lowercase().replace(' ', "-"));
+            let mut r = row()
+                .key(key.clone())
+                .w_full()
+                .h(30.0)
+                .pl(8.0)
+                .pr(4.0)
+                .gap(8.0)
+                .center_y()
+                .radius(6.0)
+                .hover(p.ui.alpha(0.35))
+                .cursor(Cursor::Pointer)
+                .role("checkbox")
+                .checked(at.is_some())
+                .label(c.label())
+                .on_press(move |s: &mut App| {
+                    let columns = s.shown_columns_mut();
+                    match columns.iter().position(|x| *x == c) {
+                        Some(n) => {
+                            columns.remove(n);
+                        }
+                        None => columns.push(c),
+                    }
+                    s.views_changed();
+                })
+                .child(el().w(14.0).center().child(icon(&rune_kit::glyphs::CHECK_SMALL, 14.0).color(p.blue).opacity(if at.is_some() { 1.0 } else { 0.0 })))
+                .child(text(c.label()).font(BODY).color(if at.is_some() { p.tx } else { p.tx2 }).grow(1.0).shrink().truncate());
+            if let Some(n) = at.filter(|&n| n > 0) {
+                r = r.child(small_icon_button(format!("{key}-up"), &icons::ARROW_UP, "Move left", p).hover_alone().on_press(move |s: &mut App| {
+                    s.shown_columns_mut().swap(n, n - 1);
+                    s.views_changed();
+                }));
+            }
+            list = list.child(r);
+        }
+        body = body.child(col().key("column-scroll").w_full().max_h(420.0).scroll(rune::ScrollSpec { stick_bottom: false }).child(list));
+        body.child(divider(p)).child(menu_row("columns-reset", &icons::COLLAPSE, "Reset to default", p).on_press(|s: &mut App| {
+            let default = if s.page == crate::app::Page::Library { crate::base::view::default_columns() } else { crate::base::store::page_columns() };
+            *s.shown_columns_mut() = default;
+            s.views_changed();
+        }))
     }
 }
 

@@ -2,9 +2,11 @@
 
 mod albums;
 mod artists;
+mod details;
 mod filters;
 mod list;
 mod player;
+mod table;
 mod toolbar;
 
 use std::ops::Range;
@@ -64,6 +66,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
             .inert()
     });
     layer.extend(drop_veil);
+    details::details_dialog(s, &p, &kit, &mut layer);
     rune_kit::root(body, layer)
 }
 

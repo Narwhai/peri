@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use crate::base::property::{Property, Record, Value, list, number, text};
-use crate::credits::{self, Credit, Role};
+use crate::credits::{self, Credit};
 use crate::library::Track;
 
 pub const UNKNOWN_ALBUM: &str = "Unknown album";
@@ -79,9 +79,17 @@ impl Record for Album {
             Property::Featured => list(&self.featured),
             Property::Genre => list(&self.genres),
             Property::Year => number(self.year.map(f64::from)),
-            Property::Composer => list(&credits::names(&self.credits, Role::Composer)),
-            Property::Lyricist => list(&credits::names(&self.credits, Role::Lyricist)),
-            Property::Producer => list(&credits::names(&self.credits, Role::Producer)),
+            Property::Composer
+            | Property::Lyricist
+            | Property::Writer
+            | Property::Producer
+            | Property::Arranger
+            | Property::Conductor
+            | Property::Performer
+            | Property::Engineer
+            | Property::Mixer
+            | Property::Remixer
+            | Property::DjMixer => p.role().map_or(Value::None, |role| list(&credits::names(&self.credits, role))),
             Property::Label => text(self.label.as_deref()),
             Property::Tracks => Value::Number(self.tracks.len() as f64),
             Property::Duration => number((self.duration > 0.0).then_some(self.duration)),

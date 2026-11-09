@@ -2,8 +2,10 @@
 
 use rune::{Align, Cursor, El, Image, ScrollSpec, SurfaceFit, Tx, col, el, icon, row, text};
 
+use super::table;
 use super::*;
 use crate::album::Album;
+use crate::base::property::Property;
 use crate::credits::{self, Role};
 use crate::app::{App, album_key, grid_key};
 use crate::icons;
@@ -155,73 +157,45 @@ pub(super) fn list_card(s: &App, a: usize, section: Option<usize>, p: &Palette) 
         .fill(p.bg2)
         .gap(14.0)
         .child(row().gap(18.0).items_start().child(art).child(head))
-        .child(track_table(s, a, p))
+        .child(track_table(s, a, &s.base.active().columns, p))
 }
 
-/// The album's songs: #, title (with the song's artist when it isn't the album's), format and
-/// length. Double-click plays the album from that song.
-fn track_table(s: &App, a: usize, p: &Palette) -> El {
+/// The album's songs as a table with the page columns. Double-click plays the album from
+/// that song. Album cards in list views use the view's columns instead.
+fn track_table(s: &App, a: usize, columns: &[Property], p: &Palette) -> El {
     let album = &s.albums[a];
     let discs = album.discs(&s.tracks);
-    let mut table = col().key("tracks").w_full();
-    table = table.child(
-        row()
-            .h(28.0)
-            .px(8.0)
-            .gap(12.0)
-            .center_y()
-            .child(text("#").font(SMALL).color(p.tx3).w(28.0).align(Align::End))
-            .child(text("Title").font(SMALL).color(p.tx3).grow(1.0))
-            .child(text("Format").font(SMALL).color(p.tx3).w(56.0))
-            .child(text("Length").font(SMALL).color(p.tx3).w(48.0).align(Align::End)),
-    );
-    table = table.child(el().w_full().h(1.0).fill(p.ui.alpha(0.7)));
+    let mut rows = col().w_full();
     let mut disc = None;
     for (n, &i) in album.tracks.iter().enumerate() {
         let t = &s.tracks[i];
         if discs.len() > 1 && t.disc != disc {
             disc = t.disc;
             let label = disc.map_or("No disc".to_string(), |d| format!("Disc {d}"));
-            table = table.child(row().key(format!("disc{}", disc.unwrap_or(0))).h(30.0).px(8.0).center_y().child(text(label).font(GROUP).color(p.tx2)));
+            rows = rows.child(row().key(format!("disc{}", disc.unwrap_or(0))).h(30.0).px(8.0).center_y().child(text(label).font(GROUP).color(p.tx2)));
         }
-        table = table.child(track_line(s, album, t, i, n, a, p));
+        rows = rows.child(track_line(s, t, i, n, a, columns, p));
     }
-    table
+    let body = col()
+        .child(table::header("tracks-header", columns, 8.0, p))
+        .child(el().w_full().h(1.0).fill(p.ui.alpha(0.7)))
+        .child(rows);
+    table::scrolling("tracks".into(), columns, 8.0, body)
 }
 
-fn track_line(s: &App, album: &Album, t: &Track, i: usize, n: usize, a: usize, p: &Palette) -> El {
+fn track_line(s: &App, t: &Track, i: usize, n: usize, a: usize, columns: &[Property], p: &Palette) -> El {
     let current = s.current == Some(i);
-    let number: El = if current {
-        el().w(28.0).center().child(icon(if s.playing { &icons::BARS } else { &icons::PAUSE }, 13.0).color(p.blue))
+    let lead: El = if current {
+        icon(if s.playing { &icons::BARS } else { &icons::PAUSE }, 13.0).color(p.blue)
     } else {
         text(t.number.map_or_else(|| format!("{}", n + 1), |x| x.to_string())).font(NUM).color(p.tx3).w(28.0).align(Align::End)
     };
-    let other_artist = t.artist().is_some_and(|ar| album.artist.as_deref().is_none_or(|aa| !aa.eq_ignore_ascii_case(&ar)));
-    let title_el = song_title(t, if current { p.blue } else { p.tx }).key("title").font(BODY).truncate().shrink();
-    let mut title = row().grow(1.0).shrink().gap(8.0).center_y().child(title_el);
-    if let Some(artist) = song_artist(t, p.tx3).filter(|_| other_artist) {
-        title = title.child(artist.key("artist").font(BODY).truncate().shrink());
-    }
-    let format = t.path.extension().and_then(|e| e.to_str()).map(str::to_uppercase).unwrap_or_default();
-    let selected = s.selected == Some(i);
-    row()
+    let look = table::RowLook { lead, selected: s.selected == Some(i), current, height: TRACK_ROW_H, px: 8.0, note: None };
+    table::song_row(t, i, columns, look, p)
         .key(format!("t{i}"))
-        .w_full()
-        .h(TRACK_ROW_H)
-        .px(8.0)
-        .gap(12.0)
-        .center_y()
-        .radius(6.0)
-        .fill(if selected { p.ui.alpha(0.55) } else { p.bg.alpha(0.0) })
-        .hover(p.ui.alpha(0.3))
-        .role("row")
-        .label(format!("{} by {}", t.title, t.artist().as_deref().unwrap_or(album.artist_name())))
+        .label(format!("{} by {}", t.title, t.artist().as_deref().unwrap_or(s.albums[a].artist_name())))
         .on_press(move |s: &mut App| s.selected = Some(i))
         .on_double_press_tx(move |s: &mut App, tx| s.play_album(a, Some(i), tx))
-        .child(number)
-        .child(title)
-        .child(text(format).font(SMALL).color(p.tx3).w(56.0))
-        .child(text(t.duration.map(clock).unwrap_or_default()).font(NUM).color(p.tx3).w(48.0).align(Align::End))
 }
 
 pub(super) fn play_button(key: &'static str, label: &'static str, p: &Palette) -> El {
@@ -323,7 +297,7 @@ pub(super) fn album_page(s: &App, a: usize, p: &Palette) -> El {
         .gap(22.0)
         .child(back)
         .child(top)
-        .child(track_table(s, a, p));
+        .child(track_table(s, a, &s.base.page_columns, p));
     let more = more_by(s, a, p);
     if let Some(more) = more {
         page = page.child(more);

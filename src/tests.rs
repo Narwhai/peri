@@ -17,6 +17,12 @@ fn runtime(dark: bool) -> Runtime<App> {
     rt
 }
 
+/// A point on row `key` clear of its links: just inside its left edge, past the number.
+fn row_point(rt: &Runtime<App>, key: &str) -> (f32, f32) {
+    let r = rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).unwrap_or_else(|| panic!("no row {key}")).rect;
+    (r[0] + 6.0, r[1] + r[3] / 2.0)
+}
+
 fn settle(rt: &mut Runtime<App>) {
     for _ in 0..30 {
         rt.frame(1.0 / 60.0);
@@ -25,6 +31,14 @@ fn settle(rt: &mut Runtime<App>) {
 
 fn click(rt: &mut Runtime<App>, key: &str) {
     let (x, y) = rt.find(key).unwrap_or_else(|| panic!("no element {key}"));
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    settle(rt);
+}
+
+/// Clicks a song row where it has no links.
+fn click_row(rt: &mut Runtime<App>, key: &str) {
+    let (x, y) = row_point(rt, key);
     rt.pointer_down(x, y);
     rt.pointer_up(x, y);
     settle(rt);
@@ -56,7 +70,7 @@ fn the_library_lists_every_track_and_counts_them() {
 fn double_clicking_a_row_plays_it_and_fills_the_bar() {
     let mut rt = runtime(true);
     let shy = idx(&rt, "Super Shy");
-    let (x, y) = rt.find(&format!("t{shy}")).unwrap();
+    let (x, y) = row_point(&rt, &format!("t{shy}"));
     for _ in 0..2 {
         rt.pointer_down(x, y);
         rt.pointer_up(x, y);
@@ -72,7 +86,7 @@ fn double_clicking_a_row_plays_it_and_fills_the_bar() {
 #[test]
 fn space_plays_the_selection_and_pauses() {
     let mut rt = runtime(false);
-    click(&mut rt, "t2");
+    click_row(&mut rt, "t2");
     assert_eq!(rt.state.selected, Some(2));
     assert_eq!(rt.state.current, None);
     key(&mut rt, Key::Text(" ".into()));
@@ -111,7 +125,7 @@ fn searching_filters_the_list_and_plays_within_it() {
     assert_eq!(text_of(&rt, "count"), "4 of 13 tracks");
     assert!(rt.find("t0").is_none(), "Laraaji is filtered out");
     let first = rt.state.filtered[0];
-    click(&mut rt, &crate::app::row_key(first, None));
+    click_row(&mut rt, &crate::app::row_key(first, None));
     key(&mut rt, Key::Enter);
     for _ in 0..3 {
         click(&mut rt, "next");
@@ -222,7 +236,7 @@ fn clicking_the_search_field_takes_typing_and_letters_do_not_trigger_shortcuts()
 #[test]
 fn space_still_plays_and_pauses_after_clicking_a_transport_button() {
     let mut rt = runtime(true);
-    click(&mut rt, "t1");
+    click_row(&mut rt, "t1");
     click(&mut rt, "shuffle");
     key(&mut rt, Key::Text(" ".into()));
     assert!(rt.state.shuffle, "Space didn't press the shuffle button again");

@@ -1,11 +1,12 @@
 //! The track list: song rows, and sticky collapsible group headers in a grouped view.
 
-use rune::{Align, Cursor, Cx, El, GrowthSpec, ScrollSpec, Tx, col, el, icon, memo, row, text};
+use rune::{Align, Cursor, Cx, El, GrowthSpec, Live, ScrollPos, ScrollSpec, Tx, col, el, icon, memo, row, text};
 
 use super::albums::{columns_for, grid_row, grid_row_h, list_card};
+use super::table;
 use super::*;
 use crate::app::{App, Row, album_key, grid_key, header_key, row_key};
-use crate::base::property::Mode;
+use crate::base::property::{Mode, Property};
 use crate::base::view::Layout;
 use crate::base::view::Section;
 use crate::icons;
@@ -92,14 +93,15 @@ pub(super) fn list(s: &App, p: &Palette, cx: &mut Cx<App>) -> El {
                     let current = s.current == Some(track);
                     let playing = current && s.playing;
                     let number = number_in(s, track, section);
-                    memo(row_key(track, section), (s.list_version, number, selected, current, playing, p.dark), || {
-                        track_row(&s.tracks[track], track, section, number, selected, current, playing, &p)
+                    let columns = &s.base.active().columns;
+                    memo(row_key(track, section), (s.list_version, number, selected, current, playing, p.dark, columns.clone()), || {
+                        track_row(&s.tracks[track], track, section, number, selected, current, playing, columns, &p)
                     })
                 }
             },
         )
         .virtual_rows_version(s.list_version);
-    col()
+    let viewport = col()
         .key("tracks")
         .w_full()
         .grow(1.0)
@@ -110,8 +112,29 @@ pub(super) fn list(s: &App, p: &Palette, cx: &mut Cx<App>) -> El {
             if s.mode() == Mode::Albums && s.base.active().layout == Layout::Grid {
                 s.set_columns(columns_for(r[2] - 2.0 * GRID_PX));
             }
-        })
-        .child(list)
+        });
+    if albums {
+        return viewport.child(list);
+    }
+    // Songs: a table as wide as its columns need, scrolling sideways when the window is
+    // narrower. The column header sits above the viewport and follows its sideways scroll.
+    let columns = &s.base.active().columns;
+    // A viewport scrolling both ways lays its content out at its natural width, so the table
+    // fills the viewport itself, and is wider when its columns need it.
+    let min_w = table::min_width(columns, LIST_PX).max(width + 2.0 * pad);
+    let shift = Live::new([0.0f32, 0.0]);
+    let follow = shift.clone();
+    let viewport = viewport.scroll_xy().on_scroll_offset(move |at: ScrollPos| {
+        follow.set([-at.offset[0], 0.0]);
+    });
+    let head = table::header("table-header", columns, LIST_PX + 10.0, &p).min_w(min_w).live_offset(&shift);
+    col()
+        .key("song-table")
+        .w_full()
+        .grow(1.0)
+        .min_h(0.0)
+        .child(el().key("table-header-clip").w_full().clip_soft(0.0).border_bottom(&p).child(head))
+        .child(viewport.child(list.min_w(min_w)))
 }
 
 /// A song's number in its group, or in the whole list when ungrouped.
@@ -154,49 +177,19 @@ fn group_header(section: &Section, g: usize, open: bool, p: &Palette) -> El {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn track_row(t: &Track, i: usize, section: Option<usize>, number: usize, selected: bool, current: bool, playing: bool, p: &Palette) -> El {
+fn track_row(t: &Track, i: usize, section: Option<usize>, number: usize, selected: bool, current: bool, playing: bool, columns: &[Property], p: &Palette) -> El {
     let lead: El = if current {
         icon(if playing { &icons::BARS } else { &icons::PAUSE }, 14.0).color(p.blue)
     } else {
         text(format!("{number}")).font(NUM).color(p.tx3).align(Align::End).w(28.0)
     };
-    let title_color = if current { p.blue } else { p.tx };
-    // "Artist · Album", each artist's name opening their page.
-    let subtitle = match (t.artist(), &t.album) {
-        (Some(a), album) => {
-            let links = name_links(&a, &t.artists);
-            let line = album.as_ref().map_or_else(|| a.clone(), |b| format!("{a} · {b}"));
-            linked(line, links, p.tx2)
-        }
-        (None, Some(b)) => text(b.clone()).color(p.tx2),
-        (None, None) => text("Unknown artist").color(p.tx2),
-    };
-    let fill = if selected { p.ui.alpha(if p.dark { 0.7 } else { 0.55 }) } else { p.bg.alpha(0.0) };
-    row()
+    let look = table::RowLook { lead, selected, current, height: ROW_H, px: 10.0, note: None };
+    table::song_row(t, i, columns, look, p)
         .key(row_key(i, section))
-        .w_full()
-        .h(ROW_H)
-        .px(10.0)
-        .gap(12.0)
-        .center_y()
-        .radius(8.0)
-        .fill(fill)
-        .hover(p.ui.alpha(0.35))
         .press(p.ui.alpha(0.5))
-        .role("row")
         .label(format!("{} by {}", t.title, t.artist().as_deref().unwrap_or("unknown artist")))
         .on_press(move |s: &mut App| s.selected = Some(i))
         .on_double_press_tx(move |s: &mut App, tx| s.play_index(i, tx))
-        .child(el().w(28.0).center().child(lead))
-        .child(
-            col()
-                .grow(1.0)
-                .shrink()
-                .gap(2.0)
-                .child(song_title(t, title_color).key("title").font(TITLE).truncate())
-                .child(subtitle.key("subtitle").font(SMALL).truncate()),
-        )
-        .child(text(t.duration.map(clock).unwrap_or_default()).font(NUM).color(p.tx3))
 }
 
 fn empty_state(s: &App, p: &Palette) -> El {

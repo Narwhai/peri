@@ -36,7 +36,12 @@ Views work like Obsidian's [Bases](https://help.obsidian.md/bases/views). By def
 
   A condition with no value yet, or one that can't be read (a word where a year goes, shown in red), filters nothing out.
 
-Properties: title, artist, featured artist, album artist, album, genre, year, composer, lyricist, producer, label, track and disc number, duration, format, folder and date added. Year comes from the recording date tag, else year, release date or original release date. Date added is the file's creation time.
+Properties: title, artist, featured artist, album artist, album, genre, year, the credit roles (composer, lyricist, writer, producer, arranger, conductor, performer, engineer, mixer, remixer, DJ mixer), label, track and disc number, duration, format, folder and date added. Year comes from the recording date tag, else year, release date or original release date. Date added is the file's creation time.
+
+## Columns and song details
+
+- **Columns** (toolbar): pick which properties song tables show after the title, and move them left with ↑. Each view keeps its own; album and artist pages share one set. Names in artist and credit columns open the artist's page. When the columns need more room than the window has, the table scrolls sideways under a header that follows.
+- **Song details:** the ⓘ button on a row, next to the playing song, or I for the selected song opens a dialog with everything about the song: artists, release, credits by role, the file (path, format, bitrate, sample rate, bit depth, channels, size) with an **Open containing folder** button, MusicBrainz IDs and ISRC, lyrics, and **All tags**, every tag exactly as the file stores it. The file is read when the dialog opens. Esc closes it.
 
 Search narrows the current view further, and Next/Previous follow the view's order. In a grouped view, a song that appears in several groups plays once, in its first group.
 
@@ -82,7 +87,8 @@ Every artist name is a link: in song rows, titles ("Calypso Gene (feat. Silka & 
 | Ctrl+F | Search (Esc clears it, Enter plays the first match) |
 | Ctrl+O | Open a folder |
 | S / R / M | Shuffle / repeat / mute |
-| Esc | Close a toolbar popover, or go back from an album or artist page |
+| I | Song details for the selected (else playing) song |
+| Esc | Close a toolbar popover or the details dialog, or go back from an album or artist page |
 
 Double-click a row to play it. Ctrl is Cmd on macOS.
 

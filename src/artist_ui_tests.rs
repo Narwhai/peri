@@ -35,10 +35,12 @@ fn mercy() -> Vec<Track> {
     ]
 }
 
+/// Wide enough that the Artist column shows "… feat. Silka & Cleo Reed" whole, so its names
+/// can be clicked.
 fn runtime() -> Runtime<App> {
     let mut app = App::new(Output::Silent, Store::memory());
     app.set_library(mercy(), false);
-    let mut rt = Runtime::new(app, view, (980.0, 1100.0), Env::new(true, 1.0));
+    let mut rt = Runtime::new(app, view, (1500.0, 1100.0), Env::new(true, 1.0));
     rt.on_key = Some(crate::app::on_key);
     rt.frame(0.0);
     settle(&mut rt);
@@ -118,3 +120,4 @@ fn the_now_playing_bar_links_the_playing_songs_artists() {
     click(&mut rt, "artist-play");
     assert!(rt.state.playing);
 }
+
