@@ -12,6 +12,7 @@ mod covers;
 mod credits;
 mod details;
 mod icons;
+mod label;
 mod library;
 mod palette;
 mod queue;
@@ -26,6 +27,8 @@ mod artist_ui_tests;
 mod table_ui_tests;
 #[cfg(test)]
 mod base_ui_tests;
+#[cfg(test)]
+mod label_ui_tests;
 #[cfg(test)]
 mod settings_ui_tests;
 #[cfg(test)]
@@ -203,6 +206,18 @@ fn scene_album_page(s: &mut App) {
     s.page = app::Page::Album(s.albums[a].id());
 }
 
+/// The demo library with Laraaji's and Nils Frahm's albums on one label, on its page.
+fn scene_label(s: &mut App) {
+    let mut tracks = demo_tracks();
+    for t in &mut tracks {
+        if matches!(t.album.as_deref(), Some("Day of Radiance" | "Spaces" | "Live Sessions")) {
+            t.label = Some("Erased Tapes".into());
+        }
+    }
+    s.set_library(tracks, false);
+    s.page = app::Page::Label("Erased Tapes".into());
+}
+
 /// The settings page with a saved folder and one that's gone missing.
 fn scene_settings(s: &mut App) {
     scene_library(s);
@@ -225,6 +240,7 @@ fn main() {
             ("album-list", scene_album_list),
             ("album", scene_album_page),
             ("artist", scene_artist),
+            ("label", scene_label),
             ("settings", scene_settings),
         ],
         min_size: Some((720.0, 420.0)),

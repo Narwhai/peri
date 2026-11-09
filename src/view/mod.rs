@@ -4,6 +4,7 @@ mod albums;
 mod artists;
 mod details;
 mod filters;
+mod labels;
 mod list;
 mod player;
 mod search;
@@ -46,12 +47,13 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         .fill(p.bg)
         .child(header(s, &p, &kit))
         .children(toolbar)
-        .child(match (s.open_album(), s.open_artist()) {
-            (Some(a), _) => albums::album_page(s, a, &p),
-            (None, Some(name)) => artists::artist_page(s, name, &p),
-            (None, None) if s.page == crate::app::Page::Search => search::search_page(s, &p),
-            (None, None) if s.page == crate::app::Page::Settings => settings::settings_page(s, &p),
-            (None, None) => list::list(s, &p, cx),
+        .child(match (s.open_album(), s.open_artist(), s.open_label()) {
+            (Some(a), _, _) => albums::album_page(s, a, &p),
+            (None, Some(name), _) => artists::artist_page(s, name, &p),
+            (None, None, Some(name)) => labels::label_page(s, name, &p),
+            (None, None, None) if s.page == crate::app::Page::Search => search::search_page(s, &p),
+            (None, None, None) if s.page == crate::app::Page::Settings => settings::settings_page(s, &p),
+            (None, None, None) => list::list(s, &p, cx),
         })
         .child(player::now_playing(s, &p))
         .on_drop_files(|s: &mut App, files, _tx| {
@@ -203,6 +205,12 @@ fn linked(content: String, links: Vec<(Range<usize>, String)>, color: Color) -> 
         t = t.link(Link::new(range, name).hover(LinkPaint::new().underline(color)));
     }
     t.on_link(|s: &mut App, name, tx| s.show_artist(name, tx))
+}
+
+/// A record label's name, opening its page. Hovering it underlines it.
+fn label_link(name: &str, color: Color) -> El {
+    let t = text(name.to_string()).color(color).link(Link::new(0..name.len(), name.to_string()).hover(LinkPaint::new().underline(color)));
+    t.on_link(|s: &mut App, name, tx| s.show_label(name, tx))
 }
 
 /// Where each of `names` appears in `content`, as links.

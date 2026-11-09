@@ -57,7 +57,7 @@ fn body(s: &App, i: usize, open: &DetailsDialog, p: &Palette) -> El {
     };
     release = release.children(numbering.map(|n| fact("Track", plain(n, p), p)));
     release = release.children(t.year.map(|y| fact("Year", plain(y.to_string(), p), p)));
-    release = release.children(t.label.clone().map(|l| fact("Label", plain(l, p), p)));
+    release = release.children(t.label.as_deref().map(|l| fact("Label", label_link(l, p.tx).key("details-label"), p)));
     if !t.genres.is_empty() {
         release = release.child(fact("Genre", plain(t.genres.join(", "), p), p));
     }

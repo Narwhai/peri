@@ -214,6 +214,7 @@ fn cell(t: &Track, c: Property, p: &Palette) -> El {
             let links = name_links(&line, &t.album_artists);
             return linked(line, links, color).font(BODY).truncate();
         }
+        Property::Label => return t.label.as_deref().map_or_else(|| text(""), |l| label_link(l, color)).font(BODY).truncate(),
         _ => c.value(t),
     };
     match shown {

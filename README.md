@@ -69,6 +69,10 @@ Each view lists either **Songs** or **Albums**; switch with the toggle in the to
 - **Saved settings:** the mode and layout save with each view. Views saved before this change load as song views.
 
 ## Keys
+## Labels
+
+A label name opens the label's page wherever it's shown: the album page's facts, the Label column of song tables, and song details. The page lists every album released under the label (newest first, grouped into Albums, EPs, Singles and Compilations) with counts and a Play button that plays them all newest first. Names match ignoring case, and the label comes from the first song of each album that has a `LABEL` (else `PUBLISHER`) tag.
+
 ## Artists
 
 Every artist name is a link: in song rows, titles ("Calypso Gene (feat. Silka & Cleo Reed)"), the now-playing bar, album cards and album pages. It opens the artist's page: their albums, albums they appear on, songs crediting them (composer, lyricist, producer, performer…), then their own songs. When they have credits, their songs start collapsed under a Songs heading; click it to open. Song rows there lead with the album cover. Back and Esc retrace the pages visited.
