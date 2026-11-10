@@ -284,6 +284,98 @@ fn space_still_plays_and_pauses_after_clicking_a_transport_button() {
     assert_eq!((rt.state.current, rt.state.playing), (Some(1), true));
 }
 
+fn mouse(rt: &mut Runtime<App>, button: rune::PointerButton) {
+    let (x, y) = rt.find("count").expect("the header's count");
+    rt.button_down(x, y, button);
+    rt.button_up(x, y, button);
+    settle(rt);
+}
+
+fn alt(rt: &mut Runtime<App>, key: Key) {
+    rt.key(KeyEvent { key, mods: Mods { alt: true, ..Mods::default() } });
+    settle(rt);
+}
+
+#[test]
+fn the_mouse_back_and_forward_buttons_walk_the_pages() {
+    use rune::PointerButton::{Back, Forward};
+    let mut rt = runtime(true);
+    rt.update(|s, tx| s.show_artist("Laraaji", tx));
+    settle(&mut rt);
+    let a = rt.state.albums.iter().position(|a| a.title == "Day of Radiance").expect("Day of Radiance");
+    rt.update(|s, tx| s.show_album(a, tx));
+    settle(&mut rt);
+    let album = rt.state.page.clone();
+    mouse(&mut rt, Back);
+    assert_eq!(rt.state.page, Page::Artist("Laraaji".into()));
+    mouse(&mut rt, Back);
+    assert_eq!(rt.state.page, Page::Library);
+    mouse(&mut rt, Back);
+    assert_eq!(rt.state.page, Page::Library, "Back stops at the library");
+    mouse(&mut rt, Forward);
+    assert_eq!(rt.state.page, Page::Artist("Laraaji".into()));
+    mouse(&mut rt, Forward);
+    assert_eq!(rt.state.page, album);
+    mouse(&mut rt, Forward);
+    assert_eq!(rt.state.page, album, "nothing further forward");
+    mouse(&mut rt, Back);
+    assert_eq!(rt.state.page, Page::Artist("Laraaji".into()), "Back works after Forward");
+}
+
+#[test]
+fn alt_arrows_go_back_and_forward_and_opening_a_page_drops_forward() {
+    let mut rt = runtime(true);
+    rt.update(|s, tx| s.show_artist("Laraaji", tx));
+    settle(&mut rt);
+    rt.update(|s, tx| s.show_label("All Saints", tx));
+    settle(&mut rt);
+    alt(&mut rt, Key::Left);
+    assert_eq!(rt.state.page, Page::Artist("Laraaji".into()));
+    alt(&mut rt, Key::Right);
+    assert_eq!(rt.state.page, Page::Label("All Saints".into()));
+    alt(&mut rt, Key::Left);
+    // A new page from here replaces what was ahead, as in a browser.
+    click(&mut rt, "settings");
+    assert_eq!(rt.state.page, Page::Settings);
+    assert!(rt.state.forward.is_empty());
+    alt(&mut rt, Key::Right);
+    assert_eq!(rt.state.page, Page::Settings);
+    alt(&mut rt, Key::Left);
+    assert_eq!(rt.state.page, Page::Artist("Laraaji".into()));
+}
+
+#[test]
+fn forward_skips_search_results_that_were_cleared() {
+    let mut rt = runtime(true);
+    rt.update(|s, tx| {
+        s.search = rune::TextEdit::new("laraaji");
+        s.searched(tx);
+    });
+    settle(&mut rt);
+    rt.update(|s, tx| s.show_artist("Laraaji", tx));
+    settle(&mut rt);
+    alt(&mut rt, Key::Left);
+    assert_eq!(rt.state.page, Page::Search);
+    // Esc clears the search, leaving the results: Forward can't come back to them.
+    key(&mut rt, Key::Escape);
+    assert_eq!(rt.state.page, Page::Library);
+    assert!(!rt.state.forward.contains(&Page::Search));
+    alt(&mut rt, Key::Right);
+    assert_eq!(rt.state.page, Page::Artist("Laraaji".into()));
+}
+
+#[test]
+fn a_left_click_on_empty_space_still_leaves_the_search_field_and_stays() {
+    let mut rt = runtime(true);
+    rt.update(|s, tx| s.show_artist("Laraaji", tx));
+    settle(&mut rt);
+    click(&mut rt, "search");
+    assert!(rt.state.search.focused);
+    click(&mut rt, "count");
+    assert!(!rt.state.search.focused, "the field lets go of the keyboard");
+    assert_eq!(rt.state.page, Page::Artist("Laraaji".into()), "a primary click doesn't navigate");
+}
+
 /// Reads the real library's new attributes and times grouping it:
 /// `RUNE_MUSIC_DIR=~/Music cargo test --release real_library_groups -- --ignored --nocapture`.
 #[test]

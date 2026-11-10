@@ -85,6 +85,8 @@ pub struct App {
     pub page: Page,
     /// The pages Back returns to, newest last; the library when empty.
     pub history: Vec<Page>,
+    /// The pages Forward returns to, the next one last: those Back left. Opening a page clears it.
+    pub forward: Vec<Page>,
     /// The artist page's Songs section, when toggled: `None` shows it collapsed if the artist
     /// has credits (so they come first), else open. Reset on every page change.
     pub artist_songs_open: Option<bool>,
@@ -190,6 +192,7 @@ impl App {
             albums: Vec::new(),
             page: Page::Library,
             history: Vec::new(),
+            forward: Vec::new(),
             artist_songs_open: None,
             artist_credits_closed: false,
             artist_with_aliases: false,
@@ -609,6 +612,12 @@ impl App {
         if page == self.page {
             return;
         }
+        self.forward.clear();
+        self.leave_for(page);
+    }
+
+    /// Shows `page`, remembering the one it leaves for Back.
+    fn leave_for(&mut self, page: Page) {
         self.artist_songs_open = None;
         self.artist_credits_closed = false;
         let left = std::mem::replace(&mut self.page, page);
@@ -621,7 +630,15 @@ impl App {
 
     /// Back: the page before this one, else the library, scrolled to where it was left.
     pub fn go_back(&mut self, tx: &mut Tx) {
-        self.page = self.history.pop().unwrap_or(Page::Library);
+        self.close_panel();
+        self.details = None;
+        // The library is where Back ends.
+        if self.page == Page::Library {
+            return;
+        }
+        let back = self.history.pop().unwrap_or(Page::Library);
+        let left = std::mem::replace(&mut self.page, back);
+        self.forward.push(left);
         self.artist_songs_open = None;
         self.artist_credits_closed = false;
         if self.page == Page::Library {
@@ -632,7 +649,17 @@ impl App {
 
     pub fn show_library(&mut self) {
         self.history.clear();
+        self.forward.clear();
         self.page = Page::Library;
+    }
+
+    /// Forward: the page Back last left, if nothing was opened since.
+    pub fn go_forward(&mut self) {
+        self.close_panel();
+        self.details = None;
+        if let Some(page) = self.forward.pop() {
+            self.leave_for(page);
+        }
     }
 
     /// Home: the active view, the search cleared.
@@ -659,6 +686,7 @@ impl App {
             match back_at {
                 Some(at) => {
                     self.history.truncate(at);
+                    self.forward.clear();
                     self.page = Page::Search;
                     self.artist_songs_open = None;
         self.artist_credits_closed = false;
@@ -668,9 +696,14 @@ impl App {
             tx.scroll_to_instant("search-page", 0.0, 0.0);
         } else if self.page == Page::Search {
             self.go_back(tx);
-        } else if let Some(at) = back_at {
-            // Pages opened from the results go back past where the results were.
-            self.history.remove(at);
+            // The results are gone: Forward skips them.
+            self.forward.retain(|p| *p != Page::Search);
+        } else {
+            if let Some(at) = back_at {
+                // Pages opened from the results go back past where the results were.
+                self.history.remove(at);
+            }
+            self.forward.retain(|p| *p != Page::Search);
         }
     }
 
@@ -1222,6 +1255,14 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
     }
     if ev.key == Key::Escape && s.page != Page::Library {
         s.go_back(tx);
+        return true;
+    }
+    if m.alt && !m.cmd && !m.ctrl && !m.shift {
+        match ev.key {
+            Key::Left => s.go_back(tx),
+            Key::Right => s.go_forward(),
+            _ => return false,
+        }
         return true;
     }
     if ev.is_command('f') {

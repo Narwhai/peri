@@ -14,7 +14,7 @@ mod toolbar;
 
 use std::ops::Range;
 
-use rune::{Color, Cursor, Cx, El, Icon, Link, LinkPaint, Spring, TextStyle, col, el, icon, row, text};
+use rune::{Color, Cursor, Cx, El, Icon, Link, LinkPaint, PointerButton, Spring, TextStyle, col, el, icon, row, text};
 use rune_kit::{Kit, PaletteSeed, TextInput};
 
 use crate::app::App;
@@ -56,6 +56,13 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
             (None, None, None) => list::list(s, &p, cx),
         })
         .child(player::now_playing(s, &p))
+        // The mouse's back and forward buttons, anywhere a control doesn't take them.
+        .pointer_buttons([PointerButton::Back, PointerButton::Forward])
+        .on_press_tx(|s: &mut App, tx| match tx.button() {
+            PointerButton::Back => s.go_back(tx),
+            PointerButton::Forward => s.go_forward(),
+            _ => {}
+        })
         .on_drop_files(|s: &mut App, files, _tx| {
             s.drop_hover = false;
             s.add_to_library(files.to_vec());
