@@ -111,6 +111,33 @@ pub fn known(name: &str, tracks: &[Track]) -> bool {
     tracks.iter().any(|t| t.artists.iter().chain(&t.album_artists).chain(t.credits.iter().map(|c| &c.name)).any(|n| n.eq_ignore_ascii_case(name)))
 }
 
+/// Names the library knows (artists, album artists, credited people) holding every word of
+/// `query`, ignoring case: one equal to it first, then by how many songs name them, at most
+/// `limit`, none of `exclude`. Each is spelled as first seen.
+pub fn suggest(query: &str, tracks: &[Track], exclude: &[String], limit: usize) -> Vec<String> {
+    let query = query.trim().to_lowercase();
+    if query.is_empty() {
+        return Vec::new();
+    }
+    let mut found: Vec<(String, String, usize)> = Vec::new();
+    for t in tracks {
+        let mut seen: Vec<String> = Vec::new();
+        for n in t.artists.iter().chain(&t.album_artists).chain(t.credits.iter().map(|c| &c.name)) {
+            let key = n.trim().to_lowercase();
+            if key.is_empty() || seen.contains(&key) || !query.split_whitespace().all(|w| key.contains(w)) || exclude.iter().any(|e| e.eq_ignore_ascii_case(&key)) {
+                continue;
+            }
+            match found.iter_mut().find(|(k, _, _)| *k == key) {
+                Some((_, _, c)) => *c += 1,
+                None => found.push((key.clone(), n.trim().to_string(), 1)),
+            }
+            seen.push(key);
+        }
+    }
+    found.sort_by(|(ka, _, ca), (kb, _, cb)| (*kb == query).cmp(&(*ka == query)).then(cb.cmp(ca)).then(ka.cmp(kb)));
+    found.into_iter().take(limit).map(|(_, n, _)| n).collect()
+}
+
 /// How much one mention of a name counts towards it leading the page: album artist, then
 /// artist, featured artist, and any other credit.
 const ALBUM_ARTIST: usize = 4;
@@ -314,5 +341,15 @@ mod tests {
         assert_eq!(all.related, alone.related);
         assert_eq!(titles(&albums, &all.albums), ["Mercy", "Haram", "Elsewhere"], "newest first across both names");
         assert!(!page("Cleo Reed", &tracks, &albums, &relations, false).has_aliases());
+    }
+
+    #[test]
+    fn suggestions_match_every_word_rank_exact_then_most_named_and_skip_excluded() {
+        let (tracks, _) = library();
+        assert_eq!(suggest("a", &tracks, &[], 3), ["Armand Hammer", "The Alchemist", "Silka"], "most named first");
+        assert_eq!(suggest("ham arm", &tracks, &[], 5), ["Armand Hammer"]);
+        assert_eq!(suggest("cleo", &tracks, &strings(&["CLEO REED"]), 5), Vec::<String>::new());
+        assert_eq!(suggest("somebody", &tracks, &[], 5), ["Somebody"]);
+        assert!(suggest("  ", &tracks, &[], 5).is_empty());
     }
 }

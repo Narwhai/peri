@@ -2,23 +2,26 @@
 //! that credit them. The search page shows the same sections for the artist it finds.
 
 use rune::{Cursor, El, ScrollSpec, col, el, icon, row, text};
+use rune_kit::{Kit, Placement, TextInput, popover, scrim};
 
 use super::albums::{album_strip, back_label, cover, cover_image, play_button, secondary_button};
 use super::table;
+use super::toolbar::{hint, segmented};
 use super::*;
 use crate::album::ReleaseType;
-use crate::artist::{ArtistPage, known, page};
+use crate::app::Panel;
+use crate::artist::{ArtistPage, known, page, suggest};
 use crate::credits::Role;
 use crate::library::Track;
 use crate::palette::Palette;
-use crate::relations::Relation;
+use crate::relations::{LinkChoice, Relation};
 
 const PAGE_TITLE: TextStyle = TextStyle::new(28.0, 700.0);
 const SONG_ROW_H: f32 = 40.0;
 /// Song rows' covers, as wide as the table's lead column.
 const COVER_W: f32 = table::LEAD_W;
 
-pub(super) fn artist_page(s: &App, name: &str, p: &Palette) -> El {
+pub(super) fn artist_page(s: &App, name: &str, p: &Palette, kit: &Kit, layer: &mut Vec<El>) -> El {
     let info = page(name, &s.tracks, &s.albums, &s.relations, s.artist_with_aliases);
     let back = row()
         .key("back")
@@ -35,7 +38,7 @@ pub(super) fn artist_page(s: &App, name: &str, p: &Palette) -> El {
         .on_press_tx(|s: &mut App, tx| s.go_back(tx))
         .child(icon(&icons::BACK, 16.0).color(p.tx2))
         .child(text(back_label(s)).font(TITLE).color(p.tx2));
-    let mut body = col().key("artist-page-body").w_full().px(28.0).py(16.0).gap(22.0).child(back).child(head(s, &info, false, p));
+    let mut body = col().key("artist-page-body").w_full().px(28.0).py(16.0).gap(22.0).child(back).child(head(s, &info, Some(link_artist(s, &info, p, kit, layer)), p));
     if info.is_empty() {
         body = body.child(text(format!("Nothing in the library is by or credits {}.", info.name)).key("artist-empty").font(BODY).color(p.tx3));
     }
@@ -90,9 +93,10 @@ pub(super) fn release_strips(s: &App, key: &str, albums: &[usize], artists: bool
         .collect()
 }
 
-/// Picture (the first album's cover), name, counts, Play. In search results the name and
-/// picture open the artist's page.
-pub(super) fn head(s: &App, info: &ArtistPage, linked: bool, p: &Palette) -> El {
+/// Picture (the first album's cover), name, counts, Play. On their page `link` is the Link
+/// artist button; in search results (`None`) the name and picture open the artist's page.
+pub(super) fn head(s: &App, info: &ArtistPage, link: Option<El>, p: &Palette) -> El {
+    let linked = link.is_none();
     let first = info.albums.first().copied().or_else(|| info.appears_on.first().and_then(|&i| s.album_of(i)));
     let mut art = cover("artist-cover".into(), first.and_then(|a| cover_image(s, &s.albums[a])), Some(160.0), 80.0, p);
     let mut counts = Vec::new();
@@ -125,7 +129,10 @@ pub(super) fn head(s: &App, info: &ArtistPage, linked: bool, p: &Palette) -> El 
         .child(name)
         .child(text(counts.join("  •  ")).key("artist-counts").font(BODY).color(p.tx3));
     if info.names.len() > 1 {
-        details = details.child(text(format!("Also credited as {}", info.names[1..].join(", "))).key("artist-aka").font(BODY).color(p.tx3).wrap());
+        details = details.child(match linked {
+            true => text(format!("Also credited as {}", info.names[1..].join(", "))).key("artist-aka").font(BODY).color(p.tx3).wrap(),
+            false => merged_names(&info.names, p),
+        });
     }
     let mut buttons = row().gap(8.0);
     if !info.play_list(&s.albums).is_empty() {
@@ -151,6 +158,7 @@ pub(super) fn head(s: &App, info: &ArtistPage, linked: bool, p: &Palette) -> El 
         let on = info.with_aliases;
         buttons = buttons.child(aliases_toggle(on, p).on_press(move |s: &mut App| s.artist_with_aliases = !on));
     }
+    buttons = buttons.children(link);
     if linked {
         let who = info.name.clone();
         buttons = buttons.child(link_button("open-artist", "Go to artist", p).on_press_tx(move |s: &mut App, tx| s.show_artist(&who, tx)));
@@ -169,7 +177,11 @@ fn related(s: &App, info: &ArtistPage, p: &Palette) -> El {
         if names.is_empty() {
             continue;
         }
-        let list = names.into_iter().fold(row().gap(8.0).flex_wrap(), |list, name| list.child(artist_pill(name, known(name, &s.tracks), p)));
+        let list = names.into_iter().fold(row().gap(8.0).flex_wrap(), |list, name| {
+            let who = name.clone();
+            let remove = remove_button(format!("unlink-{}-{name}", relation.id()), &format!("Remove {name}"), p).on_press(move |s: &mut App| s.unlink_artist(relation, &who));
+            list.child(artist_pill(name, known(name, &s.tracks), p).pr(4.0).gap(4.0).child(remove))
+        });
         section = section.child(col().gap(6.0).child(text(relation.title()).font(SMALL).color(p.tx3)).child(list));
     }
     section
@@ -187,6 +199,134 @@ pub(super) fn artist_pill(name: &str, linked: bool, p: &Palette) -> El {
         .role("link")
         .on_press_tx(move |s: &mut App, tx| s.show_artist(&who, tx))
         .child(text(name.to_string()).font(TITLE).color(p.tx))
+}
+
+/// A small ✕ that removes a name from a pill or list.
+fn remove_button(key: String, label: &str, p: &Palette) -> El {
+    el().key(key)
+        .size(22.0, 22.0)
+        .radius(11.0)
+        .center()
+        .hover(p.ui)
+        .cursor(Cursor::Pointer)
+        .role("button")
+        .label(label.to_string())
+        .help(label.to_string())
+        .child(icon(&rune_kit::glyphs::CLOSE, 12.0).color(p.tx3))
+}
+
+/// "Also credited as" and the names merged into the page after the first, each with a ✕
+/// that takes it out of the merge.
+fn merged_names(names: &[String], p: &Palette) -> El {
+    let mut line = row().key("artist-aka").gap(6.0).center_y().flex_wrap().child(text("Also credited as").font(BODY).color(p.tx3));
+    for name in &names[1..] {
+        let who = name.clone();
+        line = line.child(
+            row()
+                .key(format!("aka-{name}"))
+                .h(24.0)
+                .pl(10.0)
+                .pr(2.0)
+                .gap(2.0)
+                .radius(12.0)
+                .center_y()
+                .fill(p.ui.alpha(0.4))
+                .child(text(name.clone()).font(BODY).color(p.tx2))
+                .child(remove_button(format!("unmerge-{name}"), &format!("Unmerge {name}"), p).on_press(move |s: &mut App| s.unmerge_artist(&who))),
+        );
+    }
+    line
+}
+
+/// The Link artist button, and while open its popover: what the name becomes (same artist,
+/// alias, band, member), a name field, and the library's names matching it.
+fn link_artist(s: &App, info: &ArtistPage, p: &Palette, kit: &Kit, layer: &mut Vec<El>) -> El {
+    let open = s.panel == Some(Panel::LinkArtist);
+    let trigger = secondary_button("artist-link", &icons::PLUS, "Link artist", p).expanded(open).on_press(|s: &mut App| s.open_link_artist());
+    if !open {
+        return trigger;
+    }
+    let typed = s.link_name.text.trim().to_string();
+    let taken: Vec<String> = info.names.iter().chain(info.related.iter().map(|(_, n)| n)).cloned().collect();
+    let found = suggest(&typed, &s.tracks, &taken, 6);
+    // Enter takes the library's spelling of what's typed, else it as typed.
+    let exact = found.iter().find(|n| n.eq_ignore_ascii_case(&typed)).cloned();
+    let field = TextInput::new(&s.link_name)
+        .placeholder("Artist name")
+        .label("Artist name")
+        .leading_icon(&rune_kit::glyphs::SEARCH)
+        .width(None)
+        .on_edit(|s: &mut App| &mut s.link_name)
+        .on_submit(move |s: &mut App, tx| {
+            let typed = s.link_name.text.trim().to_string();
+            s.link_artist(exact.as_deref().unwrap_or(&typed));
+            if s.panel.is_none() {
+                tx.blur();
+            }
+        })
+        .on_key(|s: &mut App, ev, _tx| {
+            if ev.key == rune::Key::Escape {
+                s.close_panel();
+                return true;
+            }
+            false
+        })
+        .build(kit)
+        .key("artist-link-name");
+    let kinds = segmented("artist-link-kind", &LinkChoice::ALL.map(|c| (c.id(), c.label())), s.link_choice.id(), p, |s: &mut App, id: &str| {
+        if let Some(c) = LinkChoice::ALL.into_iter().find(|c| c.id() == id) {
+            s.link_choice = c;
+        }
+        // Back to the name, so picking a kind doesn't stop typing.
+        s.link_name.focused = true;
+    });
+    let mut list = col().key("artist-link-options").gap(2.0);
+    for name in &found {
+        let who = name.clone();
+        list = list.child(link_option(format!("link-option-{name}"), name, None, p).on_press(move |s: &mut App| s.link_artist(&who)));
+    }
+    if !typed.is_empty() && !found.iter().any(|n| n.eq_ignore_ascii_case(&typed)) && !taken.iter().any(|n| n.eq_ignore_ascii_case(&typed)) {
+        let who = typed.clone();
+        list = list.child(link_option("link-option-new".into(), &format!("Add “{typed}”"), Some("Not in the library yet"), p).on_press(move |s: &mut App| s.link_artist(&who)));
+    }
+    let body = col()
+        .w(380.0)
+        .padding(12.0)
+        .gap(10.0)
+        .child(text(format!("Link {} to…", info.name)).font(TITLE).color(p.tx))
+        .child(kinds)
+        .child(hint(s.link_choice.explain(), p))
+        .child(field)
+        .child(list)
+        .key("artist-link-panel")
+        .role("dialog")
+        .label("Link artist")
+        .modal(true, |s: &mut App| s.close_panel())
+        .focus_return("artist-link");
+    layer.push(scrim("artist-link-scrim", |s: &mut App| s.close_panel()));
+    layer.push(popover::anchored(kit, popover::raised(kit, body, 10.0), "artist-link", Placement::BottomStart, 6.0));
+    trigger
+}
+
+/// A pickable name in the Link artist popover, with an optional note under it.
+fn link_option(key: String, label: &str, note: Option<&str>, p: &Palette) -> El {
+    let mut lines = col().gap(1.0).grow(1.0).shrink().child(text(label.to_string()).font(BODY).color(p.tx).truncate());
+    if let Some(note) = note {
+        lines = lines.child(text(note.to_string()).font(SMALL).color(p.tx3));
+    }
+    row()
+        .key(key)
+        .min_h(30.0)
+        .px(8.0)
+        .py(4.0)
+        .center_y()
+        .radius(6.0)
+        .hover(p.ui.alpha(0.35))
+        .press(p.ui.alpha(0.6))
+        .cursor(Cursor::Pointer)
+        .role("option")
+        .label(label.to_string())
+        .child(lines)
 }
 
 /// The switch that adds their aliases' releases and credits to the page.

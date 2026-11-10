@@ -49,7 +49,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         .children(toolbar)
         .child(match (s.open_album(), s.open_artist(), s.open_label()) {
             (Some(a), _, _) => albums::album_page(s, a, &p),
-            (None, Some(name), _) => artists::artist_page(s, name, &p),
+            (None, Some(name), _) => artists::artist_page(s, name, &p, &kit, &mut layer),
             (None, None, Some(name)) => labels::label_page(s, name, &p),
             (None, None, None) if s.page == crate::app::Page::Search => search::search_page(s, &p),
             (None, None, None) if s.page == crate::app::Page::Settings => settings::settings_page(s, &p),

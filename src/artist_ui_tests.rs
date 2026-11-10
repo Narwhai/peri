@@ -343,7 +343,7 @@ fn merged_names_open_one_page_and_links_lead_to_related_artists() {
     rt.update(|s, tx| s.show_artist("Somebody", tx));
     settle(&mut rt);
     assert_eq!(text_of(&rt, "artist-name"), "The Alchemist", "the album artist of Mercy outweighs Somebody's one album");
-    assert_eq!(text_of(&rt, "artist-aka"), "Also credited as Somebody");
+    assert!(rt.find("aka-Somebody").is_some(), "Also credited as Somebody");
     assert!(rt.find("artist-albums").is_some());
     assert!(rt.find("credits").is_none(), "Elsewhere's producer credit is on one of the merged artist's own albums now");
     assert!(rt.find("artist-related").is_some());
@@ -386,4 +386,71 @@ fn include_aliases_adds_what_they_released_under_other_names_and_play_follows() 
     click(&mut rt, "artist-pill-The Alchemist");
     assert!(rt.find("artist-aliases").is_some());
     assert!(rt.find("credits").is_none(), "his Elsewhere producer credit is on an album of his own now");
+}
+
+fn type_text(rt: &mut Runtime<App>, text: &str) {
+    for c in text.chars() {
+        rt.key(KeyEvent { key: Key::Text(c.to_string()), mods: Mods::default() });
+    }
+    settle(rt);
+}
+
+#[test]
+fn link_artist_merges_links_and_removes_names_and_saves_them() {
+    let prefs = Prefs::new("ui", "{}");
+    let mut rt = prefs.runtime();
+    rt.update(|s, tx| s.show_artist("Somebody", tx));
+    settle(&mut rt);
+    let saved = || crate::base::store::Store::at(prefs.0.join("prefs.json")).load_relations().expect("readable");
+
+    // Same artist, picked from the library's names as typed.
+    click(&mut rt, "artist-link");
+    assert!(rt.find("artist-link-panel").is_some());
+    type_text(&mut rt, "alch");
+    assert!(rt.find("link-option-The Alchemist").is_some(), "the library's name matches");
+    assert!(rt.find("link-option-new").is_some(), "and what's typed can be added as is");
+    click(&mut rt, "link-option-The Alchemist");
+    assert!(rt.find("artist-link-panel").is_none(), "picking closes the popover");
+    assert_eq!(saved().merges, [strings(&["Somebody", "The Alchemist"])]);
+    assert_eq!(text_of(&rt, "artist-name"), "The Alchemist", "the merged page now leads with the album artist");
+
+    // An alias that isn't in the library: Enter adds it as typed.
+    click(&mut rt, "artist-link");
+    click(&mut rt, "alias");
+    type_text(&mut rt, "Nobody Known");
+    assert!(rt.find("link-option-The Alchemist").is_none(), "their own names aren't offered");
+    rt.key(KeyEvent { key: Key::Enter, mods: Mods::default() });
+    settle(&mut rt);
+    assert_eq!(saved().links, [crate::relations::Link { from: "Somebody".into(), kind: crate::relations::LinkKind::Alias, to: "Nobody Known".into() }]);
+    assert!(rt.find("artist-pill-Nobody Known").is_some());
+
+    // A band member, from the band's side.
+    click(&mut rt, "artist-link");
+    click(&mut rt, "has-member");
+    type_text(&mut rt, "cleo");
+    click(&mut rt, "link-option-Cleo Reed");
+    assert!(rt.find("unlink-member-Cleo Reed").is_some());
+
+    // Removing: the alias, then Somebody out of the merge.
+    click(&mut rt, "unlink-alias-Nobody Known");
+    assert!(rt.find("artist-pill-Nobody Known").is_none());
+    click(&mut rt, "unmerge-Somebody");
+    assert!(saved().merges.is_empty());
+    assert_eq!(rt.state.page, Page::Artist("The Alchemist".into()), "the page opened as Somebody moves to the name left");
+    assert_eq!(saved().links.len(), 1, "Cleo Reed's membership stays with Somebody");
+    assert!(rt.state.error.is_none(), "{:?}", rt.state.error);
+}
+
+#[test]
+fn link_artist_refuses_while_the_saved_links_are_unreadable() {
+    let prefs = Prefs::new("refuse", r#"{ "linkz": [] }"#);
+    let mut rt = prefs.runtime();
+    rt.update(|s, tx| s.show_artist("Somebody", tx));
+    settle(&mut rt);
+    click(&mut rt, "artist-link");
+    type_text(&mut rt, "Anyone");
+    click(&mut rt, "link-option-new");
+    assert!(rt.state.error.as_deref().is_some_and(|e| e.contains("couldn't be read")), "{:?}", rt.state.error);
+    let file = std::fs::read_to_string(prefs.0.join("prefs.json")).unwrap();
+    assert!(file.contains("linkz"), "the hand-edited entry is left alone");
 }

@@ -218,6 +218,15 @@ fn scene_related(s: &mut App) {
     s.artist_with_aliases = true;
 }
 
+/// The Link artist popover open on The Alchemist's page, a name typed.
+fn scene_link(s: &mut App) {
+    scene_related(s);
+    s.artist_with_aliases = false;
+    s.open_link_artist();
+    s.link_choice = relations::LinkChoice::Alias;
+    s.link_name = rune::TextEdit::new("ar");
+}
+
 /// An artist credited on songs in several roles: their pills line up by role.
 fn scene_credits(s: &mut App) {
     use credits::{Credit, Role};
@@ -306,6 +315,7 @@ fn main() {
             ("artist", scene_artist),
             ("credits", scene_credits),
             ("related", scene_related),
+            ("link", scene_link),
             ("label", scene_label),
             ("settings", scene_settings),
         ],

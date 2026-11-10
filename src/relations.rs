@@ -42,6 +42,52 @@ pub enum LinkKind {
     MemberOf,
 }
 
+/// What the Link artist popover adds between the open artist and another name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LinkChoice {
+    /// The other name is the same artist: merge it into their page.
+    Merge,
+    /// The other name is another name they release as.
+    Alias,
+    /// They're a member of the other name's band.
+    MemberOf,
+    /// The other name is a member of their band.
+    HasMember,
+}
+
+impl LinkChoice {
+    pub const ALL: [LinkChoice; 4] = [LinkChoice::Merge, LinkChoice::Alias, LinkChoice::MemberOf, LinkChoice::HasMember];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            LinkChoice::Merge => "Same artist",
+            LinkChoice::Alias => "Alias",
+            LinkChoice::MemberOf => "Member of",
+            LinkChoice::HasMember => "Has member",
+        }
+    }
+
+    /// A stable id, for keys.
+    pub fn id(self) -> &'static str {
+        match self {
+            LinkChoice::Merge => "merge",
+            LinkChoice::Alias => "alias",
+            LinkChoice::MemberOf => "member-of",
+            LinkChoice::HasMember => "has-member",
+        }
+    }
+
+    /// What adding a name does, for the popover.
+    pub fn explain(self) -> &'static str {
+        match self {
+            LinkChoice::Merge => "One page for both names: everything credited to either shows together.",
+            LinkChoice::Alias => "Another name they release as. Each keeps its own page and lists the other.",
+            LinkChoice::MemberOf => "A band they're a member of.",
+            LinkChoice::HasMember => "A member of their band.",
+        }
+    }
+}
+
 /// How a related artist relates to the one whose page lists them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Relation {
@@ -55,6 +101,15 @@ pub enum Relation {
 
 impl Relation {
     pub const ALL: [Relation; 3] = [Relation::Alias, Relation::MemberOf, Relation::Member];
+
+    /// A stable id, for keys.
+    pub fn id(self) -> &'static str {
+        match self {
+            Relation::Alias => "alias",
+            Relation::MemberOf => "member-of",
+            Relation::Member => "member",
+        }
+    }
 
     /// The heading their names list under on an artist page.
     pub fn title(self) -> &'static str {
@@ -145,6 +200,67 @@ impl Relations {
     }
 }
 
+impl Relations {
+    /// Records `choice` between the artist `name` (any of their merged names) and `other`.
+    /// Errs when `other` is blank, already one of their names, or already related that way.
+    pub fn add(&mut self, name: &str, choice: LinkChoice, other: &str) -> Result<(), String> {
+        let other = other.trim();
+        if other.is_empty() {
+            return Err("Type an artist's name to link".into());
+        }
+        let names = self.merged(name);
+        if among(&names, other) {
+            return Err(format!("{other} is already one of this artist's names"));
+        }
+        let relation = match choice {
+            LinkChoice::Merge => None,
+            LinkChoice::Alias => Some(Relation::Alias),
+            LinkChoice::MemberOf => Some(Relation::MemberOf),
+            LinkChoice::HasMember => Some(Relation::Member),
+        };
+        if let Some(relation) = relation
+            && self.related(&names).iter().any(|(r, n)| *r == relation && same(n, other))
+        {
+            return Err(format!("{other} is already linked as {}", choice.label().to_lowercase()));
+        }
+        let name = name.trim().to_string();
+        let other = other.to_string();
+        match choice {
+            LinkChoice::Merge => match self.merges.iter_mut().find(|m| among(m, &name)) {
+                Some(merge) => merge.push(other),
+                None => self.merges.push(vec![name, other]),
+            },
+            LinkChoice::Alias => self.links.push(Link { from: name, kind: LinkKind::Alias, to: other }),
+            LinkChoice::MemberOf => self.links.push(Link { from: name, kind: LinkKind::MemberOf, to: other }),
+            LinkChoice::HasMember => self.links.push(Link { from: other, kind: LinkKind::MemberOf, to: name }),
+        }
+        Ok(())
+    }
+
+    /// Removes every link that makes `other` related to the artist with these merged `names`
+    /// as `relation`.
+    pub fn unlink(&mut self, names: &[String], relation: Relation, other: &str) {
+        self.links.retain(|l| {
+            let ours = |a: &str, b: &str| among(names, a) && same(b, other);
+            let hit = match (relation, l.kind) {
+                (Relation::Alias, LinkKind::Alias) => ours(&l.from, &l.to) || ours(&l.to, &l.from),
+                (Relation::MemberOf, LinkKind::MemberOf) => ours(&l.from, &l.to),
+                (Relation::Member, LinkKind::MemberOf) => ours(&l.to, &l.from),
+                _ => false,
+            };
+            !hit
+        });
+    }
+
+    /// Takes `name` out of every merge, dropping merges left with one name.
+    pub fn unmerge(&mut self, name: &str) {
+        for merge in &mut self.merges {
+            merge.retain(|n| !same(n, name));
+        }
+        self.merges.retain(|m| m.len() > 1);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -193,6 +309,40 @@ mod tests {
         assert_eq!(r.with_aliases("mf doom"), ["mf doom", "Viktor Vaughn", "Victor Vaughn", "King Geedorah"]);
         assert_eq!(r.with_aliases("King Geedorah")[0], "King Geedorah");
         assert_eq!(r.with_aliases("KMD"), ["KMD"]);
+    }
+
+    #[test]
+    fn adding_merges_into_an_existing_merge_and_links_each_way() {
+        let mut r = Relations::default();
+        r.add("Earl Sweatshirt", LinkChoice::Merge, " Thebe Kgositsile ").expect("merge");
+        r.add("thebe kgositsile", LinkChoice::Merge, "randomblackdude").expect("joins their merge");
+        assert_eq!(r.merges, [strings(&["Earl Sweatshirt", "Thebe Kgositsile", "randomblackdude"])]);
+        r.add("Earl Sweatshirt", LinkChoice::HasMember, "Nobody").expect("member");
+        r.add("Earl Sweatshirt", LinkChoice::MemberOf, "Odd Future").expect("band");
+        r.add("Earl Sweatshirt", LinkChoice::Alias, "Other Name").expect("alias");
+        assert_eq!(r.links, [link("Nobody", LinkKind::MemberOf, "Earl Sweatshirt"), link("Earl Sweatshirt", LinkKind::MemberOf, "Odd Future"), link("Earl Sweatshirt", LinkKind::Alias, "Other Name")]);
+        assert!(r.add("Earl Sweatshirt", LinkChoice::Alias, "  ").is_err());
+        assert!(r.add("Earl Sweatshirt", LinkChoice::Alias, "RANDOMBLACKDUDE").is_err(), "already their name");
+        assert!(r.add("randomblackdude", LinkChoice::Alias, "other name").is_err(), "already linked, from any of their names");
+        assert!(r.add("Odd Future", LinkChoice::HasMember, "earl sweatshirt").is_err(), "the same link from the other side");
+        assert_eq!(r.links.len(), 3);
+    }
+
+    #[test]
+    fn unlinking_and_unmerging_remove_only_that_name() {
+        let mut r = Relations {
+            merges: vec![strings(&["A", "B", "C"]), strings(&["X", "y"])],
+            links: vec![link("B", LinkKind::Alias, "Z"), link("z", LinkKind::Alias, "c"), link("A", LinkKind::MemberOf, "Band"), link("Kid", LinkKind::MemberOf, "A"), link("Q", LinkKind::Alias, "Z")],
+        };
+        let names = r.merged("A");
+        r.unlink(&names, Relation::Alias, "Z");
+        r.unlink(&names, Relation::Member, "kid");
+        assert_eq!(r.links, [link("A", LinkKind::MemberOf, "Band"), link("Q", LinkKind::Alias, "Z")]);
+        r.unlink(&names, Relation::Member, "Band");
+        assert_eq!(r.links.len(), 2, "Band is a band they're in, not a member");
+        r.unmerge("b");
+        r.unmerge("Y");
+        assert_eq!(r.merges, [strings(&["A", "C"])]);
     }
 
     #[test]

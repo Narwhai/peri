@@ -106,4 +106,8 @@ impl Store {
         }
         self.prefs.get(ARTISTS_KEY).ok_or_else(|| format!("Couldn't read \"{ARTISTS_KEY}\" in the preferences: check its merges and links"))
     }
+
+    pub fn save_relations(&mut self, relations: &crate::relations::Relations) -> Result<(), String> {
+        self.prefs.set(ARTISTS_KEY, relations).map_err(|e| format!("Couldn't save the artist links: {e}"))
+    }
 }

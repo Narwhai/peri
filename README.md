@@ -84,7 +84,9 @@ Every artist name is a link: in song rows, titles ("Calypso Gene (feat. Silka & 
 
 ### Related artists
 
-Artist relations live under `artists` in `prefs.json`, edited by hand for now (the app reads them at launch):
+On an artist's page, **Link artist** opens a popover: pick **Same artist** (merge), **Alias**, **Member of** or **Has member**, then type a name. Names the library knows are suggested; Enter or **Add "…"** links a name it doesn't have yet, which turns into a link once music under that name arrives. The ✕ on a related artist removes the link, and the ✕ on a name under "Also credited as" takes it out of the merge. Changes save at once.
+
+They're saved under `artists` in `prefs.json`, which can also be edited by hand while the app is closed:
 
 ```json
 "artists": {
@@ -124,7 +126,7 @@ cargo test                                                   # unit + headless U
 RUNE_MUSIC_DIR=~/Music cargo test --release real_library -- --ignored --nocapture
 RUNE_MUSIC_FILE=song.flac cargo test --release real_output -- --ignored   # plays muted
 RUNE_MUSIC_DIR=~/Music cargo test --release real_library_groups -- --ignored --nocapture
-cargo run -- --snap out.png --scene playing --theme light    # scenes: library playing search error grouped filter views sort albums album-list album artist related
+cargo run -- --snap out.png --scene playing --theme light    # scenes: library playing search error grouped filter views sort albums album-list album artist related link
 ```
 
 Headless runs (`--snap`, `--script`, `--tree`) never open the audio device and keep views in memory.

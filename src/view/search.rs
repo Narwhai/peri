@@ -18,7 +18,7 @@ pub(super) fn search_page(s: &App, p: &Palette) -> El {
         );
     }
     if let Some(info) = &found.artist {
-        body = body.child(artists::head(s, info, true, p)).children(artists::sections(s, info, p));
+        body = body.child(artists::head(s, info, None, p)).children(artists::sections(s, info, p));
     }
     if !found.artists.is_empty() {
         let mut list = row().gap(8.0).flex_wrap();

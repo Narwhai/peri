@@ -46,6 +46,8 @@ pub enum Panel {
     Group,
     Filter,
     Columns,
+    /// The artist page's Link artist popover.
+    LinkArtist,
 }
 
 /// What fills the space between the toolbar and the player.
@@ -115,6 +117,11 @@ pub struct App {
     pub library: Vec<PathBuf>,
     /// Merges and links between artists, from the preferences file (edited by hand for now).
     pub relations: crate::relations::Relations,
+    /// Set when the saved relations couldn't be read: editing them would overwrite the file.
+    relations_unreadable: bool,
+    /// The Link artist popover: what the picked name becomes, and the name field.
+    pub link_choice: crate::relations::LinkChoice,
+    pub link_name: TextEdit,
     store: Store,
     /// Collapsed group titles in the active view (this run only).
     pub collapsed: std::collections::HashSet<String>,
@@ -182,7 +189,10 @@ impl App {
             list_version: 0,
             base: store.load(),
             library: store.load_library(),
+            relations_unreadable: relations_error.is_some(),
             relations,
+            link_choice: crate::relations::LinkChoice::Merge,
+            link_name: TextEdit::new(""),
             store,
             collapsed: Default::default(),
             panel: None,
@@ -203,7 +213,7 @@ impl App {
             shuffle: false,
             repeat: Repeat::Off,
             cover: None,
-            error: relations_error,
+            error: relations_error.clone(),
             scan: None,
             drop_hover: false,
             details: None,
@@ -484,6 +494,73 @@ impl App {
     pub fn show_artist(&mut self, name: &str, tx: &mut Tx) {
         self.go_to(Page::Artist(name.to_string()));
         tx.scroll_to_instant("artist-page", 0.0, 0.0);
+    }
+
+    /// Changes the artist relations with `edit` and saves them. Refuses while the saved ones
+    /// couldn't be read, so the file's hand edits aren't overwritten.
+    fn edit_relations(&mut self, edit: impl FnOnce(&mut crate::relations::Relations) -> Result<(), String>) -> Result<(), String> {
+        if self.relations_unreadable {
+            return Err("The artist links in the preferences file couldn't be read: fix or remove its \"artists\" entry first".into());
+        }
+        edit(&mut self.relations)?;
+        self.store.save_relations(&self.relations)
+    }
+
+    /// Links the open artist to `other` as the popover's choice says, closing it on success.
+    pub fn link_artist(&mut self, other: &str) {
+        let Some(name) = self.open_artist().map(str::to_string) else { return };
+        let choice = self.link_choice;
+        match self.edit_relations(|r| r.add(&name, choice, other)) {
+            Ok(()) => {
+                self.error = None;
+                self.close_panel();
+            }
+            Err(e) => self.error = Some(e),
+        }
+    }
+
+    /// Removes `other` as related to the open artist in that way.
+    pub fn unlink_artist(&mut self, relation: crate::relations::Relation, other: &str) {
+        let Some(name) = self.open_artist() else { return };
+        let names = self.relations.merged(name);
+        if let Err(e) = self.edit_relations(|r| {
+            r.unlink(&names, relation, other);
+            Ok(())
+        }) {
+            self.error = Some(e);
+        }
+    }
+
+    /// Takes `name` out of the open artist's merge. When it's the name the page is open under,
+    /// the page moves to one of their other names.
+    pub fn unmerge_artist(&mut self, name: &str) {
+        let Some(open) = self.open_artist().map(str::to_string) else { return };
+        let rest: Vec<String> = self.relations.merged(&open).into_iter().filter(|n| !n.eq_ignore_ascii_case(name)).collect();
+        match self.edit_relations(|r| {
+            r.unmerge(name);
+            Ok(())
+        }) {
+            Ok(()) => {
+                if open.eq_ignore_ascii_case(name)
+                    && let Some(other) = rest.first()
+                {
+                    self.page = Page::Artist(other.clone());
+                }
+            }
+            Err(e) => self.error = Some(e),
+        }
+    }
+
+    /// Opens the Link artist popover with an empty field, focused.
+    pub fn open_link_artist(&mut self) {
+        let open = self.panel != Some(Panel::LinkArtist);
+        self.close_panel();
+        if open {
+            let mut edit = TextEdit::new("");
+            edit.focused = true;
+            self.link_name = edit;
+            self.panel = Some(Panel::LinkArtist);
+        }
     }
 
     /// The label shown on the label page.

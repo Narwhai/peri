@@ -112,6 +112,7 @@ fn trigger_key(panel: Panel) -> &'static str {
         Panel::Group => "group",
         Panel::Filter => "filter",
         Panel::Columns => "columns",
+        Panel::LinkArtist => "artist-link",
     }
 }
 
@@ -134,7 +135,7 @@ fn tool_button(key: &'static str, glyph: &'static rune::Icon, label: String, act
 }
 
 /// A segmented control: one pill per option, the current one filled.
-fn segmented(key: &'static str, options: &[(&'static str, &'static str)], current: &str, p: &Palette, choose: impl Fn(&mut App, &str) + Clone + 'static) -> El {
+pub(super) fn segmented(key: &'static str, options: &[(&'static str, &'static str)], current: &str, p: &Palette, choose: impl Fn(&mut App, &str) + Clone + 'static) -> El {
     let mut seg = row().key(key).h(28.0).padding(2.0).gap(2.0).radius(8.0).fill(p.ui.alpha(0.45)).role("radiogroup").label(key).focus_group();
     for &(value, label) in options {
         let on = value == current;
