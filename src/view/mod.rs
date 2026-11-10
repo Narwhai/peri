@@ -52,7 +52,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
             (None, Some(name), _) => artists::artist_page(s, name, &p, &kit, &mut layer),
             (None, None, Some(name)) => labels::label_page(s, name, &p),
             (None, None, None) if s.page == crate::app::Page::Search => search::search_page(s, &p),
-            (None, None, None) if s.page == crate::app::Page::Settings => settings::settings_page(s, &p),
+            (None, None, None) if s.page == crate::app::Page::Settings => settings::settings_page(s, &p, &kit),
             (None, None, None) => list::list(s, &p, cx),
         })
         .child(player::now_playing(s, &p))

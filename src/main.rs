@@ -13,6 +13,7 @@ mod credits;
 mod details;
 mod icons;
 mod label;
+mod lastfm;
 mod library;
 mod palette;
 mod queue;
@@ -30,6 +31,8 @@ mod table_ui_tests;
 mod base_ui_tests;
 #[cfg(test)]
 mod label_ui_tests;
+#[cfg(test)]
+mod lastfm_ui_tests;
 #[cfg(test)]
 mod scroll_ui_tests;
 #[cfg(test)]

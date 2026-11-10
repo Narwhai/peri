@@ -12,6 +12,7 @@ use crate::base::property::{Mode, Property};
 use crate::covers::Covers;
 use crate::base::store::{Base, Store};
 use crate::base::view::{Evaluated, Layout, Section, Widths, evaluate};
+use crate::lastfm::{self, scrobbling::{Effect, Scrobbling}};
 use crate::library::{self, ScanMsg, Track};
 use crate::queue::{Queue, Repeat, Rng};
 
@@ -162,15 +163,29 @@ pub struct App {
     rng: Rng,
     waker: Option<Waker>,
     images: Option<ImageCache>,
+    /// Last.fm: the connected account, and the playing song's scrobble.
+    pub lastfm: Scrobbling,
 }
 
 impl App {
     pub fn new(output: Output, store: Store) -> App {
+        App::with_lastfm(output, store, lastfm::built_in())
+    }
+
+    /// `new`, with `built_in` as the build's Last.fm API account: tests pick it, whatever
+    /// this build was given.
+    pub fn with_lastfm(output: Output, store: Store, built_in: Option<lastfm::Credentials>) -> App {
         let (relations, relations_error) = match store.load_relations() {
             Ok(r) => (r, None),
             Err(e) => (Default::default(), Some(e)),
         };
-        App {
+        let (lastfm, lastfm_error) = match store.load_lastfm() {
+            Ok(saved) => (saved, None),
+            Err(e) => (None, Some(e)),
+        };
+        let stale_session = lastfm.as_ref().is_some_and(|s| s.session.is_some());
+        let lastfm = Scrobbling::new(lastfm, built_in);
+        let mut app = App {
             tracks: Vec::new(),
             albums: Vec::new(),
             page: Page::Library,
@@ -213,7 +228,7 @@ impl App {
             shuffle: false,
             repeat: Repeat::Off,
             cover: None,
-            error: relations_error.clone(),
+            error: relations_error.clone().or(lastfm_error),
             scan: None,
             drop_hover: false,
             details: None,
@@ -221,7 +236,13 @@ impl App {
             rng: Rng::from_time(),
             waker: None,
             images: None,
+            lastfm,
+        };
+        // A session granted to another API key was dropped: forget it on disk too.
+        if stale_session && app.lastfm.session().is_none() {
+            app.save_lastfm();
         }
+        app
     }
 
     /// `AppSpec::setup`: keep the waker for the scan thread and cover decoding, then scan the
@@ -229,6 +250,11 @@ impl App {
     pub fn setup(&mut self, waker: Waker) {
         self.images = Some(ImageCache::new(waker.clone()));
         self.covers = Some(if matches!(self.output, Output::Silent) { Covers::synchronous(waker.clone()) } else { Covers::new(waker.clone()) });
+        // Headless runs and tests never reach the network.
+        if !matches!(self.output, Output::Silent) {
+            let wake = waker.clone();
+            self.lastfm.set_client(lastfm::Client::spawn(move || wake()));
+        }
         self.waker = Some(waker);
         let mut roots: Vec<PathBuf> = rune::extra_args().iter().map(PathBuf::from).collect();
         if roots.is_empty() {
@@ -831,10 +857,16 @@ impl App {
                 self.error = None;
                 tx.set_title(title);
                 tx.wake_after(TICK);
+                if let Some(track) = self.tracks.get(i)
+                    && let Err(e) = self.lastfm.started(track)
+                {
+                    self.error = Some(e);
+                }
             }
             Err(e) => {
                 self.playing = false;
                 self.error = Some(e);
+                self.lastfm.stopped();
             }
         }
         self.cover = self.images.as_ref().and_then(|cache| library::read_cover(&path).map(|bytes| cache.load(bytes)));
@@ -845,6 +877,7 @@ impl App {
             engine.stop();
         }
         self.playing = false;
+        self.lastfm.stopped();
         self.current = None;
         self.queue = None;
         self.position = 0.0;
@@ -903,6 +936,7 @@ impl App {
         }
         self.playing = false;
         self.position = 0.0;
+        self.lastfm.stopped();
     }
 
     fn track_ended(&mut self, tx: &mut Tx) {
@@ -963,6 +997,76 @@ impl App {
             Output::Open(engine) => Some(engine),
             Output::Closed | Output::Silent => None,
         }
+    }
+
+    // Last.fm
+
+    /// Settings' "Connect": opens Last.fm's approval page once a token comes back.
+    pub fn lastfm_connect(&mut self) {
+        self.lastfm.connect();
+        self.save_lastfm();
+    }
+
+    /// Settings' "Get an API account…".
+    pub fn lastfm_create_account(&mut self, tx: &mut Tx) {
+        if let Err(e) = tx.open_url(lastfm::CREATE_ACCOUNT) {
+            self.lastfm.status = Some(format!("Couldn't open {}: {e}", lastfm::CREATE_ACCOUNT));
+        }
+    }
+
+    /// Settings' "Finish connecting", after approving in the browser.
+    pub fn lastfm_finish(&mut self) {
+        self.lastfm.finish();
+    }
+
+    /// Settings' "Open the page again".
+    pub fn lastfm_reopen(&mut self, tx: &mut Tx) {
+        if let Some(url) = self.lastfm.approval_url()
+            && let Err(e) = tx.open_url(&url)
+        {
+            self.lastfm.status = Some(format!("Couldn't open {url}: {e}"));
+        }
+    }
+
+    pub fn lastfm_disconnect(&mut self) {
+        self.lastfm.disconnect();
+        self.lastfm.stopped();
+        self.save_lastfm();
+    }
+
+    /// Settings' "Remove credentials": forgets the account and the API key and secret.
+    pub fn lastfm_forget(&mut self) {
+        self.lastfm.forget();
+        self.save_lastfm();
+    }
+
+    fn save_lastfm(&mut self) {
+        if let Err(e) = self.store.save_lastfm(&self.lastfm.saved) {
+            self.error = Some(e);
+        }
+    }
+
+    /// Takes Last.fm's replies and follows the playing song; true when the view changes.
+    fn poll_lastfm(&mut self, now: f64, tx: &mut Tx) -> bool {
+        if let Err(e) = self.lastfm.tick(now, self.position, self.playing) {
+            self.error = Some(e);
+        }
+        let saved = self.lastfm.saved.clone();
+        let (changed, effects) = self.lastfm.drain();
+        if self.lastfm.saved != saved {
+            self.save_lastfm();
+        }
+        for effect in effects {
+            match effect {
+                Effect::OpenUrl(url) => {
+                    if let Err(e) = tx.open_url(&url) {
+                        self.lastfm.status = Some(format!("Couldn't open {url}: {e}"));
+                    }
+                }
+                Effect::Error(e) => self.error = Some(e),
+            }
+        }
+        changed
     }
 
     // Selection
@@ -1079,7 +1183,7 @@ fn reveal(path: &std::path::Path) -> Result<(), String> {
 }
 
 /// `AppSpec::poll`: take scan results, follow the playing track, and move on when it ends.
-pub fn poll(s: &mut App, _: f64, tx: &mut Tx) -> bool {
+pub fn poll(s: &mut App, now: f64, tx: &mut Tx) -> bool {
     let mut changed = s.drain_scan();
     if let Some(covers) = &s.covers {
         changed |= covers.drain();
@@ -1097,6 +1201,7 @@ pub fn poll(s: &mut App, _: f64, tx: &mut Tx) -> bool {
             tx.wake_after(TICK);
         }
     }
+    changed |= s.poll_lastfm(now, tx);
     changed
 }
 

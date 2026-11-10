@@ -123,3 +123,5 @@ line_icon!(INFO, "rm-info", "M12 3 A9 9 0 1 0 12.01 3 Z", "M12 11 V16.5", "M12 7
 line_icon!(COLUMNS, "rm-columns", "M3 5 H21 V19 H3 Z", "M9 5 V19", "M15 5 V19");
 line_icon!(FOLDER_OPEN, "rm-folder-open", "M3 7 V18 H19 L21.5 10.5 H7 L4.5 18", "M3 7 V5 H9 L11 7 H18 V10.5");
 line_icon!(SETTINGS, "rm-settings", "M4 7 H14", "M18 7 H20", "M14 5 V9", "M4 17 H6", "M10 17 H20", "M10 15 V19");
+line_icon!(EXTERNAL, "rm-external", "M15 3 H21 V9", "M10 14 L21 3", "M18 13 V19 H5 V6 H11");
+line_icon!(LINK, "rm-link", "M10 13 A5 5 0 0 0 17.5 13.5 L20.5 10.5 A5 5 0 0 0 13.5 3.5 L11.8 5.2", "M14 11 A5 5 0 0 0 6.5 10.5 L3.5 13.5 A5 5 0 0 0 10.5 20.5 L12.2 18.8");

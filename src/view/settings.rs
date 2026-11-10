@@ -1,6 +1,8 @@
-//! The settings page: the folders and files the library is made of, saved and scanned at launch.
+//! The settings page: the folders and files the library is made of, saved and scanned at launch,
+//! and the Last.fm account songs are scrobbled to.
 
 use rune::{Cursor, El, ScrollSpec, col, icon, row, text};
+use rune_kit::{Kit, TextInput};
 
 use super::albums::{back_label, secondary_button};
 use super::*;
@@ -8,7 +10,7 @@ use crate::palette::Palette;
 
 const PAGE_TITLE: TextStyle = TextStyle::new(28.0, 700.0);
 
-pub(super) fn settings_page(s: &App, p: &Palette) -> El {
+pub(super) fn settings_page(s: &App, p: &Palette, kit: &Kit) -> El {
     let back = row()
         .key("back")
         .h(28.0)
@@ -70,7 +72,8 @@ pub(super) fn settings_page(s: &App, p: &Palette) -> El {
         .gap(22.0)
         .child(back)
         .child(text("Settings").key("settings-title").font(PAGE_TITLE).color(p.tx))
-        .child(section);
+        .child(section)
+        .child(lastfm_section(s, p, kit));
     col().key("settings-page").w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: false }).child(body)
 }
 
@@ -88,4 +91,66 @@ fn icon_button_owned(key: String, glyph: &'static rune::Icon, help: &str, p: &Pa
         .label(help.to_string())
         .help(help.to_string())
         .child(icon(glyph, 15.0).color(p.tx2))
+}
+
+/// Connecting a Last.fm account: the API account's key and secret, approval in the browser,
+/// then the session that scrobbles.
+fn lastfm_section(s: &App, p: &Palette, kit: &Kit) -> El {
+    let lastfm = &s.lastfm;
+    let mut section = col().key("settings-lastfm").w_full().gap(10.0).child(text("Last.fm").font(HEADING).color(p.tx));
+    let note = |t: &str| text(t.to_string()).font(BODY).color(p.tx3).wrap();
+    if let Some(session) = lastfm.session() {
+        section = section
+            .child(text(format!("Scrobbling as {}.", session.name)).key("lastfm-connected").font(BODY).color(p.tx).wrap())
+            .child(note("Songs are scrobbled once they've played for half their length or four minutes. Failed scrobbles aren't retried."));
+        let mut buttons = row().gap(8.0).child(secondary_button("lastfm-disconnect", &rune_kit::glyphs::CLOSE, "Disconnect", p).on_press(|s: &mut App| s.lastfm_disconnect()));
+        if !lastfm.has_built_in() {
+            buttons = buttons.child(secondary_button("lastfm-forget", &icons::TRASH, "Remove credentials", p).on_press(|s: &mut App| s.lastfm_forget()));
+        }
+        section = section.child(buttons);
+    } else if lastfm.token.is_some() {
+        let finish = match lastfm.busy {
+            true => secondary_button("lastfm-finish", &icons::LINK, "Finishing…", p),
+            false => secondary_button("lastfm-finish", &icons::LINK, "Finish connecting", p).on_press(|s: &mut App| s.lastfm_finish()),
+        };
+        section = section.child(note("Allow access on the Last.fm page that opened in your browser, then finish connecting here.").key("lastfm-approve")).child(
+            row()
+                .gap(8.0)
+                .child(finish)
+                .child(secondary_button("lastfm-reopen", &icons::EXTERNAL, "Open the page again", p).on_press_tx(|s: &mut App, tx| s.lastfm_reopen(tx)))
+                .child(secondary_button("lastfm-cancel", &rune_kit::glyphs::CLOSE, "Cancel", p).on_press(|s: &mut App| s.lastfm.cancel())),
+        );
+    } else if lastfm.has_built_in() {
+        let connect = match lastfm.busy {
+            true => secondary_button("lastfm-connect", &icons::LINK, "Connecting…", p),
+            false => secondary_button("lastfm-connect", &icons::LINK, "Connect Last.fm", p).on_press(|s: &mut App| s.lastfm_connect()),
+        };
+        section = section
+            .child(note("Scrobble what you play to your Last.fm account. Connecting opens Last.fm in your browser to sign in and allow access."))
+            .child(row().child(connect));
+    } else {
+        let field = |label: &str, input: TextInput| row().w_full().gap(12.0).center_y().child(text(label.to_string()).font(BODY).color(p.tx2).w(110.0)).child(input.build(kit).grow(1.0).shrink());
+        let key = TextInput::new(&lastfm.key).label("API key").placeholder("32 hex digits").width(None).on_edit(|s: &mut App| &mut s.lastfm.key);
+        let secret = TextInput::new(&lastfm.secret).label("Shared secret").placeholder("32 hex digits").width(None).on_edit(|s: &mut App| &mut s.lastfm.secret);
+        let connect = match lastfm.busy {
+            true => secondary_button("lastfm-connect", &icons::LINK, "Connecting…", p),
+            false => secondary_button("lastfm-connect", &icons::LINK, "Connect", p).on_press(|s: &mut App| s.lastfm_connect()),
+        };
+        let mut buttons = row()
+            .gap(8.0)
+            .child(connect)
+            .child(secondary_button("lastfm-create", &icons::EXTERNAL, "Get an API account…", p).on_press_tx(|s: &mut App, tx| s.lastfm_create_account(tx)));
+        if lastfm.saved.credentials.is_some() {
+            buttons = buttons.child(secondary_button("lastfm-forget", &icons::TRASH, "Remove credentials", p).on_press(|s: &mut App| s.lastfm_forget()));
+        }
+        section = section
+            .child(note("This build has no Last.fm API account of its own, so scrobbling needs yours: create one, then paste its API key and shared secret here. They're saved in the preferences file, unencrypted."))
+            .child(field("API key", key).key("lastfm-key"))
+            .child(field("Shared secret", secret).key("lastfm-secret"))
+            .child(buttons);
+    }
+    if let Some(status) = &lastfm.status {
+        section = section.child(text(status.clone()).key("lastfm-status").font(SMALL).color(p.red).wrap());
+    }
+    section
 }

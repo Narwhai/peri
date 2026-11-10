@@ -63,6 +63,8 @@ pub struct Track {
     pub duration: Option<f64>,
     /// When the file was created (else last modified), in seconds since the Unix epoch.
     pub added: Option<i64>,
+    /// The MusicBrainz recording ID (`MUSICBRAINZ_TRACKID`), sent with scrobbles.
+    pub recording_id: Option<String>,
 }
 
 impl Track {
@@ -234,6 +236,7 @@ fn read_track(path: PathBuf) -> Track {
         number: tag.and_then(|t| t.track()),
         duration: (duration > 0.0).then_some(duration),
         added,
+        recording_id: item(ItemKey::MusicBrainzRecordingId),
         path,
         ..Track::default()
     }

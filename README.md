@@ -21,6 +21,24 @@ On Linux, building needs `libxkbcommon`, `wayland` and `alsa-lib` (PipeWire work
 - A now-playing bar with cover art (embedded, else `cover.jpg`/`folder.jpg` next to the file).
 - Play/pause, previous/next, a seek bar, volume and mute, shuffle, and repeat (off/all/one).
 
+## Last.fm scrobbling
+
+- **Connect:** in **Settings → Last.fm** press **Connect Last.fm**, allow access on the page that opens in your browser, then press **Finish connecting**.
+- **The app's API account:** Last.fm signs every request with an API key and shared secret. They're read at build time and never committed:
+
+  ```sh
+  RUNE_LASTFM_API_KEY=… RUNE_LASTFM_SECRET=… cargo build --release
+  ```
+
+  Set both or neither; one alone fails the build. Anything shipped in a binary can be extracted, so the worst a leak allows is someone sending requests as this app (and Last.fm suspending the key). It can't reach anyone's account, which needs their own session key.
+- **Builds without a key** (built from source without the variables) ask for the user's own instead: create an API account at <https://www.last.fm/api/account/create> and paste its API key and shared secret before connecting.
+- **Changing keys:** a session belongs to the API key it was granted to. When the key in use changes (a new built-in key, or a user's key replaced by a built-in one), the saved session is dropped and Settings asks to connect again.
+- **What's sent:** "now playing" when a song starts, and a scrobble once it has played for half its length or four minutes, whichever comes first. Songs of 30 seconds or less, and songs without an artist tag, aren't scrobbled. Seeking ahead doesn't count as listening.
+- **Tags:** the artist tag as written ("A & B feat. C"), the title, album, album artist (when it differs), track number, length and MusicBrainz recording ID.
+- **Failures:** a scrobble that fails or that Last.fm ignores shows an error and is dropped, not retried. If Last.fm stops accepting the session (access revoked), the app disconnects and asks you to connect again.
+- **Saved:** the session key, user name and the API key it belongs to are kept unencrypted under `lastfm` in `prefs.json`, with the user's own API key and secret in builds without one. The built-in key is never saved. **Disconnect** forgets the session; **Remove credentials** (only in builds without a key) forgets the user's key too.
+- Headless runs (`--snap`, `--script`) and tests never contact Last.fm.
+
 ## Views, filters and grouping
 
 Views work like Obsidian's [Bases](https://help.obsidian.md/bases/views). By default a view lists every song in a flat list. Change it from the toolbar under the header:

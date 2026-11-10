@@ -12,6 +12,7 @@ const APP_ID: &str = "rune-music";
 const KEY: &str = "base";
 const LIBRARY_KEY: &str = "library";
 const ARTISTS_KEY: &str = "artists";
+const LASTFM_KEY: &str = "lastfm";
 /// Bumped when the saved shape changes incompatibly.
 const VERSION: u32 = 1;
 
@@ -109,5 +110,22 @@ impl Store {
 
     pub fn save_relations(&mut self, relations: &crate::relations::Relations) -> Result<(), String> {
         self.prefs.set(ARTISTS_KEY, relations).map_err(|e| format!("Couldn't save the artist links: {e}"))
+    }
+
+    /// The Last.fm API credentials and session; none when unset, an error when unreadable.
+    pub fn load_lastfm(&self) -> Result<Option<crate::lastfm::Saved>, String> {
+        if !self.prefs.contains(LASTFM_KEY) {
+            return Ok(None);
+        }
+        self.prefs.get(LASTFM_KEY).map(Some).ok_or_else(|| format!("Couldn't read \"{LASTFM_KEY}\" in the preferences"))
+    }
+
+    /// Saves the Last.fm settings, or removes them when there's nothing to keep.
+    pub fn save_lastfm(&mut self, saved: &crate::lastfm::Saved) -> Result<(), String> {
+        let result = match (&saved.credentials, &saved.session) {
+            (None, None) => self.prefs.remove(LASTFM_KEY),
+            _ => self.prefs.set(LASTFM_KEY, saved),
+        };
+        result.map_err(|e| format!("Couldn't save the Last.fm settings: {e}"))
     }
 }
