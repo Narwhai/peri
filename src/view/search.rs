@@ -21,7 +21,7 @@ pub(super) fn search_page(s: &App, p: &Palette) -> El {
         body = body.child(artists::head(s, info, true, p)).children(artists::sections(s, info, p));
     }
     if !found.artists.is_empty() {
-        let mut list = row().gap(8.0).wrap();
+        let mut list = row().gap(8.0).flex_wrap();
         for name in &found.artists {
             list = list.child(artists::artist_pill(name, true, p));
         }

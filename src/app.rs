@@ -87,6 +87,9 @@ pub struct App {
     pub artist_songs_open: Option<bool>,
     /// Whether the artist page's Credits section is folded. Reset on every page change.
     pub artist_credits_closed: bool,
+    /// Whether artist pages take in what the artist released under their aliases. Kept from
+    /// page to page for this run.
+    pub artist_with_aliases: bool,
     /// Where the library list is scrolled to (x, y), kept current while it shows.
     pub library_scroll: Live<[f32; 2]>,
     /// `library_scroll` when a page last opened from the library, where Back returns to.
@@ -167,6 +170,7 @@ impl App {
             history: Vec::new(),
             artist_songs_open: None,
             artist_credits_closed: false,
+            artist_with_aliases: false,
             library_scroll: Live::new([0.0, 0.0]),
             library_scroll_saved: [0.0, 0.0],
             covers: None,

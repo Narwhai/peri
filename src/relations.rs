@@ -97,6 +97,31 @@ impl Relations {
         }
     }
 
+    /// Every name of the artist `name` and of the artists they release as, through aliases of
+    /// aliases and the merges of each, `name`'s own merged names first.
+    pub fn with_aliases(&self, name: &str) -> Vec<String> {
+        let mut names = self.merged(name);
+        let mut at = 0;
+        while at < names.len() {
+            for link in self.links.iter().filter(|l| l.kind == LinkKind::Alias) {
+                let other = if same(&link.from, &names[at]) {
+                    &link.to
+                } else if same(&link.to, &names[at]) {
+                    &link.from
+                } else {
+                    continue;
+                };
+                for n in self.merged(other) {
+                    if !among(&names, &n) {
+                        names.push(n);
+                    }
+                }
+            }
+            at += 1;
+        }
+        names
+    }
+
     /// The artists linked to any of `names` (one artist's merged names), each once, in the
     /// order the links list them; none of `names` themselves.
     pub fn related(&self, names: &[String]) -> Vec<(Relation, String)> {
@@ -157,6 +182,17 @@ mod tests {
         );
         assert_eq!(r.related(&r.merged("Viktor Vaughn")), [(Relation::Alias, "MF DOOM".to_string())]);
         assert_eq!(r.related(&r.merged("KMD")), [(Relation::Member, "daniel dumile".to_string())]);
+    }
+
+    #[test]
+    fn aliases_gather_through_aliases_of_aliases_and_their_merges_but_not_bands() {
+        let r = Relations {
+            merges: vec![strings(&["Viktor Vaughn", "Victor Vaughn"])],
+            links: vec![link("MF DOOM", LinkKind::Alias, "Viktor Vaughn"), link("victor vaughn", LinkKind::Alias, "King Geedorah"), link("MF DOOM", LinkKind::MemberOf, "KMD")],
+        };
+        assert_eq!(r.with_aliases("mf doom"), ["mf doom", "Viktor Vaughn", "Victor Vaughn", "King Geedorah"]);
+        assert_eq!(r.with_aliases("King Geedorah")[0], "King Geedorah");
+        assert_eq!(r.with_aliases("KMD"), ["KMD"]);
     }
 
     #[test]

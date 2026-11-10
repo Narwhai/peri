@@ -347,7 +347,7 @@ pub(super) fn album_strip(s: &App, key: &str, title: &str, albums: &[usize], art
     for &o in albums {
         let card = small_card(s, key, o, artists, p);
         strip = strip.child(match pills.iter().find(|(a, _)| *a == o) {
-            Some((_, list)) => card.child(row().key(format!("{key}-roles{o}")).w_full().gap(4.0).pt(2.0).wrap().children(list.iter().cloned().map(table::pill_el))),
+            Some((_, list)) => card.child(row().key(format!("{key}-roles{o}")).w_full().gap(4.0).pt(2.0).flex_wrap().children(list.iter().cloned().map(table::pill_el))),
             None => card,
         });
     }
@@ -362,7 +362,7 @@ pub(super) fn album_strip(s: &App, key: &str, title: &str, albums: &[usize], art
 /// A titled block of album covers keyed `{key}`, `{key}{album}` per card, wrapping onto as
 /// many rows as it takes. With `artists`, each card names its artists too.
 pub(super) fn album_wall(s: &App, key: &str, title: &str, albums: &[usize], artists: bool, p: &Palette) -> El {
-    let mut wall = row().key(format!("{key}-wall")).w_full().gap(CARD_GAP).wrap();
+    let mut wall = row().key(format!("{key}-wall")).w_full().gap(CARD_GAP).flex_wrap();
     for &o in albums {
         wall = wall.child(small_card(s, key, o, artists, p));
     }

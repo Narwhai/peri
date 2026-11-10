@@ -57,7 +57,7 @@ pub fn search(query: &str, tracks: &[Track], albums: &[Album], relations: &Relat
     let mut ranked: Vec<(String, (String, usize))> = names.into_iter().collect();
     ranked.sort_by(|(ka, (_, ca)), (kb, (_, cb))| (*kb == query).cmp(&(*ka == query)).then(cb.cmp(ca)).then(ka.cmp(kb)));
     let mut ranked = ranked.into_iter().map(|(_, (name, _))| name);
-    let artist = ranked.next().map(|name| artist::page(&name, tracks, albums, relations));
+    let artist = ranked.next().map(|name| artist::page(&name, tracks, albums, relations, false));
     // A name merged into the top artist's page is already shown.
     let artists: Vec<String> = ranked.filter(|n| !artist.as_ref().is_some_and(|a| a.names.iter().any(|m| m.eq_ignore_ascii_case(n)))).collect();
 

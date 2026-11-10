@@ -19,7 +19,7 @@ const SONG_ROW_H: f32 = 40.0;
 const COVER_W: f32 = table::LEAD_W;
 
 pub(super) fn artist_page(s: &App, name: &str, p: &Palette) -> El {
-    let info = page(name, &s.tracks, &s.albums, &s.relations);
+    let info = page(name, &s.tracks, &s.albums, &s.relations, s.artist_with_aliases);
     let back = row()
         .key("back")
         .h(28.0)
@@ -46,7 +46,8 @@ pub(super) fn artist_page(s: &App, name: &str, p: &Palette) -> El {
 pub(super) fn sections(s: &App, info: &ArtistPage, p: &Palette) -> Vec<El> {
     let mut out = Vec::new();
     let pills: Vec<(usize, Vec<table::Pill>)> = info.album_credits.iter().map(|(a, roles)| (*a, album_pills(s.albums[*a].tracks.len(), roles, p))).collect();
-    out.extend(release_strips(s, "artist", &info.albums, false, &pills, p));
+    // Mixed with their aliases' releases, cards say which name each is under.
+    out.extend(release_strips(s, "artist", &info.albums, info.with_aliases, &pills, p));
     if !info.appears_on.is_empty() {
         out.push(songs(s, "appears-on", "Appears on", &info.appears_on, p));
     }
@@ -128,22 +129,27 @@ pub(super) fn head(s: &App, info: &ArtistPage, linked: bool, p: &Palette) -> El 
     }
     let mut buttons = row().gap(8.0);
     if !info.play_list(&s.albums).is_empty() {
-        let who = info.name.clone();
+        let (who, with_aliases) = (info.name.clone(), info.with_aliases);
         buttons = buttons.child(play_button("artist-play", "Play", p).on_press_tx(move |s: &mut App, tx| {
-            let list = page(&who, &s.tracks, &s.albums, &s.relations).play_list(&s.albums);
+            let list = page(&who, &s.tracks, &s.albums, &s.relations, with_aliases).play_list(&s.albums);
             if let Some(&first) = list.first() {
                 s.play_list(list, first, tx);
             }
         }));
     }
     if !info.discography(&s.albums).is_empty() {
-        let who = info.name.clone();
+        let (who, with_aliases) = (info.name.clone(), info.with_aliases);
         buttons = buttons.child(secondary_button("artist-discography", &icons::PLAY, "Play Discography", p).on_press_tx(move |s: &mut App, tx| {
-            let list = page(&who, &s.tracks, &s.albums, &s.relations).discography(&s.albums);
+            let list = page(&who, &s.tracks, &s.albums, &s.relations, with_aliases).discography(&s.albums);
             if let Some(&first) = list.first() {
                 s.play_list(list, first, tx);
             }
         }));
+    }
+    // Search results show the artist alone; their page can take in their aliases.
+    if !linked && info.has_aliases() {
+        let on = info.with_aliases;
+        buttons = buttons.child(aliases_toggle(on, p).on_press(move |s: &mut App| s.artist_with_aliases = !on));
     }
     if linked {
         let who = info.name.clone();
@@ -163,7 +169,7 @@ fn related(s: &App, info: &ArtistPage, p: &Palette) -> El {
         if names.is_empty() {
             continue;
         }
-        let list = names.into_iter().fold(row().gap(8.0).wrap(), |list, name| list.child(artist_pill(name, known(name, &s.tracks), p)));
+        let list = names.into_iter().fold(row().gap(8.0).flex_wrap(), |list, name| list.child(artist_pill(name, known(name, &s.tracks), p)));
         section = section.child(col().gap(6.0).child(text(relation.title()).font(SMALL).color(p.tx3)).child(list));
     }
     section
@@ -181,6 +187,27 @@ pub(super) fn artist_pill(name: &str, linked: bool, p: &Palette) -> El {
         .role("link")
         .on_press_tx(move |s: &mut App, tx| s.show_artist(&who, tx))
         .child(text(name.to_string()).font(TITLE).color(p.tx))
+}
+
+/// The switch that adds their aliases' releases and credits to the page.
+fn aliases_toggle(on: bool, p: &Palette) -> El {
+    let mark = el().w(16.0).h(16.0).radius(4.0).center();
+    let mark = if on { mark.fill(p.blue).child(icon(&rune_kit::glyphs::CHECK_SMALL, 14.0).color(rune::Color::WHITE)) } else { mark.border(1.5, p.tx3) };
+    row()
+        .key("artist-aliases")
+        .h(32.0)
+        .px(12.0)
+        .gap(8.0)
+        .radius(16.0)
+        .center_y()
+        .hover(p.ui.alpha(0.4))
+        .cursor(Cursor::Pointer)
+        .role("checkbox")
+        .checked(on)
+        .label("Include aliases")
+        .help("Also list what they released and are credited with under their other names")
+        .child(mark)
+        .child(text("Include aliases").font(TITLE).color(p.tx))
 }
 
 /// An outlined button beside Play.
@@ -220,7 +247,7 @@ fn credits(s: &App, info: &ArtistPage, p: &Palette) -> El {
         .credits
         .iter()
         .map(|(i, roles)| {
-            let pills = used.iter().map(|r| roles.contains(r).then(|| role_pill(&s.tracks[*i], *r, &info.names, p))).collect();
+            let pills = used.iter().map(|r| roles.contains(r).then(|| role_pill(&s.tracks[*i], *r, &info.matched, p))).collect();
             (*i, pills)
         })
         .collect();

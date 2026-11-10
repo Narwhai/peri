@@ -276,7 +276,7 @@ fn credits_on_their_own_album_show_on_its_card() {
         t.path = "/m/Mercy/05 Dry Spell.flac".into();
         t.title = "Dry Spell".into();
         t.number = Some(5);
-        t.credits = vec![Credit::parse(Role::Producer, "The Alchemist"), Credit::parse(Role::Mixer, "The Alchemist")];
+        t.credits = vec![Credit::parse(Role::Producer, "The Alchemist"), Credit::parse(Role::Mixer, "The Alchemist"), Credit::parse(Role::Engineer, "The Alchemist")];
         t
     });
     let rt = alchemist(songs);
@@ -287,7 +287,15 @@ fn credits_on_their_own_album_show_on_its_card() {
         .filter(|e| e.path.contains(&format!("/artist-albums-roles{mercy}/")) && e.role == "text")
         .filter_map(|e| e.text)
         .collect();
-    assert_eq!(pills, ["Producer", "Mixer · 1/3"], "a role on every song, then one on some");
+    assert_eq!(pills, ["Producer", "Engineer · 1/3", "Mixer · 1/3"], "a role on every song, then ones on some");
+    // Too wide for the card side by side, the pills wrap onto rows inside it.
+    let rect = |key: &str| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key) && e.path.contains(&format!("/artist-albums-roles{mercy}/"))).unwrap_or_else(|| panic!("no {key}")).rect;
+    let card = rt.elements().into_iter().find(|e| e.key.as_deref() == Some(&format!("artist-albums{mercy}") as &str)).expect("Mercy's card").rect;
+    let (producer, engineer, mixer) = (rect("tag-producer"), rect("tag-engineer-·-1/3"), rect("tag-mixer-·-1/3"));
+    assert!(engineer[1] > producer[1] || mixer[1] > engineer[1], "a pill starts a new row");
+    for r in [producer, engineer, mixer] {
+        assert!(r[0] >= card[0] && r[0] + r[2] <= card[0] + card[2], "pill {r:?} inside card {card:?}");
+    }
     let dry = rt.state.tracks.iter().position(|t| t.title == "Dry Spell").expect("Dry Spell");
     assert!(rt.find(&format!("credits-t{dry}")).is_none(), "own-album songs stay out of Credits");
     assert_eq!(text_of(&rt, "artist-counts"), "1 album  •  3 songs  •  credited on 2 songs");
@@ -353,4 +361,29 @@ fn unreadable_relations_say_so_instead_of_vanishing() {
     let rt = prefs.runtime();
     assert!(rt.state.error.as_deref().is_some_and(|e| e.contains("\"artists\"")), "{:?}", rt.state.error);
     assert!(rt.state.relations.merges.is_empty());
+}
+
+#[test]
+fn include_aliases_adds_what_they_released_under_other_names_and_play_follows() {
+    let prefs = Prefs::new("aliases", r#"{ "links": [{ "from": "Somebody", "kind": "alias", "to": "The Alchemist" }] }"#);
+    let mut rt = prefs.runtime();
+    rt.update(|s, tx| s.show_artist("Somebody", tx));
+    settle(&mut rt);
+    assert_eq!(text_of(&rt, "artist-counts"), "1 album  •  2 songs");
+    click(&mut rt, "artist-aliases");
+    assert!(rt.state.artist_with_aliases);
+    assert_eq!(text_of(&rt, "artist-name"), "Somebody", "still Somebody's page");
+    assert_eq!(text_of(&rt, "artist-counts"), "2 albums  •  4 songs", "Mercy joins Elsewhere");
+    click(&mut rt, "artist-discography");
+    let mut queue = rt.state.queue.clone().expect("a queue");
+    let mut order = vec![queue.current()];
+    while let Some(i) = queue.next(crate::queue::Repeat::Off) {
+        order.push(i);
+    }
+    let played: Vec<String> = order.into_iter().map(|i| rt.state.tracks[i].title.clone()).collect();
+    assert_eq!(played, ["Over There", "Far Off", "Laraaji", "Calypso Gene"], "Elsewhere (2020), then Mercy (2025)");
+    // It stays on for the alias's page, which offers it too.
+    click(&mut rt, "artist-pill-The Alchemist");
+    assert!(rt.find("artist-aliases").is_some());
+    assert!(rt.find("credits").is_none(), "his Elsewhere producer credit is on an album of his own now");
 }

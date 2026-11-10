@@ -215,6 +215,7 @@ fn scene_related(s: &mut App) {
     };
     let i = s.tracks.iter().position(|t| t.title == "Calypso Gene").expect("demo has Calypso Gene");
     s.tracks[i].credits.push(credits::Credit::parse(credits::Role::Composer, "Alan Maman"));
+    s.artist_with_aliases = true;
 }
 
 /// An artist credited on songs in several roles: their pills line up by role.
