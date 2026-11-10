@@ -124,4 +124,7 @@ line_icon!(COLUMNS, "rm-columns", "M3 5 H21 V19 H3 Z", "M9 5 V19", "M15 5 V19");
 line_icon!(FOLDER_OPEN, "rm-folder-open", "M3 7 V18 H19 L21.5 10.5 H7 L4.5 18", "M3 7 V5 H9 L11 7 H18 V10.5");
 line_icon!(SETTINGS, "rm-settings", "M4 7 H14", "M18 7 H20", "M14 5 V9", "M4 17 H6", "M10 17 H20", "M10 15 V19");
 line_icon!(EXTERNAL, "rm-external", "M15 3 H21 V9", "M10 14 L21 3", "M18 13 V19 H5 V6 H11");
+line_icon!(GRID_SMALL, "rm-grid-small", "M5 5 H10 V10 H5 Z", "M14 5 H19 V10 H14 Z", "M5 14 H10 V19 H5 Z", "M14 14 H19 V19 H14 Z");
+line_icon!(GRID_LARGE, "rm-grid-large", "M4 4 H20 V20 H4 Z");
+line_icon!(ZOOM, "rm-zoom", "M10.5 3.5 A7 7 0 1 0 10.51 3.5 Z", "M15.5 15.5 L20.5 20.5", "M7.5 10.5 H13.5", "M10.5 7.5 V13.5");
 line_icon!(LINK, "rm-link", "M10 13 A5 5 0 0 0 17.5 13.5 L20.5 10.5 A5 5 0 0 0 13.5 3.5 L11.8 5.2", "M14 11 A5 5 0 0 0 6.5 10.5 L3.5 13.5 A5 5 0 0 0 10.5 20.5 L12.2 18.8");

@@ -13,6 +13,7 @@ const KEY: &str = "base";
 const LIBRARY_KEY: &str = "library";
 const ARTISTS_KEY: &str = "artists";
 const LASTFM_KEY: &str = "lastfm";
+const ZOOM_KEY: &str = "zoom";
 /// Bumped when the saved shape changes incompatibly.
 const VERSION: u32 = 1;
 
@@ -28,6 +29,13 @@ pub struct Base {
     /// Those tables' dragged column widths.
     #[serde(default)]
     pub page_widths: super::view::Widths,
+    /// The album grid card size of views that don't set their own.
+    #[serde(default = "default_card_size")]
+    pub card_size: f32,
+}
+
+fn default_card_size() -> f32 {
+    super::view::CARD_SIZE_DEFAULT
 }
 
 /// What album and artist pages' song tables show after the title by default.
@@ -37,7 +45,7 @@ pub fn page_columns() -> Vec<Property> {
 
 impl Default for Base {
     fn default() -> Base {
-        Base { version: VERSION, views: vec![View::new("All songs")], active: 0, page_columns: page_columns(), page_widths: Default::default() }
+        Base { version: VERSION, views: vec![View::new("All songs")], active: 0, page_columns: page_columns(), page_widths: Default::default(), card_size: default_card_size() }
     }
 }
 
@@ -56,6 +64,10 @@ impl Base {
             self.views.push(View::new("All songs"));
         }
         self.active = self.active.min(self.views.len() - 1);
+        self.card_size = super::view::clamp_card_size(self.card_size);
+        for view in &mut self.views {
+            view.card_size = view.card_size.map(super::view::clamp_card_size);
+        }
         self
     }
 }
@@ -110,6 +122,15 @@ impl Store {
 
     pub fn save_relations(&mut self, relations: &crate::relations::Relations) -> Result<(), String> {
         self.prefs.set(ARTISTS_KEY, relations).map_err(|e| format!("Couldn't save the artist links: {e}"))
+    }
+
+    /// The window's zoom, 1.0 when unset or unreadable.
+    pub fn load_zoom(&self) -> f32 {
+        self.prefs.get::<f32>(ZOOM_KEY).map_or(1.0, crate::app::clamp_zoom)
+    }
+
+    pub fn save_zoom(&mut self, zoom: f32) -> Result<(), String> {
+        self.prefs.set(ZOOM_KEY, &zoom).map_err(|e| format!("Couldn't save the zoom: {e}"))
     }
 
     /// The Last.fm API credentials and session; none when unset, an error when unreadable.

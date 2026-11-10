@@ -79,6 +79,7 @@ Each view lists either **Songs** or **Albums**; switch with the toggle in the to
 - **What counts as one album:** songs with the same album artist (else track artist), album title and year, ignoring case. The same title from two years is two albums, while multi-disc and multi-folder albums merge.
 - **Songs without an album tag:** they gather per artist under "Unknown album".
 - **Layouts:** album views have **Grid** (covers) or **List** (a card per album with its track table).
+- **Card size:** the slider next to Grid/List sizes the grid's cards (120–320 pt covers), and the columns refit. Each view keeps its own size once dragged; **Set as default** makes it the size views without their own use, and double-clicking the slider puts the view back on the default.
 - **Filter, sort and group:** these work on album properties: title, album artist, artists, genres, year, composers, label, track count, total duration, formats, folder and date added. For example, sort by album artist to keep each artist's albums together.
 - **Search:** finds albums by title or artist, or albums that contain a matching song.
 - **Album page:** click a grid card, or a list card's cover or title, to open it. It has the cover, details, Play and Shuffle, the tracks grouped by disc, and "More by" the same artist. Esc or Back returns to the list. Clicking the cover in the now-playing bar opens the playing album.
@@ -131,11 +132,14 @@ They're saved under `artists` in `prefs.json`, which can also be edited by hand 
 | ↑ / ↓, Enter | Move the selection, play it |
 | Ctrl+F | Search (Esc clears it, Enter plays the first match) |
 | Ctrl+O | Open a folder |
+| Ctrl+= / Ctrl+- / Ctrl+0 | Zoom in / out / back to 100% |
 | S / R / M | Shuffle / repeat / mute |
 | I | Song details for the selected (else playing) song |
 | Esc | Close a toolbar popover or the details dialog, or go back from an album or artist page |
 
 Double-click a row to play it. Ctrl is Cmd on macOS.
+
+**Zoom:** the slider in the header (or the keys above) zooms the whole window from 50% to 200%; click the level to reset it. A window too small for the zoom draws at what fits (shown as "max …%") and keeps the zoom for when it's bigger. The zoom saves under `zoom` in `prefs.json`.
 
 ## Develop
 

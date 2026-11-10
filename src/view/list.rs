@@ -2,7 +2,7 @@
 
 use rune::{Align, Cursor, Cx, El, GrowthSpec, Live, ScrollPos, ScrollSpec, Tx, col, el, icon, memo, row, text};
 
-use super::albums::{columns_for, grid_row, grid_row_h, list_card};
+use super::albums::{grid_row, grid_row_h, list_card};
 use super::table;
 use super::*;
 use crate::app::{App, Row, album_key, grid_key, header_key, row_key};
@@ -41,11 +41,11 @@ pub(super) fn list(s: &App, p: &Palette, cx: &mut Cx<App>) -> El {
     }
     let p = *p;
     let count = s.rows.len();
-    // The grid's width, read from layout; the column count follows it (see `set_columns`).
+    // The grid's width, read from layout; the column count follows it (see `set_grid_width`).
     let pad = if grid { GRID_PX } else { LIST_PX };
     let width = cx.layout_with("tracks", |r| (r[2] / 4.0).round() * 4.0).unwrap_or(960.0) - 2.0 * pad;
     let estimate = match (albums, grid) {
-        (_, true) => grid_row_h(width, s.columns),
+        (_, true) => grid_row_h(width, s.card_size()),
         (true, false) => 520.0,
         (false, _) => ROW_H,
     };
@@ -74,7 +74,7 @@ pub(super) fn list(s: &App, p: &Palette, cx: &mut Cx<App>) -> El {
                 Row::Grid { start, section } => {
                     let playing = s.current.filter(|c| s.grid_albums(start, section).iter().any(|&a| s.albums[a].tracks.contains(c)));
                     let covers = s.covers.as_ref().map_or(0, |c| c.generation());
-                    memo(grid_key(start, section), (s.list_version, playing, s.playing, covers, width.to_bits(), p.dark), || {
+                    memo(grid_key(start, section), (s.list_version, playing, s.playing, covers, width.to_bits(), s.card_size().to_bits(), p.dark), || {
                         grid_row(s, start, section, width, &p)
                     })
                 }
@@ -112,7 +112,7 @@ pub(super) fn list(s: &App, p: &Palette, cx: &mut Cx<App>) -> El {
         })
         .on_layout(move |s: &mut App, r| {
             if s.mode() == Mode::Albums && s.base.active().layout == Layout::Grid {
-                s.set_columns(columns_for(r[2] - 2.0 * GRID_PX));
+                s.set_grid_width(r[2] - 2.0 * GRID_PX);
             }
         });
     if albums {

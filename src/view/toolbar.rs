@@ -72,6 +72,9 @@ pub(super) fn toolbar(s: &App, p: &Palette, kit: &Kit, layer: &mut Vec<El>) -> E
                 s.views_changed();
             }
         }));
+        if view.layout == Layout::Grid && s.page == crate::app::Page::Library {
+            bar = bar.child(el().w(12.0)).child(card_size_slider(s, p));
+        }
     }
     // Album grids show no song tables, unless an album page is open.
     let tables = !(albums && view.layout == Layout::Grid) || s.page != crate::app::Page::Library;
@@ -161,6 +164,50 @@ pub(super) fn segmented(key: &'static str, options: &[(&'static str, &'static st
         );
     }
     seg
+}
+
+/// The album grid's card size: small and large grid glyphs either side of a slider. The
+/// view keeps its own once dragged; double-click the slider to follow the default again, and
+/// the dot after it makes this size the default.
+fn card_size_slider(s: &App, p: &Palette) -> El {
+    use crate::base::view::{CARD_SIZE_MAX, CARD_SIZE_MIN};
+    let size = s.card_size();
+    let fraction = (size - CARD_SIZE_MIN) / (CARD_SIZE_MAX - CARD_SIZE_MIN);
+    let own = s.base.active().card_size.is_some();
+    let track = super::player::slider_track("card-size", fraction, true, p)
+        .w(96.0)
+        .label("Card size")
+        .help("Card size (double-click to use the default)")
+        .a11y_value(format!("{}", size.round()))
+        .on_step(|s: &mut App, steps, _tx| s.set_card_size(s.card_size() + steps as f32 * 8.0, true))
+        .on_double_press(|s: &mut App| s.reset_card_size())
+        .on_drag(|s: &mut App, d: &mut rune::Drag, _tx: &mut Tx| {
+            let at = |d: &rune::Drag| CARD_SIZE_MIN + (d.x / d.w).clamp(0.0, 1.0) * (CARD_SIZE_MAX - CARD_SIZE_MIN);
+            match d.phase {
+                rune::Phase::Down => {
+                    d.data = s.card_size();
+                    s.set_card_size(at(d), false);
+                }
+                rune::Phase::Move => s.set_card_size(at(d), false),
+                rune::Phase::Up if d.cancelled() => s.set_card_size(d.data, true),
+                rune::Phase::Up => s.set_card_size(at(d), true),
+            }
+        });
+    let mut r = row()
+        .key("card-size-control")
+        .gap(6.0)
+        .center_y()
+        .child(icon(&icons::GRID_SMALL, 14.0).color(p.tx3))
+        .child(track)
+        .child(icon(&icons::GRID_LARGE, 14.0).color(p.tx3));
+    if own && (size - s.base.card_size).abs() >= 0.5 {
+        r = r.child(el().w(4.0)).child(
+            super::pill_button("card-size-default", "Set as default", p)
+                .help("Album grids without their own size use this one")
+                .on_press(|s: &mut App| s.make_card_size_default()),
+        );
+    }
+    r
 }
 
 // Views

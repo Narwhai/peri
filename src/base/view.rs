@@ -78,6 +78,20 @@ pub struct View {
     /// Widths the user dragged columns to; the rest size themselves.
     #[serde(default)]
     pub widths: Widths,
+    /// Album grids: the cover width cards aim for, in points; `None` follows the base's
+    /// default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub card_size: Option<f32>,
+}
+
+/// Album grid card sizes: the cover width cards aim for, in points.
+pub const CARD_SIZE_MIN: f32 = 120.0;
+pub const CARD_SIZE_MAX: f32 = 320.0;
+pub const CARD_SIZE_DEFAULT: f32 = 168.0;
+
+/// A card size within range; anything not finite is the default.
+pub fn clamp_card_size(size: f32) -> f32 {
+    if size.is_finite() { size.clamp(CARD_SIZE_MIN, CARD_SIZE_MAX) } else { CARD_SIZE_DEFAULT }
 }
 
 /// Column widths set by dragging, in points, by property.
@@ -90,7 +104,7 @@ pub fn default_columns() -> Vec<Property> {
 
 impl View {
     pub fn new(name: impl Into<String>) -> View {
-        View { name: name.into(), mode: Mode::Songs, layout: Layout::Grid, filter: Group::default(), sorts: Vec::new(), group_by: None, columns: default_columns(), widths: Widths::new() }
+        View { name: name.into(), mode: Mode::Songs, layout: Layout::Grid, filter: Group::default(), sorts: Vec::new(), group_by: None, columns: default_columns(), widths: Widths::new(), card_size: None }
     }
 
     /// Switches what the view lists, dropping sorts, grouping and conditions on properties

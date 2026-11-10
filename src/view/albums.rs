@@ -11,8 +11,6 @@ use crate::icons;
 use crate::library::Track;
 use crate::palette::Palette;
 
-/// Grid card cover edge range: columns fill the width with covers between these.
-pub const CARD_MIN: f32 = 168.0;
 const CARD_GAP: f32 = 18.0;
 /// Card height below the cover: title, meta and artist lines.
 const CARD_TEXT_H: f32 = 70.0;
@@ -23,19 +21,19 @@ const PAGE_COVER: f32 = 232.0;
 const ALBUM_TITLE: TextStyle = TextStyle::new(17.0, 650.0);
 const PAGE_TITLE: TextStyle = TextStyle::new(28.0, 700.0);
 
-/// How many covers fit across `width` (the list's inner width).
-pub fn columns_for(width: f32) -> usize {
-    (((width + CARD_GAP) / (CARD_MIN + CARD_GAP)).floor() as usize).max(1)
+/// How many cards `size` wide fit across `width` (the list's inner width).
+pub fn columns_for(width: f32, size: f32) -> usize {
+    (((width + CARD_GAP) / (size + CARD_GAP)).floor() as usize).max(1)
 }
 
-/// Grid card width for `columns` across `width`.
-fn card_w(width: f32, columns: usize) -> f32 {
-    ((width - CARD_GAP * (columns as f32 - 1.0)) / columns as f32).floor()
+/// Grid card width: the view's card size, narrower only when the list is.
+fn card_w(width: f32, size: f32) -> f32 {
+    size.min(width).floor()
 }
 
 /// The height a grid row takes, for the list's row estimate.
-pub fn grid_row_h(width: f32, columns: usize) -> f32 {
-    card_w(width, columns) + CARD_TEXT_H + CARD_GAP + 16.0
+pub fn grid_row_h(width: f32, size: f32) -> f32 {
+    card_w(width, size) + CARD_TEXT_H + CARD_GAP + 16.0
 }
 
 /// "EP • 2024 • 4 tracks • 12:08", skipping what isn't known.
@@ -84,8 +82,12 @@ pub(super) fn cover(key: String, image: Option<Image>, size: Option<f32>, radius
 /// A row of grid cards; `width` is the list's inner width.
 pub(super) fn grid_row(s: &App, start: usize, section: Option<usize>, width: f32, p: &Palette) -> El {
     let columns = s.columns.max(1);
-    let w = card_w(width, columns);
-    let mut r = row().key(grid_key(start, section)).w_full().gap(CARD_GAP).pb(CARD_GAP).items_start();
+    // Narrower only while the column count catches up with a resize.
+    let fit = ((width - CARD_GAP * (columns as f32 - 1.0)) / columns as f32).floor();
+    let w = card_w(width, s.card_size()).min(fit);
+    // Cards keep their size; what's left of the width spreads between them.
+    let gap = if columns > 1 { ((width - w * columns as f32) / (columns as f32 - 1.0)).max(CARD_GAP) } else { CARD_GAP };
+    let mut r = row().key(grid_key(start, section)).w_full().gap(gap).pb(CARD_GAP).items_start();
     for &a in s.grid_albums(start, section) {
         r = r.child(grid_card(s, a, section, w, p));
     }

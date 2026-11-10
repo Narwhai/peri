@@ -165,7 +165,7 @@ fn volume_slider(s: &App, p: &Palette) -> El {
 }
 
 /// A 4 pt bar with a fill and a knob, in a taller hit area.
-fn slider_track(key: &'static str, fraction: f32, enabled: bool, p: &Palette) -> El {
+pub(super) fn slider_track(key: &'static str, fraction: f32, enabled: bool, p: &Palette) -> El {
     let fill = if enabled { p.tx2 } else { p.ui };
     el()
         .key(key)

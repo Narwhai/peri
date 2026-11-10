@@ -23,6 +23,8 @@ use crate::icons;
 use crate::library::Track;
 use crate::palette::Palette;
 
+pub use albums::columns_for;
+
 const ROW_H: f32 = 44.0;
 const BAR_H: f32 = 88.0;
 const COVER: f32 = 56.0;
@@ -35,8 +37,13 @@ const NUM: TextStyle = TextStyle::new(11.5, 400.0).features("'tnum' 1");
 const HEADING: TextStyle = TextStyle::new(15.0, 600.0);
 const GROUP: TextStyle = TextStyle::new(12.5, 600.0);
 
+/// The smallest window the app lays out in; a zoom never lays it out smaller.
+pub const MIN_SIZE: (f32, f32) = (720.0, 420.0);
+
 pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     let p = Palette::new(cx.system_dark());
+    let window = cx.layout_size("zoom-frame");
+    let zoom = window.map_or(1.0, |size| applied_zoom(s.zoom, size));
     let kit = Kit::from_palette(PaletteSeed { bg: p.bg2, fg: p.tx, accent: p.blue });
     let mut layer = Vec::new();
     // The view's toolbar does nothing to search results or settings, so they go without it.
@@ -45,7 +52,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         .w_full()
         .h_full()
         .fill(p.bg)
-        .child(header(s, &p, &kit))
+        .child(header(s, zoom, &p, &kit))
         .children(toolbar)
         .child(match (s.open_album(), s.open_artist(), s.open_label()) {
             (Some(a), _, _) => albums::album_page(s, a, &p),
@@ -81,10 +88,98 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     });
     layer.extend(drop_veil);
     details::details_dialog(s, &p, &kit, &mut layer);
-    rune_kit::root(body, layer)
+    layer.extend(zoom_toast(s, zoom, &p));
+    zoomed(window, zoom, &p, rune_kit::root(body, layer))
 }
 
-fn header(s: &App, p: &Palette, kit: &Kit) -> El {
+/// The zoom the app draws at in a `window`-sized window: the user's, less when that would lay
+/// the app out smaller than [`MIN_SIZE`] (but never less than 100% for it).
+pub fn applied_zoom(zoom: f32, [w, h]: [f32; 2]) -> f32 {
+    let fits = (w / MIN_SIZE.0).min(h / MIN_SIZE.1).max(1.0);
+    zoom.min(fits)
+}
+
+/// The app at `zoom`: laid out `1 / zoom` the window's size, drawn `zoom` times as large from
+/// the top-left corner, so it fills the window again.
+fn zoomed(window: Option<[f32; 2]>, zoom: f32, p: &Palette, app: El) -> El {
+    let frame = el().key("zoom-frame").w_full().h_full().fill(p.bg);
+    match window {
+        Some([w, h]) if zoom != 1.0 => frame.child(el().key("zoomed").pin(Some(0.0), Some(0.0), None, None).size(w / zoom, h / zoom).scale(zoom).origin(0.0, 0.0).child(app)),
+        _ => frame.child(el().key("zoomed").w_full().h_full().child(app)),
+    }
+}
+
+/// The zoom level, for a moment after a keyboard zoom.
+fn zoom_toast(s: &App, zoom: f32, p: &Palette) -> Option<El> {
+    s.zoom_toast?;
+    let toast = row()
+            .key("zoom-toast")
+            .h(32.0)
+            .px(14.0)
+            .gap(8.0)
+            .radius(16.0)
+            .center_y()
+            .fill(p.bg2)
+            .border(1.0, p.ui)
+            .shadow(0.0, 6.0, Color::BLACK.alpha(0.18))
+            .label(format!("Zoom {}", zoom_label(s.zoom, zoom)))
+            .child(icon(&icons::ZOOM, 15.0).color(p.tx2))
+            .child(text(zoom_label(s.zoom, zoom)).font(TITLE).color(p.tx));
+    // Centred above the now-playing bar.
+    Some(row().key("zoom-toast-row").pin(Some(0.0), None, Some(0.0), Some(BAR_H + 20.0)).justify_center().child(toast).inert())
+}
+
+/// "120%"; "max 136%" when the window is too small for the zoom asked for.
+fn zoom_label(asked: f32, applied: f32) -> String {
+    let percent = |z: f32| (z * 100.0).round();
+    if percent(applied) < percent(asked) { format!("max {}%", percent(applied)) } else { format!("{}%", percent(asked)) }
+}
+
+/// The header's zoom control: the level, and a slider that's live as it drags. Clicking the
+/// level resets it to 100%.
+fn zoom_control(s: &App, zoom: f32, p: &Palette) -> El {
+    use crate::app::{ZOOM_MAX, ZOOM_MIN};
+    let shown = s.zoom_preview.unwrap_or(s.zoom);
+    let fraction = (shown - ZOOM_MIN) / (ZOOM_MAX - ZOOM_MIN);
+    let level = match s.zoom_preview {
+        Some(preview) => zoom_label(preview, preview),
+        None => zoom_label(s.zoom, zoom),
+    };
+    let at = |d: &rune::Drag| ZOOM_MIN + (d.x / d.w).clamp(0.0, 1.0) * (ZOOM_MAX - ZOOM_MIN);
+    let track = player::slider_track("zoom", fraction, true, p)
+        .w(72.0)
+        .label("Zoom")
+        .help("Zoom (Ctrl+= / Ctrl+- / Ctrl+0)")
+        .a11y_value(level.clone())
+        .on_step(|s: &mut App, steps, _tx| s.set_zoom(s.zoom + steps as f32 * 0.1, true))
+        .on_drag(move |s: &mut App, d: &mut rune::Drag, _tx: &mut rune::Tx| match d.phase {
+            rune::Phase::Down | rune::Phase::Move => s.zoom_preview = Some(crate::app::clamp_zoom(at(d))),
+            rune::Phase::Up => {
+                if let (false, Some(zoom)) = (d.cancelled(), s.zoom_preview.take()) {
+                    s.set_zoom(zoom, true);
+                }
+            }
+        });
+    row()
+        .key("zoom-control")
+        .gap(6.0)
+        .center_y()
+        .child(icon(&icons::ZOOM, 15.0).color(p.tx3))
+        .child(track)
+        .child(
+            text(level)
+                .key("zoom-level")
+                .font(NUM)
+                .color(p.tx2)
+                .min_w(36.0)
+                .cursor(Cursor::Pointer)
+                .role("button")
+                .help(if zoom < s.zoom { "The window is too small for more zoom. Click to reset to 100% (Ctrl+0)" } else { "Reset zoom to 100% (Ctrl+0)" })
+                .on_press(|s: &mut App| s.set_zoom(1.0, true)),
+        )
+}
+
+fn header(s: &App, zoom: f32, p: &Palette, kit: &Kit) -> El {
     let count = match (&s.scan, s.tracks.len()) {
         (Some(scan), _) if scan.found > 0 => format!("Scanning… {} files", scan.found),
         (Some(_), _) => "Scanning…".to_string(),
@@ -118,7 +213,10 @@ fn header(s: &App, p: &Palette, kit: &Kit) -> El {
             _ => false,
         })
         .build(kit)
-        .key("search");
+        .key("search")
+        // Gives way to the buttons after it in a narrow (or zoomed-in) window.
+        .shrink()
+        .min_w(140.0);
     row()
         .key("header")
         .w_full()
@@ -148,6 +246,7 @@ fn header(s: &App, p: &Palette, kit: &Kit) -> El {
         )
         .child(text(count).key("count").font(SMALL).color(p.tx3).grow(1.0).shrink().truncate())
         .child(search)
+        .child(zoom_control(s, zoom, p))
         .child(pill_button("open", "Open folder…", p).on_press_tx(|s: &mut App, tx| s.open_folder(tx)))
         .child(icon_button("settings", &icons::SETTINGS, "Settings", p).role("button").on_press(|s: &mut App| s.show_settings()))
 }

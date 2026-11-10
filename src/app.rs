@@ -18,6 +18,12 @@ use crate::queue::{Queue, Repeat, Rng};
 
 /// How often the view refreshes the playback position while a track plays.
 const TICK: Duration = Duration::from_millis(200);
+/// The window's zoom range and keyboard step.
+pub const ZOOM_MIN: f32 = 0.5;
+pub const ZOOM_MAX: f32 = 2.0;
+const ZOOM_STEP: f32 = 0.1;
+/// How long the zoom level shows after a keyboard zoom.
+const ZOOM_TOAST: Duration = Duration::from_millis(1200);
 /// Arrow-key and slider-key seek step, in seconds.
 pub const SEEK_STEP: f64 = 5.0;
 /// Previous restarts the track instead when it has played longer than this.
@@ -112,6 +118,15 @@ pub struct App {
     pub rows: Vec<Row>,
     /// Covers per grid row, from the list's width.
     pub columns: usize,
+    /// The album grid's inner width as last laid out, which the column count follows.
+    grid_width: Option<f32>,
+    /// The window's zoom: 1.0 is 100%, saved.
+    pub zoom: f32,
+    /// While the zoom slider is dragged: the zoom it would set. The zoom lands on release, so
+    /// the slider doesn't move under the pointer.
+    pub zoom_preview: Option<f32>,
+    /// When a keyboard zoom last changed the zoom, which shows the level for a moment.
+    pub zoom_toast: Option<std::time::Instant>,
     /// Bumped whenever `filtered` or `sections` change, so the list knows its rows did.
     pub list_version: u64,
     /// The saved views; edits save at once.
@@ -204,6 +219,10 @@ impl App {
             sections: Vec::new(),
             rows: Vec::new(),
             columns: 4,
+            grid_width: None,
+            zoom: store.load_zoom(),
+            zoom_preview: None,
+            zoom_toast: None,
             list_version: 0,
             base: store.load(),
             library: store.load_library(),
@@ -458,6 +477,10 @@ impl App {
                 self.shown_albums = unsearched.order;
                 self.sections = unsearched.sections;
             }
+        }
+        // Views size their grid cards differently.
+        if let Some(width) = self.grid_width {
+            self.columns = crate::view::columns_for(width, self.card_size());
         }
         self.rebuild_rows();
     }
@@ -830,12 +853,77 @@ impl App {
         rows
     }
 
-    /// The grid's column count changed with the window's width.
-    pub fn set_columns(&mut self, columns: usize) {
+    /// The grid's inner width changed with the window's: refit its columns.
+    pub fn set_grid_width(&mut self, width: f32) {
+        self.grid_width = Some(width);
+        self.fit_columns();
+    }
+
+    /// Fits as many columns across the grid as covers of the active view's card size allow.
+    fn fit_columns(&mut self) {
+        let Some(width) = self.grid_width else { return };
+        let columns = crate::view::columns_for(width, self.card_size());
         if columns != self.columns {
             self.columns = columns;
             self.rebuild_rows();
         }
+    }
+
+    /// The active view's grid card size: its own, else the default.
+    pub fn card_size(&self) -> f32 {
+        self.base.active().card_size.unwrap_or(self.base.card_size)
+    }
+
+    /// Sizes the active view's grid cards; `save` writes it out (a slider saves when let go).
+    pub fn set_card_size(&mut self, size: f32, save: bool) {
+        self.base.active_mut().card_size = Some(crate::base::view::clamp_card_size(size));
+        self.fit_columns();
+        if save {
+            self.save_views();
+        }
+    }
+
+    /// Makes the active view's card size the default, which views without their own follow.
+    pub fn make_card_size_default(&mut self) {
+        self.base.card_size = self.card_size();
+        self.base.active_mut().card_size = None;
+        self.fit_columns();
+        self.save_views();
+    }
+
+    /// The active view follows the default card size again.
+    pub fn reset_card_size(&mut self) {
+        self.base.active_mut().card_size = None;
+        self.fit_columns();
+        self.save_views();
+    }
+
+    fn save_views(&mut self) {
+        if let Err(e) = self.store.save(&self.base) {
+            self.error = Some(e);
+        }
+    }
+
+    /// Zooms the window to `zoom` (within range, to the percent); `save` writes it out.
+    pub fn set_zoom(&mut self, zoom: f32, save: bool) {
+        self.zoom = clamp_zoom(zoom);
+        if save {
+            self.save_zoom();
+        }
+    }
+
+    pub fn save_zoom(&mut self) {
+        if let Err(e) = self.store.save_zoom(self.zoom) {
+            self.error = Some(e);
+        }
+    }
+
+    /// A keyboard zoom: `steps` of 10% (0 resets to 100%), showing the level for a moment.
+    fn zoom_by(&mut self, steps: i32, tx: &mut Tx) {
+        let zoom = if steps == 0 { 1.0 } else { ((self.zoom / ZOOM_STEP).round() + steps as f32) * ZOOM_STEP };
+        self.set_zoom(zoom, true);
+        self.zoom_toast = Some(std::time::Instant::now());
+        tx.wake_after(ZOOM_TOAST);
     }
 
     /// The albums of a grid row.
@@ -1235,7 +1323,16 @@ pub fn poll(s: &mut App, now: f64, tx: &mut Tx) -> bool {
         }
     }
     changed |= s.poll_lastfm(now, tx);
+    if s.zoom_toast.is_some_and(|at| at.elapsed() >= ZOOM_TOAST) {
+        s.zoom_toast = None;
+        changed = true;
+    }
     changed
+}
+
+/// A zoom within range, rounded to the percent; anything not finite is 100%.
+pub fn clamp_zoom(zoom: f32) -> f32 {
+    if zoom.is_finite() { ((zoom * 100.0).round() / 100.0).clamp(ZOOM_MIN, ZOOM_MAX) } else { 1.0 }
 }
 
 /// `AppSpec::on_key`: keys nothing focused took.
@@ -1271,6 +1368,19 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
     }
     if ev.is_command('o') {
         s.open_folder(tx);
+        return true;
+    }
+    // Ctrl+= or Ctrl++ zooms in, Ctrl+- out, Ctrl+0 back to 100%.
+    if ev.is_command('=') || ev.is_command('+') {
+        s.zoom_by(1, tx);
+        return true;
+    }
+    if ev.is_command('-') {
+        s.zoom_by(-1, tx);
+        return true;
+    }
+    if ev.is_command('0') {
+        s.zoom_by(0, tx);
         return true;
     }
     match &ev.key {

@@ -39,6 +39,8 @@ mod scroll_ui_tests;
 mod settings_ui_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod zoom_ui_tests;
 
 use app::{App, Output, Panel};
 use base::filter::{Condition, Conjunction, Group, Node, Operator};
@@ -322,7 +324,7 @@ fn main() {
             ("label", scene_label),
             ("settings", scene_settings),
         ],
-        min_size: Some((720.0, 420.0)),
+        min_size: Some(view::MIN_SIZE),
         setup: Some(setup),
         poll: Some(app::poll),
         on_key: Some(app::on_key),
