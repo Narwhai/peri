@@ -130,7 +130,7 @@ They're saved under `artists` in `prefs.json`, which can also be edited by hand 
 | ← / → | Seek 5 s |
 | Ctrl+← / Ctrl+→ | Previous / next track |
 | ↑ / ↓, Enter | Move the selection, play it |
-| Ctrl+F | Search (Esc clears it, Enter plays the first match) |
+| Ctrl+F or / | Search (Esc clears it, Enter plays the first match) |
 | Ctrl+O | Open a folder |
 | Ctrl+= / Ctrl+- / Ctrl+0 | Zoom in / out / back to 100% |
 | S / R / M | Shuffle / repeat / mute |

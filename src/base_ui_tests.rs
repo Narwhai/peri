@@ -213,3 +213,13 @@ fn views_save_as_they_change_and_load_on_the_next_launch() {
     assert_eq!(next.sections.first().map(|s| s.title.as_str()), Some("1980"));
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn slash_focuses_search_and_then_types_in_it() {
+    let mut rt = runtime();
+    type_text(&mut rt, "/");
+    assert!(rt.state.search.focused, "/ focuses the search field");
+    assert_eq!(rt.state.search.text, "", "the / that focused it isn't typed");
+    type_text(&mut rt, "a/b");
+    assert_eq!(rt.state.search.text, "a/b", "in the field, / types");
+}

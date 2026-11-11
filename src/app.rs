@@ -1362,7 +1362,8 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         }
         return true;
     }
-    if ev.is_command('f') {
+    // Ctrl+F, or / as in Vim. A focused field takes its own /, so it still types.
+    if ev.is_command('f') || (ev.key == Key::Text("/".into()) && !m.cmd && !m.ctrl && !m.alt) {
         s.search.focused = true;
         return true;
     }
