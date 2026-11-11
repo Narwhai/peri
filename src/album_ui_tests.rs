@@ -223,3 +223,25 @@ fn the_grid_fits_more_columns_in_a_wider_window() {
     assert!(rt.state.columns > narrow, "{} columns at 1600 vs {narrow} at 720", rt.state.columns);
     assert_eq!(rt.state.rows.len(), 4usize.div_ceil(rt.state.columns));
 }
+
+#[test]
+fn hovering_a_grid_cards_play_button_keeps_it_shown_and_pressing_it_plays_without_opening_the_album() {
+    let mut rt = runtime();
+    click(&mut rt, "mode/albums");
+    let a = album(&rt, "Get Up");
+    let card = album_key(a, None);
+    let play = |rt: &Runtime<App>| {
+        rt.elements().into_iter().find(|e| e.key.as_deref() == Some("play") && e.path.contains(&format!("/{card}/"))).unwrap_or_else(|| panic!("no play button on {card}"))
+    };
+    let r = play(&rt).rect;
+    let (x, y) = (r[0] + r[2] / 2.0, r[1] + r[3] / 2.0);
+    rt.pointer_move(x, y);
+    settle(&mut rt);
+    let opacity = play(&rt).opacity;
+    assert!(opacity > 0.99, "the play button stays shown while hovered, opacity {opacity}");
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    settle(&mut rt);
+    assert_eq!(rt.state.page, Page::Library, "pressing play doesn't open the album");
+    assert_eq!(rt.state.tracks[rt.state.current.expect("playing")].title, "New Jeans");
+}

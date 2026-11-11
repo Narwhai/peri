@@ -119,7 +119,9 @@ fn grid_card(s: &App, a: usize, section: Option<usize>, w: f32, p: &Palette) -> 
         .center()
         .pin(None, None, Some(10.0), Some(10.0))
         .group_opacity(if playing { 1.0 } else { 0.0 }, 1.0)
-        .hover_alone()
+        // No `hover_alone`: it would rest the card's group while the pointer is on the button,
+        // fading the button out from under it.
+        .hover(rune::Color::WHITE.alpha(0.12))
         .press_scale(0.92)
         .cursor(Cursor::Pointer)
         .label(format!("Play {}", album.title))
