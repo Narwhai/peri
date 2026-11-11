@@ -2,7 +2,7 @@
 
 use rune::{Align, Cursor, Cx, El, GrowthSpec, Live, ScrollPos, ScrollSpec, Tx, col, el, icon, memo, row, text};
 
-use super::albums::{grid_row, grid_row_h, list_card};
+use super::albums::{grid_row, grid_row_h, list_card, song_cover};
 use super::table;
 use super::*;
 use crate::app::{App, Row, album_key, grid_key, header_key, row_key};
@@ -89,9 +89,11 @@ pub(super) fn list(s: &App, p: &Palette, cx: &mut Cx<App>) -> El {
                     let playing = current && s.playing;
                     let number = number_in(s, track, section);
                     let view = s.base.active();
-                    let columns = table::Columns { shown: &view.columns, widths: &view.widths, pills: &[] };
-                    memo(row_key(track, section), (s.list_version, number, selected, current, playing, p.dark, columns.version()), || {
-                        track_row(&s.tracks[track], track, section, number, selected, current, playing, columns, &p)
+                    let columns = table::Columns { shown: &view.columns, widths: &view.widths, pills: &[], covers: view.covers };
+                    let covers = if view.covers { s.covers.as_ref().map_or(0, |c| c.generation()) } else { 0 };
+                    memo(row_key(track, section), (s.list_version, number, selected, current, playing, p.dark, columns.version(), covers), || {
+                        let cover = view.covers.then(|| song_cover(s, format!("cover{track}"), track, table::COVER_W, &p));
+                        track_row(&s.tracks[track], track, section, number, selected, current, playing, cover, columns, &p)
                     })
                 }
             },
@@ -121,7 +123,7 @@ pub(super) fn list(s: &App, p: &Palette, cx: &mut Cx<App>) -> El {
     // Songs: a table as wide as its columns need, scrolling sideways when the window is
     // narrower. The column header sits above the viewport and follows its sideways scroll.
     let view = s.base.active();
-    let columns = table::Columns { shown: &view.columns, widths: &view.widths, pills: &[] };
+    let columns = table::Columns { shown: &view.columns, widths: &view.widths, pills: &[], covers: view.covers };
     // A viewport scrolling both ways lays its content out at its natural width, so the table
     // fills the viewport itself, and is wider when its columns need it.
     let min_w = table::min_width(columns, LIST_PX).max(width + 2.0 * pad);
@@ -183,13 +185,14 @@ fn group_header(section: &Section, g: usize, open: bool, p: &Palette) -> El {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn track_row(t: &Track, i: usize, section: Option<usize>, number: usize, selected: bool, current: bool, playing: bool, columns: table::Columns, p: &Palette) -> El {
-    let lead: El = if current {
+/// A song row; with a `cover`, the cover shows the playing icon and the lead keeps the number.
+fn track_row(t: &Track, i: usize, section: Option<usize>, number: usize, selected: bool, current: bool, playing: bool, cover: Option<El>, columns: table::Columns, p: &Palette) -> El {
+    let lead: El = if current && cover.is_none() {
         icon(if playing { &icons::BARS } else { &icons::PAUSE }, 14.0).color(p.blue)
     } else {
         text(format!("{number}")).font(NUM).color(p.tx3).align(Align::End).w(28.0)
     };
-    let look = table::RowLook { lead, selected, current, height: ROW_H, px: 10.0, pills: Vec::new() };
+    let look = table::RowLook { lead, cover, selected, current, height: ROW_H, px: 10.0, pills: Vec::new() };
     table::song_row(t, i, columns, look, p)
         .key(row_key(i, section))
         .press(p.ui.alpha(0.5))

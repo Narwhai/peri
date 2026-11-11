@@ -201,3 +201,13 @@ fn durations_group_by_the_minute() {
     let groups: Vec<(String, usize)> = evaluate(&view, &lib, "").sections.iter().map(|s| (s.title.clone(), s.items.len())).collect();
     assert_eq!(groups, [("1:00 – 1:59".to_string(), 1), ("3:00 – 3:59".to_string(), 1), ("4:00 – 4:59".to_string(), 1), ("5:00 – 5:59".to_string(), 1)]);
 }
+
+#[test]
+fn views_saved_without_the_covers_setting_show_covers_and_it_round_trips() {
+    let old: View = serde_json::from_str(r#"{"name": "Old"}"#).expect("an old view parses");
+    assert!(old.covers);
+    let mut off = View::new("Off");
+    off.covers = false;
+    let back: View = serde_json::from_str(&serde_json::to_string(&off).expect("serializes")).expect("parses");
+    assert!(!back.covers);
+}

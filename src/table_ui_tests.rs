@@ -89,6 +89,58 @@ fn a_credit_columns_names_open_the_artist_page() {
 }
 
 #[test]
+fn the_album_column_opens_the_songs_album() {
+    let mut rt = runtime();
+    let dance = idx(&rt, "The Dance #1");
+    assert_eq!(cell(&rt, &row_key(dance, None), "col-album").as_deref(), Some("Day of Radiance"));
+    click(&mut rt, &format!("album:{dance}"));
+    let a = rt.state.albums.iter().position(|a| a.title == "Day of Radiance").expect("album");
+    assert_eq!(rt.state.page, Page::Album(rt.state.albums[a].id()));
+}
+
+#[test]
+fn song_views_show_covers_until_switched_off_and_save_it() {
+    let mut rt = runtime();
+    let dance = idx(&rt, "The Dance #1");
+    let row = row_key(dance, None);
+    let cover = format!("cover{dance}");
+    let in_row = |rt: &Runtime<App>| rt.elements().into_iter().any(|e| e.key.as_deref() == Some(cover.as_str()) && e.path.contains(&format!("/{row}/")));
+    assert!(rt.state.base.active().covers, "new views show covers");
+    assert!(in_row(&rt));
+    click(&mut rt, "columns");
+    click(&mut rt, "columns-covers");
+    assert!(!rt.state.base.active().covers);
+    assert!(!in_row(&rt));
+    assert!(rt.state.base.views.iter().filter(|v| v.covers).count() < rt.state.base.views.len(), "only the active view changes");
+}
+
+#[test]
+fn the_playing_song_shows_its_icon_on_the_cover_and_keeps_its_number() {
+    let mut rt = runtime();
+    let dance = idx(&rt, "The Dance #1");
+    rt.update(|s, tx| s.play_index(dance, tx));
+    settle(&mut rt);
+    let n = rt.state.filtered.iter().position(|&i| i == dance).expect("listed") + 1;
+    let row = row_key(dance, None);
+    let texts: Vec<String> = rt.elements().into_iter().filter(|e| e.path.contains(&format!("/{row}/"))).filter_map(|e| e.text).collect();
+    assert!(texts.contains(&n.to_string()), "the number stays: {texts:?}");
+    assert!(rt.find(&format!("cover{dance}")).is_some());
+}
+
+#[test]
+fn the_covers_switch_shows_only_for_song_views() {
+    let mut rt = runtime();
+    click(&mut rt, "columns");
+    assert!(has(&rt, "columns-covers"));
+    rt.update(|s, _| {
+        s.base.active_mut().set_mode(Mode::Albums);
+        s.views_changed();
+    });
+    settle(&mut rt);
+    assert!(!has(&rt, "columns-covers"));
+}
+
+#[test]
 fn album_pages_use_their_own_columns() {
     let mut rt = runtime();
     rt.update(|s, _| {

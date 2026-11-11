@@ -4,7 +4,7 @@
 use rune::{Cursor, El, ScrollSpec, col, el, icon, row, text};
 use rune_kit::{Kit, Placement, TextInput, popover, scrim};
 
-use super::albums::{album_strip, back_label, cover, cover_image, play_button, secondary_button};
+use super::albums::{album_strip, back_label, cover, cover_image, play_button, secondary_button, song_cover};
 use super::table;
 use super::toolbar::{hint, segmented};
 use super::*;
@@ -422,7 +422,7 @@ fn role_pill(t: &Track, role: Role, names: &[String], p: &Palette) -> table::Pil
 
 /// `rows` are the songs with what fills their Roles slots; `list` is what double-click plays.
 fn song_table(s: &App, key: &str, rows: Vec<(usize, Vec<Option<table::Pill>>)>, pills: &[f32], list: &[usize], p: &Palette) -> El {
-    let columns = table::Columns { shown: &s.base.page_columns, widths: &s.base.page_widths, pills };
+    let columns = table::Columns { shown: &s.base.page_columns, widths: &s.base.page_widths, pills, covers: false };
     let mut body = col().child(table::header(&format!("{key}-header"), "", columns, 8.0, p));
     for (i, pills) in rows {
         body = body.child(song_line(s, key, i, list, pills, columns, p));
@@ -454,17 +454,9 @@ fn section_toggle(key: &'static str, title: &'static str, count: usize, open: bo
 fn song_line(s: &App, key: &str, i: usize, list: &[usize], pills: Vec<Option<table::Pill>>, columns: table::Columns, p: &Palette) -> El {
     let t = &s.tracks[i];
     let current = s.current == Some(i);
-    // The song's album cover, dimmed under the playing icon for the current song.
-    let image = s.album_of(i).and_then(|a| cover_image(s, &s.albums[a]));
-    let mut lead = cover(format!("{key}-cover{i}"), image, Some(COVER_W), 4.0, p);
-    if current {
-        lead = lead.child(
-            el().pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0)).radius(4.0).fill(rune::Color::BLACK.alpha(0.55)).center()
-                .child(icon(if s.playing { &icons::BARS } else { &icons::PAUSE }, 13.0).color(rune::Color::WHITE)),
-        );
-    }
+    let lead = song_cover(s, format!("{key}-cover{i}"), i, COVER_W, p);
     let list = list.to_vec();
-    let look = table::RowLook { lead, selected: s.selected == Some(i), current, height: SONG_ROW_H, px: 8.0, pills };
+    let look = table::RowLook { lead, cover: None, selected: s.selected == Some(i), current, height: SONG_ROW_H, px: 8.0, pills };
     table::song_row(t, i, columns, look, p)
         .key(format!("{key}-t{i}"))
         .label(format!("{} by {}", t.title, t.artist().unwrap_or_else(|| "unknown artist".into())))

@@ -15,6 +15,8 @@ use crate::palette::Palette;
 
 /// Room for the row's number or playing icon.
 pub const LEAD_W: f32 = 28.0;
+/// The album cover after the lead, when the table shows covers.
+pub const COVER_W: f32 = 32.0;
 /// The title column takes the room left, but never less than this.
 pub const TITLE_MIN: f32 = 220.0;
 const DETAILS_W: f32 = 28.0;
@@ -31,12 +33,14 @@ pub struct Columns<'a> {
     pub widths: &'a Widths,
     /// The widths of the pill slots in a Roles column after the title; none, no such column.
     pub pills: &'a [f32],
+    /// Whether rows show their album's cover between the lead and the title.
+    pub covers: bool,
 }
 
 impl<'a> Columns<'a> {
     /// What changes a row's look, for memo versions.
-    pub fn version(&self) -> (Vec<Property>, Vec<(Property, u32)>) {
-        (self.shown.to_vec(), self.widths.iter().map(|(&c, w)| (c, w.to_bits())).collect())
+    pub fn version(&self) -> (Vec<Property>, Vec<(Property, u32)>, bool) {
+        (self.shown.to_vec(), self.widths.iter().map(|(&c, w)| (c, w.to_bits())).collect(), self.covers)
     }
 }
 
@@ -84,7 +88,8 @@ fn sized(e: El, c: Property, widths: &Widths) -> El {
 pub fn min_width(columns: Columns, px: f32) -> f32 {
     let cells: f32 = columns.shown.iter().map(|&c| width_in(columns.widths, c) + GAP).sum();
     let pills = if columns.pills.is_empty() { 0.0 } else { pills_width(columns.pills) + GAP };
-    2.0 * px + LEAD_W + GAP + TITLE_MIN + pills + cells + GAP + DETAILS_W
+    let covers = if columns.covers { COVER_W + GAP } else { 0.0 };
+    2.0 * px + LEAD_W + GAP + covers + TITLE_MIN + pills + cells + GAP + DETAILS_W
 }
 
 /// The Roles column's width: its slots side by side.
@@ -109,6 +114,9 @@ pub fn scrolling(key: String, columns: Columns, px: f32, body: El) -> El {
 pub fn header(key: &str, lead: &str, columns: Columns, px: f32, p: &Palette) -> El {
     let mut r = row().key(key.to_string()).w_full().h(28.0).px(px).gap(GAP).center_y();
     r = r.child(text(lead.to_string()).font(SMALL).color(p.tx3).w(LEAD_W).align(Align::End));
+    if columns.covers {
+        r = r.child(el().w(COVER_W));
+    }
     r = r.child(text("Title").font(SMALL).color(p.tx3).grow(1.0).min_w(TITLE_MIN).shrink());
     if !columns.pills.is_empty() {
         r = r.child(text("Roles").key(format!("{key}-col-roles")).font(SMALL).color(p.tx3).w(pills_width(columns.pills)));
@@ -174,6 +182,8 @@ fn resize_handle(key: String, c: Property, p: &Palette) -> El {
 pub struct RowLook {
     /// "3", or the playing icon.
     pub lead: El,
+    /// The album cover after the lead: `Some` exactly when the table shows covers.
+    pub cover: Option<El>,
     pub selected: bool,
     pub current: bool,
     pub height: f32,
@@ -197,16 +207,11 @@ pub fn song_row(t: &Track, i: usize, columns: Columns, look: RowLook, p: &Palett
         .hover(p.ui.alpha(0.35))
         .hover_group()
         .role("row")
-        .child(el().w(LEAD_W).center().child(look.lead))
-        .child(
-            row()
-                .grow(1.0)
-                .min_w(TITLE_MIN)
-                .shrink()
-                .gap(8.0)
-                .center_y()
-                .child(title.shrink()),
-        );
+        .child(el().w(LEAD_W).center().child(look.lead));
+    if let Some(cover) = look.cover {
+        r = r.child(cover);
+    }
+    r = r.child(row().grow(1.0).min_w(TITLE_MIN).shrink().gap(8.0).center_y().child(title.shrink()));
     if !columns.pills.is_empty() {
         let mut slots = row().key("roles").w(pills_width(columns.pills)).gap(PILL_GAP).center_y();
         for (k, &w) in columns.pills.iter().enumerate() {
@@ -219,7 +224,7 @@ pub fn song_row(t: &Track, i: usize, columns: Columns, look: RowLook, p: &Palett
         r = r.child(slots);
     }
     for &c in columns.shown {
-        r = r.child(sized(cell(t, c, p), c, columns.widths).key(column_key(c)));
+        r = r.child(sized(cell(t, i, c, p), c, columns.widths).key(column_key(c)));
     }
     r.child(details_button(i, p))
 }
@@ -252,7 +257,7 @@ pub(super) fn pill_el(pill: Pill) -> El {
 }
 
 /// One column's value: names link to their pages, numbers align right.
-fn cell(t: &Track, c: Property, p: &Palette) -> El {
+fn cell(t: &Track, i: usize, c: Property, p: &Palette) -> El {
     let color = p.tx2;
     let shown = match c {
         // The artist line as tagged ("A & B feat. C"), each name a link.
@@ -263,6 +268,7 @@ fn cell(t: &Track, c: Property, p: &Palette) -> El {
             return linked(line, links, color).font(BODY).truncate();
         }
         Property::Label => return t.label.as_deref().map_or_else(|| text(""), |l| label_link(l, color)).font(BODY).truncate(),
+        Property::Album => return t.album.as_deref().map_or_else(|| text(""), |a| album_link(a, i, color)).font(BODY).truncate(),
         _ => c.value(t),
     };
     match shown {

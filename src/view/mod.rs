@@ -319,6 +319,16 @@ fn label_link(name: &str, color: Color) -> El {
     t.on_link(|s: &mut App, name, tx| s.show_label(name, tx))
 }
 
+/// Song `i`'s album title, opening the album's page. Hovering it underlines it.
+fn album_link(title: &str, i: usize, color: Color) -> El {
+    let t = text(title.to_string()).color(color).link(Link::new(0..title.len(), format!("album:{i}")).hover(LinkPaint::new().underline(color)));
+    t.on_link(move |s: &mut App, _, tx| {
+        if let Some(a) = s.album_of(i) {
+            s.show_album(a, tx);
+        }
+    })
+}
+
 /// Where each of `names` appears in `content`, as links.
 fn name_links(content: &str, names: &[String]) -> Vec<(Range<usize>, String)> {
     credits::find_names(content, names).into_iter().map(|(r, n)| (r, n.to_string())).collect()

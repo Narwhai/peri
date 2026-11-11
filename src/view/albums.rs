@@ -79,6 +79,20 @@ pub(super) fn cover(key: String, image: Option<Image>, size: Option<f32>, radius
 
 // Grid
 
+/// Song `i`'s album cover at `size`, dimmed under the playing or paused icon when it's the
+/// current song.
+pub(super) fn song_cover(s: &App, key: String, i: usize, size: f32, p: &Palette) -> El {
+    let image = s.album_of(i).and_then(|a| cover_image(s, &s.albums[a]));
+    let art = cover(key, image, Some(size), 4.0, p);
+    if s.current != Some(i) {
+        return art;
+    }
+    art.child(
+        el().pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0)).radius(4.0).fill(rune::Color::BLACK.alpha(0.55)).center()
+            .child(icon(if s.playing { &icons::BARS } else { &icons::PAUSE }, 13.0).color(rune::Color::WHITE)),
+    )
+}
+
 /// A row of grid cards; `width` is the list's inner width.
 pub(super) fn grid_row(s: &App, start: usize, section: Option<usize>, width: f32, p: &Palette) -> El {
     let columns = s.columns.max(1);
@@ -157,7 +171,7 @@ pub(super) fn list_card(s: &App, a: usize, section: Option<usize>, p: &Palette) 
         .fill(p.bg2)
         .gap(14.0)
         .child(row().gap(18.0).items_start().child(art).child(head))
-        .child(track_table(s, a, table::Columns { shown: &s.base.active().columns, widths: &s.base.active().widths, pills: &[] }, p));
+        .child(track_table(s, a, table::Columns { shown: &s.base.active().columns, widths: &s.base.active().widths, pills: &[], covers: false }, p));
     // Padding, not margin: virtual rows size each row by its box, so the gap sits inside it.
     col().w_full().pb(16.0).child(card)
 }
@@ -192,7 +206,7 @@ fn track_line(s: &App, t: &Track, i: usize, n: usize, a: usize, columns: table::
     } else {
         text(t.number.map_or_else(|| format!("{}", n + 1), |x| x.to_string())).font(NUM).color(p.tx3).w(28.0).align(Align::End)
     };
-    let look = table::RowLook { lead, selected: s.selected == Some(i), current, height: TRACK_ROW_H, px: 8.0, pills: Vec::new() };
+    let look = table::RowLook { lead, cover: None, selected: s.selected == Some(i), current, height: TRACK_ROW_H, px: 8.0, pills: Vec::new() };
     table::song_row(t, i, columns, look, p)
         .key(format!("t{i}"))
         .label(format!("{} by {}", t.title, t.artist().as_deref().unwrap_or(s.albums[a].artist_name())))
@@ -298,7 +312,7 @@ pub(super) fn album_page(s: &App, a: usize, p: &Palette) -> El {
         .gap(22.0)
         .child(back)
         .child(top)
-        .child(track_table(s, a, table::Columns { shown: &s.base.page_columns, widths: &s.base.page_widths, pills: &[] }, p));
+        .child(track_table(s, a, table::Columns { shown: &s.base.page_columns, widths: &s.base.page_widths, pills: &[], covers: false }, p));
     let more = more_by(s, a, p);
     if let Some(more) = more {
         page = page.child(more);

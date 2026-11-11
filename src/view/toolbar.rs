@@ -484,6 +484,9 @@ fn columns_body<'a>(s: &'a App, p: &'a Palette) -> impl FnOnce(&mut Vec<El>) -> 
         let page = s.page != crate::app::Page::Library;
         let mut body = col().key("columns-body").w(300.0).padding(8.0).gap(2.0);
         body = body.child(hint(if page { "Shown after the title in album and artist pages' song tables. Click to show or hide; ↑ moves a column left." } else { "Shown after the title in this view's song tables. Click to show or hide; ↑ moves a column left." }, p));
+        if !page && s.mode() == crate::base::property::Mode::Songs {
+            body = body.child(covers_switch(s.base.active().covers, p)).child(divider(p));
+        }
         let mut list = col().key("column-list").w_full().gap(2.0);
         // Shown columns first in their order, then the rest in property order.
         let order = shown.iter().copied().chain(Property::ALL.into_iter().filter(|c| *c != Property::Title && !shown.contains(c)));
@@ -535,6 +538,33 @@ fn columns_body<'a>(s: &'a App, p: &'a Palette) -> impl FnOnce(&mut Vec<El>) -> 
             s.views_changed();
         }))
     }
+}
+
+/// Whether the song view's rows show their album's cover before the title.
+fn covers_switch(on: bool, p: &Palette) -> El {
+    let knob = el().size(12.0, 12.0).radius(6.0).fill(rune::Color::WHITE).motion(SNAPPY);
+    let track = row().size(26.0, 16.0).radius(8.0).padding(2.0).center_y().fill(if on { p.blue } else { p.ui2 });
+    let track = if on { track.justify_end() } else { track.justify_start() }.child(knob);
+    row()
+        .key("columns-covers")
+        .w_full()
+        .h(30.0)
+        .px(8.0)
+        .gap(8.0)
+        .center_y()
+        .radius(6.0)
+        .hover(p.ui.alpha(0.35))
+        .cursor(Cursor::Pointer)
+        .role("switch")
+        .checked(on)
+        .label("Show covers")
+        .on_press(|s: &mut App| {
+            let view = s.base.active_mut();
+            view.covers = !view.covers;
+            s.views_changed();
+        })
+        .child(text("Show covers").font(BODY).color(p.tx).grow(1.0))
+        .child(track)
 }
 
 // Shared pieces

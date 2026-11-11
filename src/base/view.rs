@@ -82,6 +82,14 @@ pub struct View {
     /// default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub card_size: Option<f32>,
+    /// Song views: whether rows show their album's cover between the number and the title.
+    #[serde(default = "default_covers")]
+    pub covers: bool,
+}
+
+/// Whether new views, and views saved before the setting existed, show covers in song rows.
+fn default_covers() -> bool {
+    true
 }
 
 /// Album grid card sizes: the cover width cards aim for, in points.
@@ -104,7 +112,7 @@ pub fn default_columns() -> Vec<Property> {
 
 impl View {
     pub fn new(name: impl Into<String>) -> View {
-        View { name: name.into(), mode: Mode::Songs, layout: Layout::Grid, filter: Group::default(), sorts: Vec::new(), group_by: None, columns: default_columns(), widths: Widths::new(), card_size: None }
+        View { name: name.into(), mode: Mode::Songs, layout: Layout::Grid, filter: Group::default(), sorts: Vec::new(), group_by: None, columns: default_columns(), widths: Widths::new(), card_size: None, covers: default_covers() }
     }
 
     /// Switches what the view lists, dropping sorts, grouping and conditions on properties
