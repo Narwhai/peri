@@ -39,6 +39,13 @@ On Linux, building needs `libxkbcommon`, `wayland` and `alsa-lib` (PipeWire work
 - **Saved:** the session key, user name and the API key it belongs to are kept unencrypted under `lastfm` in `prefs.json`, with the user's own API key and secret in builds without one. The built-in key is never saved. **Disconnect** forgets the session; **Remove credentials** (only in builds without a key) forgets the user's key too.
 - Headless runs (`--snap`, `--script`) and tests never contact Last.fm.
 
+## Play counts
+
+- **What counts:** the same rule as scrobbles. A song counts once it has played for half its length or four minutes, whichever comes first. Paused time and seeking ahead don't count, and songs of 30 seconds or less never count. Last.fm doesn't need to be connected.
+- **Where they show:** the **Plays** and **Last played** properties (columns, sort, filter, group), and song details. Albums add up their songs' plays and take the latest last played.
+- **Copies:** copies of one song share its plays. They match by MusicBrainz recording ID, else artist, title and album ignoring case, else the file path.
+- **Saved:** each play is a line (time, path, recording ID, artist, title, album) appended to `plays.jsonl` next to `prefs.json`. Counts are tallied from it at launch. A line that can't be read is skipped and reported. Headless runs and tests keep plays in memory.
+
 ## Views, filters and grouping
 
 Views work like Obsidian's [Bases](https://help.obsidian.md/bases/views). By default a view lists every song in a flat list. Change it from the toolbar under the header:
@@ -56,7 +63,7 @@ Views work like Obsidian's [Bases](https://help.obsidian.md/bases/views). By def
 
   A condition with no value yet, or one that can't be read (a word where a year goes, shown in red), filters nothing out.
 
-Properties: title, artist, featured artist, album artist, album, genre, year, the credit roles (composer, lyricist, writer, producer, arranger, conductor, performer, engineer, mixer, remixer, DJ mixer), label, track and disc number, duration, format, folder and date added. Year comes from the recording date tag, else year, release date or original release date. Date added is the file's creation time.
+Properties: title, artist, featured artist, album artist, album, genre, year, the credit roles (composer, lyricist, writer, producer, arranger, conductor, performer, engineer, mixer, remixer, DJ mixer), label, track and disc number, duration, format, folder, date added, plays and last played. Year comes from the recording date tag, else year, release date or original release date. Date added is the file's creation time.
 
 ## Columns and song details
 

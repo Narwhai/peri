@@ -96,6 +96,10 @@ pub struct Album {
     pub duration: f64,
     /// When the newest song was added.
     pub added: Option<i64>,
+    /// Its songs' plays added up.
+    pub plays: u32,
+    /// When any of its songs last played.
+    pub last_played: Option<i64>,
 }
 
 impl Album {
@@ -166,6 +170,8 @@ impl Record for Album {
             Property::Format => list(&self.formats),
             Property::Folder => text(self.folder.as_deref()),
             Property::Added => number(self.added.map(|s| s as f64)),
+            Property::Plays => Value::Number(f64::from(self.plays)),
+            Property::LastPlayed => number(self.last_played.map(|s| s as f64)),
             Property::Track | Property::Disc => Value::None,
         }
     }
@@ -204,6 +210,8 @@ pub fn build(tracks: &[Track]) -> Vec<Album> {
                 folder: None,
                 duration: 0.0,
                 added: None,
+                plays: 0,
+                last_played: None,
             });
             albums.len() - 1
         });
@@ -228,6 +236,8 @@ pub fn build(tracks: &[Track]) -> Vec<Album> {
         }
         a.duration += t.duration.unwrap_or(0.0);
         a.added = a.added.max(t.added);
+        a.plays += t.plays;
+        a.last_played = a.last_played.max(t.last_played);
     }
     for a in &mut albums {
         a.tracks.sort_by_key(|&i| (tracks[i].disc.unwrap_or(0), tracks[i].number.unwrap_or(u32::MAX), i));

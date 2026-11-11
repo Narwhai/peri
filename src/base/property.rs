@@ -55,6 +55,10 @@ pub enum Property {
     Added,
     /// Albums only: how many songs.
     Tracks,
+    /// How many times a song played; an album's songs' plays added up.
+    Plays,
+    /// When a song last played; an album's most recent.
+    LastPlayed,
 }
 
 /// How a property's values compare, which decides the operators a filter offers.
@@ -81,7 +85,7 @@ pub enum Value {
 }
 
 impl Property {
-    pub const ALL: [Property; 26] = [
+    pub const ALL: [Property; 28] = [
         Property::Title,
         Property::Artist,
         Property::Featured,
@@ -108,12 +112,14 @@ impl Property {
         Property::Format,
         Property::Folder,
         Property::Added,
+        Property::Plays,
+        Property::LastPlayed,
     ];
 
     /// The properties a mode offers. Albums drop the per-song ones and add a track count;
     /// "Title" is the album's title there.
     pub fn for_mode(mode: Mode) -> &'static [Property] {
-        const ALBUM: [Property; 24] = [
+        const ALBUM: [Property; 26] = [
             Property::Title,
             Property::AlbumArtist,
             Property::Artist,
@@ -138,6 +144,8 @@ impl Property {
             Property::Format,
             Property::Folder,
             Property::Added,
+            Property::Plays,
+            Property::LastPlayed,
         ];
         match mode {
             Mode::Songs => &Property::ALL,
@@ -174,7 +182,9 @@ impl Property {
             | Property::Format
             | Property::Folder
             | Property::Added
-            | Property::Tracks => return None,
+            | Property::Tracks
+            | Property::Plays
+            | Property::LastPlayed => return None,
         })
     }
 
@@ -196,6 +206,8 @@ impl Property {
             Property::Folder => "Folder",
             Property::Added => "Date added",
             Property::Tracks => "Track count",
+            Property::Plays => "Plays",
+            Property::LastPlayed => "Last played",
             Property::Writer => "Writer",
             Property::Arranger => "Arranger",
             Property::Conductor => "Conductor",
@@ -229,9 +241,9 @@ impl Property {
             | Property::Mixer
             | Property::Remixer
             | Property::DjMixer => Kind::List,
-            Property::Year | Property::Track | Property::Disc | Property::Tracks => Kind::Number,
+            Property::Year | Property::Track | Property::Disc | Property::Tracks | Property::Plays => Kind::Number,
             Property::Duration => Kind::Duration,
-            Property::Added => Kind::Date,
+            Property::Added | Property::LastPlayed => Kind::Date,
         }
     }
 
@@ -258,6 +270,8 @@ impl Property {
             Property::Folder => text(t.path.parent().and_then(|p| p.to_str())),
             Property::Added => number(t.added.map(|s| s as f64)),
             Property::Tracks => Value::None,
+            Property::Plays => Value::Number(f64::from(t.plays)),
+            Property::LastPlayed => number(t.last_played.map(|s| s as f64)),
             Property::Composer
             | Property::Lyricist
             | Property::Writer

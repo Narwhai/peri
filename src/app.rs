@@ -14,6 +14,8 @@ use crate::base::store::{Base, Store};
 use crate::base::view::{Evaluated, Layout, Section, Widths, evaluate};
 use crate::lastfm::{self, scrobbling::{Effect, Scrobbling}};
 use crate::library::{self, ScanMsg, Track};
+use crate::listen::{Listen, unix_now};
+use crate::plays::Plays;
 use crate::queue::{Queue, Repeat, Rng};
 
 /// How often the view refreshes the playback position while a track plays.
@@ -182,6 +184,10 @@ pub struct App {
     images: Option<ImageCache>,
     /// Last.fm: the connected account, and the playing song's scrobble.
     pub lastfm: Scrobbling,
+    /// Every song's plays, saved as they count.
+    plays: Plays,
+    /// How long the loaded song has really played, until its play counts.
+    listen: Option<Listen>,
 }
 
 impl App {
@@ -201,6 +207,7 @@ impl App {
             Err(e) => (None, Some(e)),
         };
         let stale_session = lastfm.as_ref().is_some_and(|s| s.session.is_some());
+        let (plays, plays_error) = store.plays();
         let lastfm = Scrobbling::new(lastfm, built_in);
         let mut app = App {
             tracks: Vec::new(),
@@ -250,7 +257,7 @@ impl App {
             shuffle: false,
             repeat: Repeat::Off,
             cover: None,
-            error: relations_error.clone().or(lastfm_error),
+            error: relations_error.clone().or(lastfm_error).or(plays_error),
             scan: None,
             drop_hover: false,
             details: None,
@@ -259,6 +266,8 @@ impl App {
             waker: None,
             images: None,
             lastfm,
+            plays,
+            listen: None,
         };
         // A session granted to another API key was dropped: forget it on disk too.
         if stale_session && app.lastfm.session().is_none() {
@@ -442,6 +451,7 @@ impl App {
         // Names one song's tags pair with IDs, or that stand alone, help split every other's.
         crate::credits::resolve(&mut tracks);
         library::sort(&mut tracks);
+        self.plays.apply(&mut tracks);
         self.tracks = tracks;
         self.albums = album::build(&self.tracks);
         let find = |path: &Option<PathBuf>, tracks: &[Track]| path.as_ref().and_then(|p| tracks.iter().position(|t| &t.path == p));
@@ -978,6 +988,7 @@ impl App {
                 self.error = None;
                 tx.set_title(title);
                 tx.wake_after(TICK);
+                self.listen = self.tracks.get(i).map(|t| Listen::new(t.duration));
                 if let Some(track) = self.tracks.get(i)
                     && let Err(e) = self.lastfm.started(track)
                 {
@@ -987,6 +998,7 @@ impl App {
             Err(e) => {
                 self.playing = false;
                 self.error = Some(e);
+                self.listen = None;
                 self.lastfm.stopped();
             }
         }
@@ -998,6 +1010,7 @@ impl App {
             engine.stop();
         }
         self.playing = false;
+        self.listen = None;
         self.lastfm.stopped();
         self.current = None;
         self.queue = None;
@@ -1057,6 +1070,7 @@ impl App {
         }
         self.playing = false;
         self.position = 0.0;
+        self.listen = None;
         self.lastfm.stopped();
     }
 
@@ -1165,6 +1179,25 @@ impl App {
         if let Err(e) = self.store.save_lastfm(&self.lastfm.saved) {
             self.error = Some(e);
         }
+    }
+
+    /// Follows the loaded song, and counts its play once it has played long enough; true
+    /// when that changed the counts shown.
+    fn poll_plays(&mut self, now: f64) -> bool {
+        let Some(listen) = &mut self.listen else { return false };
+        if !listen.tick(now, self.position, self.playing) {
+            return false;
+        }
+        let Some(track) = self.current.and_then(|i| self.tracks.get(i)) else { return false };
+        let recorded = unix_now().and_then(|at| self.plays.record(track, at));
+        if let Err(e) = recorded {
+            self.error = Some(e);
+        }
+        // Copies of the song share its plays, and views may sort or filter on them.
+        self.plays.apply(&mut self.tracks);
+        self.albums = album::build(&self.tracks);
+        self.refilter();
+        true
     }
 
     /// Takes Last.fm's replies and follows the playing song; true when the view changes.
@@ -1322,6 +1355,7 @@ pub fn poll(s: &mut App, now: f64, tx: &mut Tx) -> bool {
             tx.wake_after(TICK);
         }
     }
+    changed |= s.poll_plays(now);
     changed |= s.poll_lastfm(now, tx);
     if s.zoom_toast.is_some_and(|at| at.elapsed() >= ZOOM_TOAST) {
         s.zoom_toast = None;

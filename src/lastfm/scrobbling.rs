@@ -3,8 +3,9 @@
 
 use rune::TextEdit;
 
-use super::{Answer, Call, Client, Credentials, Error, INVALID_SESSION, Saved, Session, Song, auth_url, should_scrobble};
+use super::{Answer, Call, Client, Credentials, Error, INVALID_SESSION, Saved, Session, Song, auth_url};
 use crate::library::Track;
+use crate::listen::{Listen, unix_now};
 
 /// Last.fm's "This token has not been authorized".
 const UNAUTHORIZED_TOKEN: u32 = 14;
@@ -23,13 +24,9 @@ pub enum Effect {
 /// The song playing now, and how long it has really played: seeking doesn't count.
 struct Play {
     song: Song,
-    duration: Option<f64>,
     /// When it started, in seconds since the Unix epoch.
     started: i64,
-    played: f64,
-    /// The last position seen while playing, and the clock then.
-    last: Option<(f64, f64)>,
-    scrobbled: bool,
+    listen: Listen,
 }
 
 pub struct Scrobbling {
@@ -164,11 +161,8 @@ impl Scrobbling {
         }
         // Last.fm needs an artist; untagged files can't be scrobbled.
         let Some(song) = song_of(track) else { return Ok(()) };
-        let started = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|e| format!("Can't scrobble: the clock is before 1970 ({e})"))
-            .and_then(|d| i64::try_from(d.as_secs()).map_err(|e| format!("Can't scrobble: the clock is out of range ({e})")))?;
-        self.play = Some(Play { song: song.clone(), duration: track.duration, started, played: 0.0, last: None, scrobbled: false });
+        let started = unix_now().map_err(|e| format!("Can't scrobble: {e}"))?;
+        self.play = Some(Play { song: song.clone(), started, listen: Listen::new(track.duration) });
         self.call(Call::NowPlaying { session, song })
     }
 
@@ -176,25 +170,12 @@ impl Scrobbling {
         self.play = None;
     }
 
-    /// Every frame: counts the time played since the last tick (when the position moved no
-    /// further than the clock did, so seeks don't count), and scrobbles once the play counts.
+    /// Every frame: follows the time played, and scrobbles once the play counts.
     pub fn tick(&mut self, now: f64, position: f64, playing: bool) -> Result<(), String> {
         let Some(play) = &mut self.play else { return Ok(()) };
-        if !playing {
-            play.last = None;
+        if !play.listen.tick(now, position, playing) {
             return Ok(());
         }
-        if let Some((p0, t0)) = play.last {
-            let moved = position - p0;
-            if moved > 0.0 && moved <= (now - t0) + 0.5 {
-                play.played += moved;
-            }
-        }
-        play.last = Some((position, now));
-        if play.scrobbled || !should_scrobble(play.duration, play.played) {
-            return Ok(());
-        }
-        play.scrobbled = true;
         let (song, started) = (play.song.clone(), play.started);
         let Some(session) = self.session().map(|s| s.key.clone()) else { return Ok(()) };
         self.call(Call::Scrobble { session, song, started })

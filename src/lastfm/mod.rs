@@ -89,17 +89,6 @@ impl Song {
     }
 }
 
-/// Whether a play counts, by Last.fm's rule: the track is longer than 30 seconds and has played
-/// for half its length or 4 minutes, whichever comes first. With no known length, only the
-/// 4 minutes count (a track that played that long is longer than 30 seconds).
-pub fn should_scrobble(duration: Option<f64>, played: f64) -> bool {
-    const FOUR_MINUTES: f64 = 240.0;
-    match duration {
-        Some(d) => d > 30.0 && played >= (d / 2.0).min(FOUR_MINUTES),
-        None => played >= FOUR_MINUTES,
-    }
-}
-
 /// One API call.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Call {
@@ -354,17 +343,6 @@ mod tests {
     #[test]
     fn auth_url_encodes_its_query() {
         assert_eq!(auth_url("ab c", "t&1"), "https://www.last.fm/api/auth/?api_key=ab%20c&token=t%261");
-    }
-
-    #[test]
-    fn scrobble_rule() {
-        assert!(!should_scrobble(Some(30.0), 30.0), "30 seconds is too short");
-        assert!(!should_scrobble(Some(31.0), 15.0));
-        assert!(should_scrobble(Some(31.0), 15.5));
-        assert!(!should_scrobble(Some(600.0), 239.0));
-        assert!(should_scrobble(Some(600.0), 240.0), "4 minutes count before half of 10");
-        assert!(!should_scrobble(None, 200.0));
-        assert!(should_scrobble(None, 240.0));
     }
 
     #[test]

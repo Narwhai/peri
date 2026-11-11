@@ -54,8 +54,8 @@ pub fn width(p: Property) -> f32 {
     match p {
         Property::Track | Property::Disc => 44.0,
         Property::Year | Property::Format => 56.0,
-        Property::Duration | Property::Tracks => 60.0,
-        Property::Added | Property::ReleaseType => 96.0,
+        Property::Duration | Property::Tracks | Property::Plays => 60.0,
+        Property::Added | Property::LastPlayed | Property::ReleaseType => 96.0,
         Property::Folder => 260.0,
         Property::Album | Property::Label | Property::Genre => 180.0,
         Property::Title => TITLE_MIN,

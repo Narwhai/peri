@@ -93,6 +93,15 @@ impl Store {
         Store { prefs: Prefs::memory() }
     }
 
+    /// The play log, beside the preferences file; in memory when they are. The error tells of
+    /// lines it couldn't read.
+    pub fn plays(&self) -> (crate::plays::Plays, Option<String>) {
+        match self.prefs.path().and_then(|p| p.parent()) {
+            Some(dir) => crate::plays::Plays::open(dir.join(crate::plays::FILE)),
+            None => (crate::plays::Plays::memory(), None),
+        }
+    }
+
     /// The saved base, or the default when there is none or it's from an incompatible version.
     pub fn load(&self) -> Base {
         self.prefs.get::<Base>(KEY).filter(|b| b.version == VERSION).map_or_else(Base::default, Base::normalized)

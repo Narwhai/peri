@@ -420,3 +420,62 @@ fn real_library_groups_by_every_property() {
         assert_eq!(e.order.len(), tracks.len(), "every song plays once");
     }
 }
+
+#[test]
+fn a_play_counts_at_half_the_song_and_shows_in_columns_and_details() {
+    let mut rt = runtime(true);
+    let eta = rt.state.tracks.iter().position(|t| t.title == "ETA").expect("ETA is in the demo library");
+    assert_eq!(rt.state.tracks[eta].plays, 0);
+    rt.update(|s, tx| s.play_index(eta, tx));
+    rt.frame(0.0);
+    // ETA lasts 151 seconds: the play counts after 75.5 of them, heard in 0.2 s ticks.
+    for step in 1..=400 {
+        rt.update(|s, _| s.position = f64::from(step) * 0.2);
+        rt.frame(0.2);
+        if step == 350 {
+            let eta = rt.state.tracks.iter().find(|t| t.title == "ETA").expect("still there");
+            assert_eq!(eta.plays, 0, "70 seconds isn't half of 151");
+        }
+    }
+    let eta = rt.state.tracks.iter().position(|t| t.title == "ETA").expect("still there");
+    assert_eq!(rt.state.tracks[eta].plays, 1, "counted once");
+    assert!(rt.state.tracks[eta].last_played.is_some());
+    let album = rt.state.albums.iter().find(|a| a.tracks.contains(&eta)).expect("ETA's album");
+    assert_eq!(album.plays, 1, "the album adds up its songs' plays");
+
+    rt.update(|s, _| s.base.active_mut().columns.push(crate::base::property::Property::Plays));
+    rt.update(|s, _| s.refilter());
+    settle(&mut rt);
+    rt.update(|s, tx| s.show_details(eta, tx));
+    settle(&mut rt);
+    let count = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("details-play-count")).and_then(|e| e.text);
+    assert_eq!(count.as_deref(), Some("Once"));
+}
+
+#[test]
+fn plays_are_saved_beside_the_preferences_and_count_at_the_next_launch() {
+    use crate::base::store::Store;
+    let dir = std::env::temp_dir().join(format!("rune-music-plays-ui-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let file = dir.join("prefs.json");
+    let mut app = App::new(Output::Silent, Store::at(&file));
+    crate::scene_library(&mut app);
+    let mut rt = Runtime::new(app, view, (980.0, 640.0), Env::new(true, 1.0));
+    rt.poll = Some(crate::app::poll);
+    rt.frame(0.0);
+    let eta = rt.state.tracks.iter().position(|t| t.title == "ETA").expect("ETA is in the demo library");
+    rt.update(|s, tx| s.play_index(eta, tx));
+    rt.frame(0.0);
+    for step in 1..=400 {
+        rt.update(|s, _| s.position = f64::from(step) * 0.2);
+        rt.frame(0.2);
+    }
+    assert!(dir.join(crate::plays::FILE).exists());
+
+    let mut next = App::new(Output::Silent, Store::at(&file));
+    crate::scene_library(&mut next);
+    let eta = next.tracks.iter().find(|t| t.title == "ETA").expect("ETA is in the demo library");
+    assert_eq!(eta.plays, 1);
+    assert_eq!(next.tracks.iter().map(|t| t.plays).sum::<u32>(), 1, "only ETA played");
+    std::fs::remove_dir_all(&dir).unwrap();
+}

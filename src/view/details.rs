@@ -63,6 +63,16 @@ fn body(s: &App, i: usize, open: &DetailsDialog, p: &Palette) -> El {
     }
     b = b.child(release);
 
+    let mut plays = section("Plays", p).key("details-plays");
+    let count = match t.plays {
+        0 => "Never played".to_string(),
+        1 => "Once".to_string(),
+        n => format!("{n} times"),
+    };
+    plays = plays.child(fact("Plays", plain(count, p).key("details-play-count"), p));
+    plays = plays.children(t.last_played.map(|at| fact("Last played", plain(crate::base::property::format_date(at), p), p)));
+    b = b.child(plays);
+
     let roles = Role::ALL.into_iter().filter(|&r| t.credits.iter().any(|c| c.role == r));
     let mut c = section("Credits", p).key("details-credits");
     let mut any = false;

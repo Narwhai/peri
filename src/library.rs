@@ -65,6 +65,10 @@ pub struct Track {
     pub added: Option<i64>,
     /// The MusicBrainz recording ID (`MUSICBRAINZ_TRACKID`), sent with scrobbles.
     pub recording_id: Option<String>,
+    /// How many times the song has played, from [`crate::plays`]; copies share their plays.
+    pub plays: u32,
+    /// When it last played, in seconds since the Unix epoch.
+    pub last_played: Option<i64>,
 }
 
 impl Track {
@@ -238,6 +242,8 @@ fn read_track(path: PathBuf) -> Track {
         added,
         recording_id: item(ItemKey::MusicBrainzRecordingId),
         path,
+        plays: 0,
+        last_played: None,
         ..Track::default()
     }
 }
