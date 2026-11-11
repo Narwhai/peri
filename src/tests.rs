@@ -125,7 +125,7 @@ fn searching_opens_results_that_back_returns_to_and_clearing_leaves() {
     assert!(rt.find("toolbar").is_none(), "the view's toolbar hides on the results");
     assert_eq!(text_of(&rt, "artist-name"), "Nils Frahm");
     assert!(rt.find("artist-albums").is_some(), "her albums show like on the artist page");
-    assert!(rt.find("artist-songs").is_some());
+    assert!(rt.find("artist-music").is_some() && rt.find("artist-tab").is_some(), "the tab block");
     // Results update as the query changes.
     key(&mut rt, Key::Backspace);
     key(&mut rt, Key::Backspace);

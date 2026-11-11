@@ -27,6 +27,12 @@ use crate::palette::Palette;
 pub use albums::columns_for;
 
 const ROW_H: f32 = 44.0;
+/// The header's tabs: as tall as the header's bottom edge they stand on, so their bottoms line up with it.
+const TAB_H: f32 = 38.0;
+/// The gap between the header's tabs.
+const TAB_GAP: f32 = 2.0;
+/// The top corners' radius of a header tab.
+const TAB_RADIUS: f32 = 3.0;
 const BAR_H: f32 = 88.0;
 const COVER: f32 = 56.0;
 const SNAPPY: Spring = Spring::new(0.25, 0.0);
@@ -240,28 +246,37 @@ fn header(s: &App, zoom: f32, p: &Palette, kit: &Kit) -> El {
 fn tabs(s: &App, p: &Palette) -> El {
     let graph = s.in_graph();
     let tab = |key: &'static str, glyph: &'static Icon, label: &'static str, help: &'static str, on: bool| {
-        row()
+        // Like the artist page's folder tabs: the active one fills with the page below and its seam covers the header's bottom line.
+        let edge = if on { p.ui.alpha(0.7) } else { p.ui.alpha(0.35) };
+        let mut folder = row()
             .key(key)
-            .h(32.0)
+            .h(TAB_H)
             .pl(8.0)
             .pr(12.0)
             .gap(8.0)
-            .radius(8.0)
+            .corners([TAB_RADIUS, TAB_RADIUS, 0.0, 0.0])
+            .border(1.0, edge)
             .center_y()
-            .fill(if on { p.ui.alpha(0.55) } else { p.bg2.alpha(0.0) })
-            .hover(p.ui.alpha(if on { 0.65 } else { 0.4 }))
+            .fill(if on { p.bg } else { p.bg2.alpha(0.0) })
             .cursor(Cursor::Pointer)
             .role("tab")
             .checked(on)
             .label(label)
             .help(help)
             .child(icon(glyph, 18.0).color(if on { p.ui3 } else { p.tx3 }))
-            .child(text(label).font(HEADING).color(if on { p.tx } else { p.tx2 }))
+            .child(text(label).font(HEADING).color(if on { p.tx } else { p.tx2 }));
+        if on {
+            // Inside the tab's side borders and over the header's bottom line beneath it.
+            folder = folder.child(el().key(format!("{key}-seam")).pin(Some(1.0), None, Some(1.0), Some(0.0)).h(1.0).fill(p.bg));
+        } else {
+            folder = folder.hover(p.ui.alpha(0.3));
+        }
+        folder
     };
     row()
         .key("tabs")
-        .gap(4.0)
-        .center_y()
+        .gap(TAB_GAP)
+        .self_end()
         .role("tablist")
         .label("Sections")
         .child(tab("home", &icons::NOTE, "Library", "Back to the library's views", !graph).on_press(|s: &mut App| s.go_home()))

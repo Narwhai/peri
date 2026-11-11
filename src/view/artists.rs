@@ -1,5 +1,5 @@
-//! The artist page: their albums, the songs they appear on, their songs, and the songs
-//! that credit them. The search page shows the same sections for the artist it finds.
+//! The artist page: their releases or their songs (a tab), the songs they appear on, the songs
+//! that credit them, and related artists. The search page shows the same sections for the artist it finds.
 
 use rune::{Cursor, El, ScrollSpec, col, el, icon, row, text};
 use rune_kit::{Kit, Placement, TextInput, popover, scrim};
@@ -9,7 +9,7 @@ use super::table;
 use super::toolbar::{hint, segmented};
 use super::*;
 use crate::album::ReleaseType;
-use crate::app::Panel;
+use crate::app::{ArtistTab, Panel};
 use crate::artist::{ArtistPage, everything, involved, known, page, suggest};
 use crate::credits::Role;
 use crate::library::Track;
@@ -18,6 +18,12 @@ use crate::relations::{LinkChoice, Relation};
 
 const PAGE_TITLE: TextStyle = TextStyle::new(28.0, 700.0);
 const SONG_ROW_H: f32 = 40.0;
+/// Height of the folder tabs; the panel's top line sits at its bottom edge.
+const TAB_H: f32 = 34.0;
+/// The gap between folder tabs; the first sits flush with the panel's left edge.
+const TAB_GAP: f32 = 2.0;
+/// Corner radius of the folder tabs' top corners and the panel's other corners.
+const TAB_RADIUS: f32 = 3.0;
 /// Song rows' covers, as wide as the table's lead column.
 const COVER_W: f32 = table::LEAD_W;
 
@@ -46,32 +52,24 @@ pub(super) fn artist_page(s: &App, name: &str, p: &Palette, kit: &Kit, layer: &m
     col().key("artist-page").w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: false }).child(body.children(sections(s, &info, &others, p)))
 }
 
-/// Their albums, the songs they appear on, their credits, their songs, then related artists.
+/// Their releases or songs (a tab), the songs they appear on, their credits, then related artists.
 pub(super) fn sections(s: &App, info: &ArtistPage, others: &[(Relation, ArtistPage)], p: &Palette) -> Vec<El> {
     let mut out = Vec::new();
     let pills = album_pill_rows(s, info, p);
-    // Mixed with their aliases' releases, cards say which name each is under.
-    out.extend(release_strips(s, "artist", &info.albums, info.with_aliases, &pills, p));
+    if !info.albums.is_empty() {
+        out.push(music(s, info, &pills, p));
+    }
     if !info.appears_on.is_empty() {
         out.push(songs(s, "appears-on", "Appears on", &info.appears_on, p));
     }
-    // Credits come first, each song once with a pill per role; the Songs section starts
-    // collapsed when there are any.
+    // Each song once with a pill per role.
     if !info.credits.is_empty() {
         let open = !s.artist_credits_closed;
         let toggle = section_toggle("artist-credits-toggle", "Credits", info.credits.len(), open, p).on_press(move |s: &mut App| s.artist_credits_closed = open);
-        let mut section = col().key("credits").w_full().gap(8.0).child(toggle);
+        // Boxed like the Releases / Songs panel, open or folded.
+        let mut section = col().key("credits").w_full().gap(8.0).border(1.0, p.ui).radius(TAB_RADIUS).px(16.0).py(10.0).child(toggle);
         if open {
             section = section.child(credits(s, "credits", info, p));
-        }
-        out.push(section);
-    }
-    if !info.songs.is_empty() {
-        let open = s.artist_songs_open.unwrap_or(info.credits.is_empty());
-        let toggle = section_toggle("artist-songs-toggle", "Songs", info.songs.len(), open, p).on_press(move |s: &mut App| s.artist_songs_open = Some(!open));
-        let mut section = col().key("artist-songs").w_full().gap(8.0).child(toggle);
-        if open {
-            section = section.child(song_table(s, "artist-songs", untagged(&info.songs), &[], &info.songs, p));
         }
         out.push(section);
     }
@@ -80,6 +78,61 @@ pub(super) fn sections(s: &App, info: &ArtistPage, others: &[(Relation, ArtistPa
         out.push(related(s, info, p));
     }
     out
+}
+
+/// The Releases / Songs folder tabs over a bordered panel holding the active tab's content: the
+/// release strips, or one table of every song on their albums, newest album first. Keyed `artist-music`.
+fn music(s: &App, info: &ArtistPage, pills: &[(usize, Vec<table::Pill>)], p: &Palette) -> El {
+    let tabs = row()
+        .key("artist-tab")
+        .absolute(0.0, 0.0)
+        .h(TAB_H)
+        .gap(TAB_GAP)
+        .role("tablist")
+        .label("Releases or songs")
+        .focus_group()
+        .child(folder_tab(ArtistTab::Releases, "releases", "Releases", s.artist_tab == ArtistTab::Releases, p))
+        .child(folder_tab(ArtistTab::Songs, "songs", "Songs", s.artist_tab == ArtistTab::Songs, p));
+    let content = match s.artist_tab {
+        // Mixed with their aliases' releases, cards say which name each is under.
+        ArtistTab::Releases => col().key("artist-releases").w_full().gap(22.0).children(release_strips(s, "artist", &info.albums, info.with_aliases, pills, p)),
+        ArtistTab::Songs => {
+            let list: Vec<usize> = info.albums.iter().flat_map(|&a| s.albums[a].tracks.iter().copied()).collect();
+            col().key("artist-songs-list").w_full().child(song_table(s, "artist-songs", untagged(&list), &[], &list, p))
+        }
+    };
+    // Square top-left, where the first tab meets the panel.
+    let panel = col().key("artist-music-panel").w_full().mt(TAB_H - 1.0).border(1.0, p.ui).corners([0.0, TAB_RADIUS, TAB_RADIUS, TAB_RADIUS]).padding(16.0).child(content);
+    col().key("artist-music").w_full().child(panel).child(tabs)
+}
+
+/// One folder tab: its label on a top-rounded tab that opens into the panel when `on`. The
+/// active tab fills with the page background and covers the panel's top line beneath it.
+fn folder_tab(tab: ArtistTab, value: &'static str, label: &'static str, on: bool, p: &Palette) -> El {
+    let edge = if on { p.ui } else { p.ui.alpha(0.5) };
+    let mut folder = row()
+        .key(value)
+        .h(TAB_H)
+        .px(16.0)
+        .center()
+        .corners([TAB_RADIUS, TAB_RADIUS, 0.0, 0.0])
+        .border(1.0, edge)
+        .cursor(Cursor::Pointer)
+        .role("tab")
+        .label(label)
+        .checked(on)
+        .focusable(true)
+        .motion(SNAPPY)
+        .on_press(move |s: &mut App| s.artist_tab = tab)
+        .child(text(label).font(TITLE).color(if on { p.tx } else { p.tx2 }));
+    if on {
+        // Sits on the tab's bottom border line, between its side borders: the panel's top line
+        // is hidden beneath the tab.
+        folder = folder.fill(p.bg).child(el().key("artist-tab-seam").pin(Some(1.0), None, Some(1.0), Some(0.0)).h(1.0).fill(p.bg));
+    } else {
+        folder = folder.hover(p.ui.alpha(0.3));
+    }
+    folder
 }
 
 /// One strip per release type (Albums, EPs, Singles, Compilations) of `albums`, keeping

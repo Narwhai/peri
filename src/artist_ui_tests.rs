@@ -3,7 +3,7 @@
 
 use rune::{Env, Key, KeyEvent, Mods, Runtime};
 
-use crate::app::{App, Output, Page, album_key};
+use crate::app::{App, ArtistTab, Output, Page, album_key};
 use crate::base::property::Mode;
 use crate::base::store::Store;
 use crate::credits::{Credit, Role};
@@ -129,7 +129,9 @@ fn each_artist_of_a_collaborative_album_opens_from_the_album_page_and_back_retra
     assert_eq!(rt.state.page, Page::Artist("The Alchemist".into()));
     assert!(rt.find("artist-albums").is_some(), "Mercy counts as The Alchemist's album");
     assert!(rt.find("credits").is_none(), "his only credits are on his own album");
-    // From the artist page into a guest's page, then Back twice to the album.
+    // From the artist page into a guest's page, then Back twice to the album. Silka's name is
+    // on a song row, which lists under the Songs tab.
+    click_tab(&mut rt, "songs");
     click(&mut rt, "Silka");
     assert_eq!(rt.state.page, Page::Artist("Silka".into()));
     click(&mut rt, "back");
@@ -157,30 +159,129 @@ fn the_now_playing_bar_links_the_playing_songs_artists() {
 }
 
 
-#[test]
-fn songs_start_collapsed_under_the_credits_when_the_artist_has_credits() {
-    // The Alchemist plays on Mercy and produced Elsewhere: credits first, songs folded.
-    let mut rt = alchemist(elsewhere());
-    let y = |rt: &Runtime<App>, key: &str| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).unwrap_or_else(|| panic!("no {key}")).rect[1];
-    assert!(y(&rt, "credits") < y(&rt, "artist-songs"), "credits come before songs");
-    assert!(rt.find("artist-songs-table").is_none(), "songs start collapsed");
-    click(&mut rt, "artist-songs-toggle");
-    assert!(rt.find("artist-songs-table").is_some());
-    click(&mut rt, "artist-songs-toggle");
-    assert!(rt.find("artist-songs-table").is_none());
-    // Silka has no credits, so her songs show open.
-    rt.update(|s, tx| s.show_artist("Silka", tx));
+/// Mercy plus Armand Hammer's older album "Ruins", so his page has two releases to order.
+fn with_older_album() -> Vec<Track> {
+    let song = |n: u32, title: &str| Track {
+        path: format!("/m/Ruins/{n:02} {title}.flac").into(),
+        title: title.into(),
+        credit: Some("Armand Hammer".into()),
+        album_artist: Some("Armand Hammer".into()),
+        tagged: TaggedArtists { artists: strings(&["Armand Hammer"]), ..TaggedArtists::default() },
+        album: Some("Ruins".into()),
+        year: Some(2010),
+        number: Some(n),
+        duration: Some(200.0),
+        ..Track::default()
+    };
+    let mut tracks = mercy();
+    tracks.extend([song(1, "Ruin Porch"), song(2, "Dust Hymn")]);
+    tracks
+}
+
+/// Armand Hammer's page with Mercy and Ruins in the library.
+fn armand_hammer() -> Runtime<App> {
+    let mut rt = runtime();
+    rt.update(|s, _| s.set_library(with_older_album(), false));
     settle(&mut rt);
-    assert!(rt.find("artist-songs-table").is_some());
+    rt.update(|s, tx| s.show_artist("Armand Hammer", tx));
+    settle(&mut rt);
+    rt
+}
+
+/// Clicks the option `value` of the artist page's Releases / Songs tab. The toolbar's own
+/// Songs option shares the key, so this looks only inside `artist-tab`.
+fn click_tab(rt: &mut Runtime<App>, value: &str) {
+    let (x, y) = rt
+        .elements()
+        .into_iter()
+        .find(|e| e.key.as_deref() == Some(value) && e.path.contains("artist-tab"))
+        .map(|e| (e.rect[0] + e.rect[2] * 0.5, e.rect[1] + e.rect[3] * 0.5))
+        .unwrap_or_else(|| panic!("no {value} option in artist-tab"));
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    settle(rt);
 }
 
 #[test]
-fn artist_song_rows_lead_with_the_album_cover() {
+fn the_releases_tab_is_the_default_and_songs_list_every_song_newest_album_first() {
+    let mut rt = armand_hammer();
+    let mercy = rt.state.albums.iter().position(|a| a.title == "Mercy").expect("Mercy");
+    let ruins = rt.state.albums.iter().position(|a| a.title == "Ruins").expect("Ruins");
+    assert!(rt.find("artist-tab").is_some());
+    assert!(rt.find(&format!("artist-albums{mercy}")).is_some(), "Releases is the default");
+    assert!(rt.find("artist-songs-table").is_none());
+
+    click_tab(&mut rt, "songs");
+    assert!(rt.find(&format!("artist-albums{mercy}")).is_none(), "the strips give way to the table");
+    assert!(rt.find("artist-songs-table").is_some());
+    let order: Vec<usize> = rt.state.albums[mercy].tracks.iter().chain(&rt.state.albums[ruins].tracks).copied().collect();
+    assert_eq!(order.len(), 4);
+    let y = |rt: &Runtime<App>, key: &str| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).unwrap_or_else(|| panic!("no {key}")).rect[1];
+    let ys: Vec<f32> = order.iter().map(|i| y(&rt, &format!("artist-songs-t{i}"))).collect();
+    assert!(ys.windows(2).all(|w| w[0] < w[1]), "rows in album order, newest first: {ys:?}");
+    assert!(rt.find(&format!("artist-songs-cover{}", order[0])).is_some(), "rows lead with the album cover");
+}
+
+#[test]
+fn switching_back_restores_the_releases_and_another_artist_opens_on_them() {
+    let mut rt = armand_hammer();
+    let mercy = rt.state.albums.iter().position(|a| a.title == "Mercy").expect("Mercy");
+    click_tab(&mut rt, "songs");
+    click_tab(&mut rt, "releases");
+    assert!(rt.find(&format!("artist-albums{mercy}")).is_some());
+    assert!(rt.find("artist-songs-table").is_none());
+
+    click_tab(&mut rt, "songs");
+    rt.update(|s, tx| s.show_artist("The Alchemist", tx));
+    settle(&mut rt);
+    assert_eq!(rt.state.artist_tab, ArtistTab::Releases, "another artist's page resets the tab");
+    assert!(rt.find("artist-songs-table").is_none());
+    assert!(rt.find(&format!("artist-albums{mercy}")).is_some());
+}
+
+#[test]
+fn an_artist_with_no_releases_of_their_own_has_no_tab() {
     let mut rt = runtime();
     rt.update(|s, tx| s.show_artist("Silka", tx));
     settle(&mut rt);
-    let calypso = rt.state.tracks.iter().position(|t| t.title == "Calypso Gene").expect("Calypso Gene");
-    assert!(rt.find(&format!("artist-songs-cover{calypso}")).is_some());
+    assert!(rt.find("artist-tab").is_none());
+    assert!(rt.find("artist-music").is_none());
+    assert!(rt.find("appears-on").is_some(), "Silka's songs on Mercy still list");
+}
+
+#[test]
+fn the_active_folder_tab_opens_into_the_panel_it_sits_on() {
+    let mut rt = armand_hammer();
+    // The toolbar's Songs option shares the key, so the tab is looked up inside `artist-tab`.
+    let tab = |rt: &Runtime<App>, value: &str| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(value) && e.path.contains("artist-tab")).unwrap_or_else(|| panic!("no {value} tab")).rect;
+    let panel = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("artist-music-panel")).expect("panel").rect;
+    let releases = tab(&rt, "releases");
+    let songs = tab(&rt, "songs");
+    let bottom = |r: [f32; 4]| r[1] + r[3];
+    assert_eq!(bottom(releases), panel[1] + 1.0, "the active tab's bottom edge covers the panel's top border");
+    assert!(releases[0] >= panel[0] && releases[0] + releases[2] <= panel[0] + panel[2], "Releases sits within the panel's width");
+    assert!(songs[0] >= panel[0] && songs[0] + songs[2] <= panel[0] + panel[2], "Songs sits within the panel's width");
+    assert_eq!(releases[0], panel[0], "the first tab's left edge lines up with the panel's");
+    let seam = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("artist-tab-seam")).expect("seam").rect;
+    assert_eq!(seam[1], panel[1], "the seam strip is on the panel's top line");
+    assert_eq!(seam[3], 1.0, "the seam strip is one point tall");
+    assert!(seam[0] > releases[0] && seam[0] + seam[2] < releases[0] + releases[2], "the seam sits between the tab's side borders");
+    click_tab(&mut rt, "songs");
+    let songs = tab(&rt, "songs");
+    assert_eq!(bottom(songs), panel[1] + 1.0, "Songs covers the panel's top border once active");
+}
+
+#[test]
+fn the_tabs_sit_above_credits_and_credits_keep_their_toggle() {
+    let mut rt = alchemist(elsewhere());
+    let y = |rt: &Runtime<App>, key: &str| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).unwrap_or_else(|| panic!("no {key}")).rect[1];
+    assert!(rt.find("artist-tab").is_some());
+    assert!(y(&rt, "artist-music") < y(&rt, "credits"), "the tabs come before credits");
+    assert!(rt.find("credits-table").is_some(), "credits start open");
+    click(&mut rt, "artist-credits-toggle");
+    assert!(rt.find("credits-table").is_none());
+    click(&mut rt, "artist-credits-toggle");
+    assert!(rt.find("credits-table").is_some());
 }
 
 #[test]

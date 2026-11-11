@@ -88,6 +88,16 @@ pub struct DetailsDialog {
     pub raw_open: bool,
 }
 
+/// The artist page's tab: their releases, or every song on them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ArtistTab {
+    /// Their albums, EPs, singles and compilations as strips.
+    #[default]
+    Releases,
+    /// Every song on their releases in one table.
+    Songs,
+}
+
 pub struct App {
     pub tracks: Vec<Track>,
     /// The library gathered into albums, in library order.
@@ -97,9 +107,8 @@ pub struct App {
     pub history: Vec<Page>,
     /// The pages Forward returns to, the next one last: those Back left. Opening a page clears it.
     pub forward: Vec<Page>,
-    /// The artist page's Songs section, when toggled: `None` shows it collapsed if the artist
-    /// has credits (so they come first), else open. Reset on every page change.
-    pub artist_songs_open: Option<bool>,
+    /// The artist page's tab, Releases or Songs. Reset on every page change.
+    pub artist_tab: ArtistTab,
     /// Whether the artist page's Credits section is folded. Reset on every page change.
     pub artist_credits_closed: bool,
     /// The artist page's bands and members sections that are open, by the other artist's name.
@@ -226,7 +235,7 @@ impl App {
             page: Page::Library,
             history: Vec::new(),
             forward: Vec::new(),
-            artist_songs_open: None,
+            artist_tab: ArtistTab::Releases,
             artist_credits_closed: false,
             artist_related_open: Vec::new(),
             artist_with_aliases: false,
@@ -669,7 +678,7 @@ impl App {
 
     /// Shows `page`, remembering the one it leaves for Back.
     fn leave_for(&mut self, page: Page) {
-        self.artist_songs_open = None;
+        self.artist_tab = ArtistTab::Releases;
         self.artist_credits_closed = false;
         self.artist_related_open.clear();
         let left = std::mem::replace(&mut self.page, page);
@@ -691,7 +700,7 @@ impl App {
         let back = self.history.pop().unwrap_or(Page::Library);
         let left = std::mem::replace(&mut self.page, back);
         self.forward.push(left);
-        self.artist_songs_open = None;
+        self.artist_tab = ArtistTab::Releases;
         self.artist_credits_closed = false;
         self.artist_related_open.clear();
         if self.page == Page::Library {
@@ -708,7 +717,7 @@ impl App {
     pub fn show_graph(&mut self) {
         self.close_panel();
         self.details = None;
-        self.artist_songs_open = None;
+        self.artist_tab = ArtistTab::Releases;
         self.artist_credits_closed = false;
         self.artist_related_open.clear();
         if self.page == Page::Library {
@@ -798,7 +807,7 @@ impl App {
         self.close_panel();
         self.details = None;
         self.search.clear();
-        self.artist_songs_open = None;
+        self.artist_tab = ArtistTab::Releases;
         self.artist_credits_closed = false;
         self.artist_related_open.clear();
         self.show_library();
@@ -820,7 +829,7 @@ impl App {
                     self.history.truncate(at);
                     self.forward.clear();
                     self.page = Page::Search;
-                    self.artist_songs_open = None;
+                    self.artist_tab = ArtistTab::Releases;
                     self.artist_credits_closed = false;
                     self.artist_related_open.clear();
                 }
