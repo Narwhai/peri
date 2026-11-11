@@ -202,7 +202,7 @@ pub fn song_row(t: &Track, i: usize, columns: Columns, look: RowLook, p: &Palett
         .px(look.px)
         .gap(GAP)
         .center_y()
-        .radius(6.0)
+        .radius(3.0)
         .fill(if look.selected { p.ui.alpha(if p.dark { 0.7 } else { 0.55 }) } else { p.bg.alpha(0.0) })
         .hover(p.ui.alpha(0.35))
         .hover_group()

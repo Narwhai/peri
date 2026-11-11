@@ -118,7 +118,10 @@ line_icon!(COPY, "rm-copy", "M8 8 H20 V20 H8 Z", "M16 8 V4 H4 V16 H8");
 line_icon!(ARROW_UP, "rm-arrow-up", "M12 19 V5", "M6 11 L12 5 L18 11");
 line_icon!(COLLAPSE, "rm-collapse", "M7 9 L12 4 L17 9", "M7 15 L12 20 L17 15");
 line_icon!(EXPAND, "rm-expand", "M7 4 L12 9 L17 4", "M7 20 L12 15 L17 20");
+pub static HOUSE: Icon = stroked!("rm-house", "M4 10.5 L12 4 L20 10.5", "M6 9 V19.5 H10 V14.5 H14 V19.5 H18 V9");
+
 line_icon!(BACK, "rm-back", "M15 5 L8 12 L15 19");
+line_icon!(FORWARD, "rm-forward", "M9 5 L16 12 L9 19");
 line_icon!(INFO, "rm-info", "M12 3 A9 9 0 1 0 12.01 3 Z", "M12 11 V16.5", "M12 7.6 V7.7");
 line_icon!(COLUMNS, "rm-columns", "M3 5 H21 V19 H3 Z", "M9 5 V19", "M15 5 V19");
 line_icon!(FOLDER_OPEN, "rm-folder-open", "M3 7 V18 H19 L21.5 10.5 H7 L4.5 18", "M3 7 V5 H9 L11 7 H18 V10.5");

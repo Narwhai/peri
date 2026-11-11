@@ -88,7 +88,7 @@ fn the_graph_tab_shows_every_artist_and_library_returns() {
         assert!(rt.find(&format!("kind-{}", kind.id())).is_some(), "the legend lists {}", kind.label());
     }
     assert!(rt.find("kind-alias").is_none(), "only kinds the graph has");
-    click(&mut rt, "home");
+    click(&mut rt, "library-tab");
     assert_eq!(rt.state.page, Page::Library);
 }
 
@@ -174,7 +174,7 @@ fn hiding_a_kind_of_link_and_the_camera_save_and_come_back() {
         settle(&mut rt);
         let cam = rt.state.graph.camera.expect("the camera moved");
         // Leaving and coming back keeps it.
-        click(&mut rt, "home");
+        click(&mut rt, "library-tab");
         click(&mut rt, "graph-tab");
         assert_eq!(rt.state.graph.camera, Some(cam));
         rt.update(|s, _| s.save_graph());
@@ -629,7 +629,7 @@ fn the_active_header_tab_stands_on_the_header_edge_with_a_seam_over_its_line() {
         assert!(seam[0] > tab[0] && seam[0] + seam[2] < tab[0] + tab[2], "the seam sits between {on}'s side borders");
         assert!(!has(rt, &format!("{off}-seam")), "only the active tab has a seam");
     };
-    check(&rt, "home", "graph-tab");
+    check(&rt, "library-tab", "graph-tab");
     click(&mut rt, "graph-tab");
-    check(&rt, "graph-tab", "home");
+    check(&rt, "graph-tab", "library-tab");
 }

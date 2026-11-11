@@ -149,7 +149,7 @@ fn raw_section(d: &Details, open: bool, p: &Palette) -> El {
         .h(28.0)
         .gap(6.0)
         .center_y()
-        .radius(6.0)
+        .radius(3.0)
         .hover(p.ui.alpha(0.3))
         .cursor(Cursor::Pointer)
         .role("button")

@@ -355,7 +355,7 @@ fn hover_tip(g: &Graph, i: usize, p: &Palette) -> Option<El> {
             .pin(Some(x + r + 6.0), Some(y - 12.0), None, None)
             .px(8.0)
             .py(4.0)
-            .radius(6.0)
+            .radius(3.0)
             .fill(p.bg2)
             .border(1.0, p.ui)
             .shadow(4.0, 12.0, Color::BLACK.alpha(0.2))
@@ -392,7 +392,7 @@ fn link_tip(g: &Graph, edges: &[usize], p: &Palette) -> Option<El> {
         .px(8.0)
         .py(6.0)
         .gap(4.0)
-        .radius(6.0)
+        .radius(3.0)
         .fill(p.bg2)
         .border(1.0, p.ui)
         .shadow(4.0, 12.0, Color::BLACK.alpha(0.2))
@@ -640,7 +640,7 @@ fn names(g: &Graph, zoom: f32, rect: [f32; 4], p: &Palette) -> El {
                 .pin(Some(left), Some(top), None, None)
                 // A backdrop keeps the name readable over the lines it sits on.
                 .px(2.0)
-                .radius(3.0)
+                .radius(2.0)
                 .fill(p.bg.alpha(0.7)),
         );
     }

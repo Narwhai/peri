@@ -18,7 +18,7 @@ pub(super) fn label_page(s: &App, name: &str, p: &Palette) -> El {
         .pl(6.0)
         .pr(10.0)
         .gap(4.0)
-        .radius(6.0)
+        .radius(3.0)
         .center_y()
         .hover(p.ui.alpha(0.45))
         .cursor(Cursor::Pointer)
@@ -29,7 +29,7 @@ pub(super) fn label_page(s: &App, name: &str, p: &Palette) -> El {
         .child(text(back_label(s)).font(TITLE).color(p.tx2));
 
     let first = info.albums.first().copied();
-    let art = cover("label-cover".into(), first.and_then(|a| cover_image(s, &s.albums[a])), Some(160.0), 80.0, p);
+    let art = cover("label-cover".into(), first.and_then(|a| cover_image(s, &s.albums[a])), Some(160.0), p);
     let mut counts = Vec::new();
     for kind in ReleaseType::ALL {
         let n = info.albums.iter().filter(|&&a| s.albums[a].release_type == kind).count();

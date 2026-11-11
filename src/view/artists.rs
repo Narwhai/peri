@@ -35,7 +35,7 @@ pub(super) fn artist_page(s: &App, name: &str, p: &Palette, kit: &Kit, layer: &m
         .pl(6.0)
         .pr(10.0)
         .gap(4.0)
-        .radius(6.0)
+        .radius(3.0)
         .center_y()
         .hover(p.ui.alpha(0.45))
         .cursor(Cursor::Pointer)
@@ -67,7 +67,7 @@ pub(super) fn sections(s: &App, info: &ArtistPage, others: &[(Relation, ArtistPa
         let open = !s.artist_credits_closed;
         let toggle = section_toggle("artist-credits-toggle", "Credits", info.credits.len(), open, p).on_press(move |s: &mut App| s.artist_credits_closed = open);
         // Boxed like the Releases / Songs panel, open or folded.
-        let mut section = col().key("credits").w_full().gap(8.0).border(1.0, p.ui).radius(TAB_RADIUS).px(16.0).py(10.0).child(toggle);
+        let mut section = boxed(col().key("credits").w_full().gap(8.0).child(toggle), p);
         if open {
             section = section.child(credits(s, "credits", info, p));
         }
@@ -78,6 +78,11 @@ pub(super) fn sections(s: &App, info: &ArtistPage, others: &[(Relation, ArtistPa
         out.push(related(s, info, p));
     }
     out
+}
+
+/// Wraps a section in the bordered box the Credits and Releases panels use.
+pub(super) fn boxed(section: El, p: &Palette) -> El {
+    section.border(1.0, p.ui).radius(TAB_RADIUS).px(16.0).py(10.0)
 }
 
 /// The Releases / Songs folder tabs over a bordered panel holding the active tab's content: the
@@ -153,7 +158,7 @@ pub(super) fn release_strips(s: &App, key: &str, albums: &[usize], artists: bool
 pub(super) fn head(s: &App, info: &ArtistPage, others: &[(Relation, ArtistPage)], link: Option<El>, p: &Palette) -> El {
     let linked = link.is_none();
     let first = info.albums.first().copied().or_else(|| info.appears_on.first().and_then(|&i| s.album_of(i)));
-    let mut art = cover("artist-cover".into(), first.and_then(|a| cover_image(s, &s.albums[a])), Some(160.0), 80.0, p);
+    let mut art = cover("artist-cover".into(), first.and_then(|a| cover_image(s, &s.albums[a])), Some(160.0), p);
     let mut counts = Vec::new();
     for kind in ReleaseType::ALL {
         let n = info.albums.iter().filter(|&&a| s.albums[a].release_type == kind).count();
@@ -257,12 +262,13 @@ fn involved_section(s: &App, relation: Relation, other: &ArtistPage, p: &Palette
             s.artist_related_open.push(who.clone());
         }
     });
-    let mut section = col().key(key.clone()).w_full().gap(8.0).child(toggle);
+    let mut section = boxed(col().key(key.clone()).w_full().gap(8.0).child(toggle), p);
     if open {
         let pills = album_pill_rows(s, other, p);
         section = section.children(release_strips(s, &key, &other.albums, other.with_aliases, &pills, p));
         if !other.appears_on.is_empty() {
-            section = section.child(songs(s, &format!("{key}-appears-on"), "Appears on", &other.appears_on, p));
+            let appears = format!("{key}-appears-on");
+            section = section.child(titled(&appears, "Appears on", song_table(s, &appears, untagged(&other.appears_on), &[], &other.appears_on, p), p));
         }
         if !other.credits.is_empty() {
             section = section.child(credits(s, &format!("{key}-credits"), other, p));
@@ -274,7 +280,7 @@ fn involved_section(s: &App, relation: Relation, other: &ArtistPage, p: &Palette
 /// The artists linked to this one, a row of names per relation; names in the library open
 /// their pages.
 fn related(s: &App, info: &ArtistPage, p: &Palette) -> El {
-    let mut section = col().key("artist-related").w_full().gap(10.0).child(text("Related").font(HEADING).color(p.tx));
+    let mut section = boxed(col().key("artist-related").w_full().gap(10.0).child(text("Related").font(HEADING).color(p.tx)), p);
     for relation in Relation::ALL {
         let names: Vec<&String> = info.related.iter().filter(|(r, _)| *r == relation).map(|(_, n)| n).collect();
         if names.is_empty() {
@@ -423,7 +429,7 @@ fn link_option(key: String, label: &str, note: Option<&str>, p: &Palette) -> El 
         .px(8.0)
         .py(4.0)
         .center_y()
-        .radius(6.0)
+        .radius(3.0)
         .hover(p.ui.alpha(0.35))
         .press(p.ui.alpha(0.6))
         .cursor(Cursor::Pointer)
@@ -434,7 +440,7 @@ fn link_option(key: String, label: &str, note: Option<&str>, p: &Palette) -> El 
 
 /// The switch that adds their aliases' releases and credits to the page.
 fn aliases_toggle(on: bool, p: &Palette) -> El {
-    let mark = el().w(16.0).h(16.0).radius(4.0).center();
+    let mark = el().w(16.0).h(16.0).radius(2.0).center();
     let mark = if on { mark.fill(p.blue).child(icon(&rune_kit::glyphs::CHECK_SMALL, 14.0).color(rune::Color::WHITE)) } else { mark.border(1.5, p.tx3) };
     row()
         .key("artist-aliases")
@@ -471,7 +477,7 @@ fn link_button(key: &'static str, label: &'static str, p: &Palette) -> El {
 
 /// A titled song table with the page columns. Double-click plays the table from that song.
 pub(super) fn songs(s: &App, key: &str, title: &str, list: &[usize], p: &Palette) -> El {
-    titled(key, title, song_table(s, key, untagged(list), &[], list, p), p)
+    boxed(titled(key, title, song_table(s, key, untagged(list), &[], list, p), p), p)
 }
 
 fn titled(key: &str, title: &str, table: El, p: &Palette) -> El {
@@ -543,7 +549,7 @@ fn section_toggle(key: &str, title: &str, count: usize, open: bool, p: &Palette)
         .pr(10.0)
         .gap(8.0)
         .center_y()
-        .radius(6.0)
+        .radius(3.0)
         .hover(p.ui.alpha(0.3))
         .cursor(Cursor::Pointer)
         .role("button")

@@ -11,7 +11,7 @@ use crate::icons;
 use crate::library::Track;
 use crate::palette::Palette;
 
-const CARD_GAP: f32 = 18.0;
+pub(super) const CARD_GAP: f32 = 18.0;
 /// Card height below the cover: title, meta and artist lines.
 const CARD_TEXT_H: f32 = 70.0;
 const LIST_COVER: f32 = 132.0;
@@ -62,8 +62,8 @@ pub(super) fn cover_image(s: &App, a: &Album) -> Option<Image> {
 }
 
 /// A square cover, or a placeholder with a note while it loads or when there is none.
-pub(super) fn cover(key: String, image: Option<Image>, size: Option<f32>, radius: f32, p: &Palette) -> El {
-    let base = el().key(key).radius(radius).fill(p.ui).clip_rounded(radius);
+pub(super) fn cover(key: String, image: Option<Image>, size: Option<f32>, p: &Palette) -> El {
+    let base = el().key(key).fill(p.ui);
     let base = match size {
         Some(px) => base.size(px, px),
         None => base.w_full().aspect_ratio(1.0),
@@ -83,12 +83,12 @@ pub(super) fn cover(key: String, image: Option<Image>, size: Option<f32>, radius
 /// current song.
 pub(super) fn song_cover(s: &App, key: String, i: usize, size: f32, p: &Palette) -> El {
     let image = s.album_of(i).and_then(|a| cover_image(s, &s.albums[a]));
-    let art = cover(key, image, Some(size), 4.0, p);
+    let art = cover(key, image, Some(size), p);
     if s.current != Some(i) {
         return art;
     }
     art.child(
-        el().pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0)).radius(4.0).fill(rune::Color::BLACK.alpha(0.55)).center()
+        el().pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0)).fill(rune::Color::BLACK.alpha(0.55)).center()
             .child(icon(if s.playing { &icons::BARS } else { &icons::PAUSE }, 13.0).color(rune::Color::WHITE)),
     )
 }
@@ -127,14 +127,14 @@ fn grid_card(s: &App, a: usize, section: Option<usize>, w: f32, p: &Palette) -> 
         .label(format!("Play {}", album.title))
         .on_press_tx(move |s: &mut App, tx| s.play_album(a, None, tx))
         .child(icon(if playing && s.playing { &icons::BARS } else { &icons::PLAY }, 18.0).color(rune::Color::WHITE));
-    let art = cover(format!("cover{a}"), cover_image(s, album), None, 8.0, p).child(play);
+    let art = cover(format!("cover{a}"), cover_image(s, album), None, p).child(play);
     let title_color = if playing { p.blue } else { p.tx };
     col()
         .key(album_key(a, section))
         .w(w)
         .gap(4.0)
         .padding(8.0)
-        .radius(12.0)
+        .radius(2.0)
         .hover(p.ui.alpha(0.3))
         .hover_group()
         .press_scale(0.98)
@@ -155,7 +155,7 @@ fn grid_card(s: &App, a: usize, section: Option<usize>, w: f32, p: &Palette) -> 
 pub(super) fn list_card(s: &App, a: usize, section: Option<usize>, p: &Palette) -> El {
     let album = &s.albums[a];
     let open = move |s: &mut App, tx: &mut Tx| s.show_album(a, tx);
-    let art = cover(format!("cover{a}"), cover_image(s, album), Some(LIST_COVER), 8.0, p).cursor(Cursor::Pointer).on_press_tx(open);
+    let art = cover(format!("cover{a}"), cover_image(s, album), Some(LIST_COVER), p).cursor(Cursor::Pointer).on_press_tx(open);
     let head = col()
         .gap(4.0)
         .grow(1.0)
@@ -169,7 +169,7 @@ pub(super) fn list_card(s: &App, a: usize, section: Option<usize>, p: &Palette) 
         .key(album_key(a, section))
         .w_full()
         .padding(16.0)
-        .radius(12.0)
+        .radius(2.0)
         .fill(p.bg2)
         .gap(14.0)
         .child(row().gap(18.0).items_start().child(art).child(head))
@@ -260,7 +260,7 @@ pub(super) fn album_page(s: &App, a: usize, p: &Palette) -> El {
         .pl(6.0)
         .pr(10.0)
         .gap(4.0)
-        .radius(6.0)
+        .radius(3.0)
         .center_y()
         .hover(p.ui.alpha(0.45))
         .cursor(Cursor::Pointer)
@@ -305,7 +305,7 @@ pub(super) fn album_page(s: &App, a: usize, p: &Palette) -> El {
                 .child(play_button("page-play", "Play", p).on_press_tx(move |s: &mut App, tx| s.play_album(a, None, tx)))
                 .child(secondary_button("page-shuffle", &icons::SHUFFLE, "Shuffle", p).on_press_tx(move |s: &mut App, tx| s.shuffle_album(a, tx))),
         );
-    let top = row().gap(28.0).items_start().child(cover("page-cover".into(), cover_image(s, album), Some(PAGE_COVER), 10.0, p)).child(head);
+    let top = row().gap(28.0).items_start().child(cover("page-cover".into(), cover_image(s, album), Some(PAGE_COVER), p)).child(head);
     let mut page = col()
         .key("album-page-body")
         .w_full()
@@ -336,6 +336,7 @@ pub(super) fn back_label(s: &App) -> String {
         Some(crate::app::Page::Search) => format!("Results for “{}”", s.search.text.trim()),
         Some(crate::app::Page::Settings) => "Settings".to_string(),
         Some(crate::app::Page::Graph) => "Graph".to_string(),
+        Some(crate::app::Page::Home) => "Home".to_string(),
         Some(crate::app::Page::Library) | None => s.base.active().name.clone(),
     }
 }
@@ -364,7 +365,7 @@ fn more_by(s: &App, a: usize, p: &Palette) -> Option<El> {
 pub(super) fn album_strip(s: &App, key: &str, title: &str, albums: &[usize], artists: bool, pills: &[(usize, Vec<table::Pill>)], p: &Palette) -> El {
     let mut strip = row().gap(CARD_GAP).items_start();
     for &o in albums {
-        let card = small_card(s, key, o, artists, p);
+        let card = small_card(s, key, o, artists, 150.0, p);
         strip = strip.child(match pills.iter().find(|(a, _)| *a == o) {
             Some((_, list)) => card.child(row().key(format!("{key}-roles{o}")).w_full().gap(4.0).pt(2.0).flex_wrap().children(list.iter().cloned().map(table::pill_el))),
             None => card,
@@ -383,27 +384,27 @@ pub(super) fn album_strip(s: &App, key: &str, title: &str, albums: &[usize], art
 pub(super) fn album_wall(s: &App, key: &str, title: &str, albums: &[usize], artists: bool, p: &Palette) -> El {
     let mut wall = row().key(format!("{key}-wall")).w_full().gap(CARD_GAP).flex_wrap();
     for &o in albums {
-        wall = wall.child(small_card(s, key, o, artists, p));
+        wall = wall.child(small_card(s, key, o, artists, 150.0, p));
     }
     col().key(key.to_string()).w_full().gap(10.0).child(text(title.to_string()).font(HEADING).color(p.tx)).child(wall)
 }
 
 /// A strip or wall's card: cover, title, optionally the artists, then kind and year. Opens
 /// the album.
-fn small_card(s: &App, key: &str, o: usize, artists: bool, p: &Palette) -> El {
+pub(super) fn small_card(s: &App, key: &str, o: usize, artists: bool, width: f32, p: &Palette) -> El {
     let other = &s.albums[o];
     let mut card = col()
         .key(format!("{key}{o}"))
-        .w(150.0)
+        .w(width)
         .gap(4.0)
         .padding(6.0)
-        .radius(10.0)
+        .radius(2.0)
         .hover(p.ui.alpha(0.3))
         .cursor(Cursor::Pointer)
         .role("link")
         .label(other.title.clone())
         .on_press_tx(move |s: &mut App, tx| s.show_album(o, tx))
-        .child(cover(format!("{key}-cover{o}"), cover_image(s, other), Some(138.0), 8.0, p))
+        .child(cover(format!("{key}-cover{o}"), cover_image(s, other), Some(width - 12.0), p))
         .child(text(other.title.clone()).font(TITLE).color(p.tx).truncate());
     if artists {
         card = card.child(text(other.artist_name().to_string()).font(SMALL).color(p.tx2).truncate());

@@ -35,6 +35,8 @@ mod base_ui_tests;
 #[cfg(test)]
 mod graph_ui_tests;
 #[cfg(test)]
+mod home_ui_tests;
+#[cfg(test)]
 mod label_ui_tests;
 #[cfg(test)]
 mod lastfm_ui_tests;
@@ -66,7 +68,7 @@ fn setup(s: &mut App, waker: rune::Waker) {
 }
 
 /// A made-up library for headless scenes.
-fn demo_tracks() -> Vec<Track> {
+pub(crate) fn demo_tracks() -> Vec<Track> {
     type Album = (&'static str, &'static str, &'static str, u32, &'static [(&'static str, f64)]);
     let albums: [Album; 4] = [
         ("Laraaji", "Day of Radiance", "Ambient;New Age", 1980, &[("The Dance #1", 1192.0), ("The Dance #2", 488.0), ("Meditation #1", 1281.0)]),
@@ -308,6 +310,19 @@ fn scene_settings(s: &mut App) {
     s.show_settings();
 }
 
+/// The demo library with some songs played, on the Home tab: the newest albums and the songs
+/// played last. Each album's `added` is its year, so the newest is Live Sessions.
+fn scene_home(s: &mut App) {
+    s.set_library(demo_tracks(), false);
+    for (n, title) in ["Hammers", "New Jeans", "Says", "ETA", "Mary"].into_iter().enumerate() {
+        if let Some(i) = s.tracks.iter().position(|t| t.title == title) {
+            // Oldest first, so the most recent is at the top.
+            let _ = s.record_play(i, 1_800_000_000 + n as i64 * 60);
+        }
+    }
+    s.show_home();
+}
+
 /// The artist and related scenes' library on the Graph tab, The Alchemist picked.
 fn scene_graph(s: &mut App) {
     scene_related(s);
@@ -337,6 +352,7 @@ fn main() {
             ("label", scene_label),
             ("settings", scene_settings),
             ("graph", scene_graph),
+            ("home", scene_home),
         ],
         min_size: Some(view::MIN_SIZE),
         setup: Some(setup),

@@ -5,6 +5,7 @@ use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
 use rune::{FileDialogOptions, Image, ImageCache, Key, KeyEvent, Live, TextEdit, Tx, Waker};
+use serde::{Deserialize, Serialize};
 
 use crate::album::{self, Album, AlbumId};
 use crate::audio::{self, Engine};
@@ -30,6 +31,8 @@ const ZOOM_TOAST: Duration = Duration::from_millis(1200);
 pub const SEEK_STEP: f64 = 5.0;
 /// Previous restarts the track instead when it has played longer than this.
 const RESTART_AFTER: f64 = 3.0;
+/// How many songs and albums the home page lists.
+pub const RECENT_COUNT: usize = 20;
 
 /// Where sound goes.
 pub enum Output {
@@ -77,6 +80,17 @@ pub enum Page {
     Settings,
     /// Every artist, linked to those they've worked with.
     Graph,
+    /// The home tab: the newest albums and the songs played last.
+    Home,
+}
+
+/// The header's tabs, which the window remembers across launches.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Tab {
+    Home,
+    Library,
+    Graph,
 }
 
 /// The song details dialog: which song, and what was read from its file when it opened.
@@ -121,6 +135,10 @@ pub struct App {
     pub library_scroll: Live<[f32; 2]>,
     /// `library_scroll` when a page last opened from the library, where Back returns to.
     library_scroll_saved: [f32; 2],
+    /// The Home strip's sideways scroll as `[offset, max]`, kept current while it shows.
+    pub home_strip: Live<[f32; 2]>,
+    /// The Home strip's viewport width, kept current while it shows.
+    pub home_viewport: Live<f32>,
     /// Album covers for cards and lists; `None` until setup has a waker.
     pub covers: Option<Covers>,
     /// Indices into `tracks` the active view shows, in play order. In an album view,
@@ -228,11 +246,21 @@ impl App {
             Ok(g) => (g, None),
             Err(e) => (crate::graph::state::Graph::with(None, 0), Some(e)),
         };
+        // The tab last open is the page shown at launch; an unreadable one shows as an error.
+        let (tab, tab_error) = match store.load_tab() {
+            Ok(tab) => (tab, None),
+            Err(e) => (None, Some(e)),
+        };
+        let page = match tab {
+            Some(Tab::Home) => Page::Home,
+            Some(Tab::Graph) => Page::Graph,
+            Some(Tab::Library) | None => Page::Library,
+        };
         let lastfm = Scrobbling::new(lastfm, built_in);
         let mut app = App {
             tracks: Vec::new(),
             albums: Vec::new(),
-            page: Page::Library,
+            page,
             history: Vec::new(),
             forward: Vec::new(),
             artist_tab: ArtistTab::Releases,
@@ -241,6 +269,8 @@ impl App {
             artist_with_aliases: false,
             library_scroll: Live::new([0.0, 0.0]),
             library_scroll_saved: [0.0, 0.0],
+            home_strip: Live::new([0.0; 2]),
+            home_viewport: Live::new(0.0),
             covers: None,
             filtered: Vec::new(),
             shown_albums: Vec::new(),
@@ -278,7 +308,7 @@ impl App {
             shuffle: false,
             repeat: Repeat::Off,
             cover: None,
-            error: relations_error.clone().or(lastfm_error).or(plays_error).or(graph_error),
+            error: relations_error.clone().or(lastfm_error).or(plays_error).or(graph_error).or(tab_error),
             scan: None,
             drop_hover: false,
             details: None,
@@ -525,11 +555,25 @@ impl App {
         self.base.active().mode
     }
 
+    /// The albums on the home page: the newest added, newest first; albums with no date are left out.
+    pub fn recently_added(&self) -> Vec<usize> {
+        let mut added: Vec<(i64, usize)> = self.albums.iter().enumerate().filter_map(|(a, album)| album.added.map(|at| (at, a))).collect();
+        added.sort_by_key(|&(at, a)| (std::cmp::Reverse(at), a));
+        added.into_iter().take(RECENT_COUNT).map(|(_, a)| a).collect()
+    }
+
+    /// The songs on the home page: the ones played last, most recent first, ties by library order.
+    pub fn recently_played(&self) -> Vec<usize> {
+        let mut played: Vec<(i64, usize)> = self.tracks.iter().enumerate().filter_map(|(i, t)| t.last_played.map(|at| (at, i))).collect();
+        played.sort_by_key(|&(at, i)| (std::cmp::Reverse(at), i));
+        played.into_iter().take(RECENT_COUNT).map(|(_, i)| i).collect()
+    }
+
     /// The album shown on the album page, if it's still in the library.
     pub fn open_album(&self) -> Option<usize> {
         match &self.page {
             Page::Album(id) => self.albums.iter().position(|a| &a.id() == id),
-            Page::Library | Page::Artist(_) | Page::Label(_) | Page::Search | Page::Settings | Page::Graph => None,
+            Page::Library | Page::Artist(_) | Page::Label(_) | Page::Search | Page::Settings | Page::Graph | Page::Home => None,
         }
     }
 
@@ -544,7 +588,7 @@ impl App {
     pub fn shown_columns(&self) -> &[Property] {
         match self.page {
             Page::Library => &self.base.active().columns,
-            Page::Album(_) | Page::Artist(_) | Page::Label(_) | Page::Search | Page::Settings | Page::Graph => &self.base.page_columns,
+            Page::Album(_) | Page::Artist(_) | Page::Label(_) | Page::Search | Page::Settings | Page::Graph | Page::Home => &self.base.page_columns,
         }
     }
 
@@ -552,7 +596,7 @@ impl App {
     pub fn shown_columns_mut(&mut self) -> &mut Vec<Property> {
         match self.page {
             Page::Library => &mut self.base.active_mut().columns,
-            Page::Album(_) | Page::Artist(_) | Page::Label(_) | Page::Search | Page::Settings | Page::Graph => &mut self.base.page_columns,
+            Page::Album(_) | Page::Artist(_) | Page::Label(_) | Page::Search | Page::Settings | Page::Graph | Page::Home => &mut self.base.page_columns,
         }
     }
 
@@ -560,14 +604,14 @@ impl App {
     pub fn shown_widths(&self) -> &Widths {
         match self.page {
             Page::Library => &self.base.active().widths,
-            Page::Album(_) | Page::Artist(_) | Page::Label(_) | Page::Search | Page::Settings | Page::Graph => &self.base.page_widths,
+            Page::Album(_) | Page::Artist(_) | Page::Label(_) | Page::Search | Page::Settings | Page::Graph | Page::Home => &self.base.page_widths,
         }
     }
 
     pub fn shown_widths_mut(&mut self) -> &mut Widths {
         match self.page {
             Page::Library => &mut self.base.active_mut().widths,
-            Page::Album(_) | Page::Artist(_) | Page::Label(_) | Page::Search | Page::Settings | Page::Graph => &mut self.base.page_widths,
+            Page::Album(_) | Page::Artist(_) | Page::Label(_) | Page::Search | Page::Settings | Page::Graph | Page::Home => &mut self.base.page_widths,
         }
     }
 
@@ -575,7 +619,7 @@ impl App {
     pub fn open_artist(&self) -> Option<&str> {
         match &self.page {
             Page::Artist(name) => Some(name),
-            Page::Library | Page::Album(_) | Page::Label(_) | Page::Search | Page::Settings | Page::Graph => None,
+            Page::Library | Page::Album(_) | Page::Label(_) | Page::Search | Page::Settings | Page::Graph | Page::Home => None,
         }
     }
 
@@ -656,7 +700,7 @@ impl App {
     pub fn open_label(&self) -> Option<&str> {
         match &self.page {
             Page::Label(name) => Some(name),
-            Page::Library | Page::Album(_) | Page::Artist(_) | Page::Search | Page::Settings | Page::Graph => None,
+            Page::Library | Page::Album(_) | Page::Artist(_) | Page::Search | Page::Settings | Page::Graph | Page::Home => None,
         }
     }
 
@@ -693,8 +737,8 @@ impl App {
     pub fn go_back(&mut self, tx: &mut Tx) {
         self.close_panel();
         self.details = None;
-        // The library and the graph are where Back ends.
-        if self.page == Page::Library || self.page == Page::Graph {
+        // The library, the graph and home are where Back ends.
+        if matches!(self.page, Page::Library | Page::Graph | Page::Home) {
             return;
         }
         let back = self.history.pop().unwrap_or(Page::Library);
@@ -715,6 +759,19 @@ impl App {
 
     /// The Graph tab: every artist and their links, building the graph if the library changed.
     pub fn show_graph(&mut self) {
+        self.show_tab(Page::Graph);
+        self.save_tab(Tab::Graph);
+        self.refresh_graph();
+    }
+
+    /// The Home tab: the newest albums and the songs played last.
+    pub fn show_home(&mut self) {
+        self.show_tab(Page::Home);
+        self.save_tab(Tab::Home);
+    }
+
+    /// Shows a tab's page with no history, so Back ends there.
+    fn show_tab(&mut self, page: Page) {
         self.close_panel();
         self.details = None;
         self.artist_tab = ArtistTab::Releases;
@@ -725,13 +782,24 @@ impl App {
         }
         self.history.clear();
         self.forward.clear();
-        self.page = Page::Graph;
-        self.refresh_graph();
+        self.page = page;
+    }
+
+    /// Saves the open tab, so the next launch opens it. A failed save shows as an error.
+    fn save_tab(&mut self, tab: Tab) {
+        if let Err(e) = self.store.save_tab(&tab) {
+            self.error = Some(e);
+        }
     }
 
     /// Whether the Graph tab is the one open: its page, or a page opened from it.
     pub fn in_graph(&self) -> bool {
         self.page == Page::Graph || self.history.first() == Some(&Page::Graph)
+    }
+
+    /// Whether the Home tab is the one open: its page, or a page opened from it.
+    pub fn in_home(&self) -> bool {
+        self.page == Page::Home || self.history.first() == Some(&Page::Home)
     }
 
     /// Rebuilds the graph when the library or relations changed since it was built.
@@ -811,6 +879,7 @@ impl App {
         self.artist_credits_closed = false;
         self.artist_related_open.clear();
         self.show_library();
+        self.save_tab(Tab::Library);
     }
 
     /// Follows the search field: a query opens the results (returning to them when they're
@@ -1290,6 +1359,17 @@ impl App {
         }
     }
 
+    /// Counts a play of library song `i` at `at` (seconds since the epoch), as playing it does, and
+    /// shows it in the counts. Headless scenes and tests use it to seed the play log.
+    pub fn record_play(&mut self, i: usize, at: i64) -> Result<(), String> {
+        let Some(track) = self.tracks.get(i) else { return Ok(()) };
+        let recorded = self.plays.record(track, at);
+        self.plays.apply(&mut self.tracks);
+        self.albums = album::build(&self.tracks);
+        self.refilter();
+        recorded
+    }
+
     /// Follows the loaded song, and counts its play once it has played long enough; true
     /// when that changed the counts shown.
     fn poll_plays(&mut self, now: f64) -> bool {
@@ -1526,7 +1606,7 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         s.graph.find.clear();
         return true;
     }
-    if ev.key == Key::Escape && s.page != Page::Library {
+    if ev.key == Key::Escape && !matches!(s.page, Page::Library | Page::Home) {
         s.go_back(tx);
         return true;
     }

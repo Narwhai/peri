@@ -110,7 +110,7 @@ fn home_still_opens_the_list_where_it_was_left() {
     scroll_down(&mut rt, 800.0);
     rt.update(|s, tx| s.show_artist("Artist 01", tx));
     settle(&mut rt);
-    click(&mut rt, "home");
+    click(&mut rt, "library-tab");
     assert_eq!(rt.state.page, Page::Library);
     assert!(scrolled(&rt) < 1.0, "Home opens the list at the top, at {}", scrolled(&rt));
 }

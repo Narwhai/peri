@@ -14,8 +14,10 @@ On Linux, building needs `libxkbcommon`, `wayland` and `alsa-lib` (PipeWire work
 ## Features
 
 - Recursive folder scan on a background thread. It reads mp3, flac, ogg, wav, m4a/aac, aiff and caf files.
-- The library folders are remembered. **Open folder…** replaces them, and dropping folders or files on the window adds to them. Both are scanned at every launch.
+- The library folders are remembered. **Open folder…** (Ctrl+O, or the button on an empty library) replaces them, and dropping folders or files on the window adds to them. Both are scanned at every launch.
 - **Settings** (the sliders button, top right): see the library folders, add or remove one, rescan, or **Forget library**. A folder that can't be found (an unplugged drive) stays saved, is marked *Not found*, and is scanned again once it's back.
+- **Home** tab (left of Library): the 10 newest albums in one row of cards, and the 10 songs played last. Double-click a song to play from there.
+- The open tab (Home, Library or Graph) is remembered across launches.
 - Search across title, artist and album.
 - A virtualised track list, so large libraries scroll smoothly.
 - A now-playing bar with cover art (embedded, else `cover.jpg`/`folder.jpg` next to the file).
@@ -171,7 +173,7 @@ cargo test                                                   # unit + headless U
 RUNE_MUSIC_DIR=~/Music cargo test --release real_library -- --ignored --nocapture
 RUNE_MUSIC_FILE=song.flac cargo test --release real_output -- --ignored   # plays muted
 RUNE_MUSIC_DIR=~/Music cargo test --release real_library_groups -- --ignored --nocapture
-cargo run -- --snap out.png --scene playing --theme light    # scenes: library playing search error grouped filter views sort albums album-list album artist related link graph
+cargo run -- --snap out.png --scene playing --theme light    # scenes: library playing search error grouped filter views sort albums album-list album artist related link graph home
 ```
 
 Headless runs (`--snap`, `--script`, `--tree`) never open the audio device and keep views in memory.

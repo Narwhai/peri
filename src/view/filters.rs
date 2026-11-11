@@ -73,7 +73,7 @@ fn group(s: &App, p: &Palette, kit: &Kit, layer: &mut Vec<El>, g: &Group, path: 
         inner.key("filter-root")
     } else {
         // A nested group sits in a tinted box with a rule down its left edge.
-        inner.key(format!("group{id}")).padding(8.0).radius(8.0).fill(p.ui.alpha(0.18)).border(1.0, p.ui.alpha(0.6))
+        inner.key(format!("group{id}")).padding(8.0).radius(4.0).fill(p.ui.alpha(0.18)).border(1.0, p.ui.alpha(0.6))
     }
 }
 

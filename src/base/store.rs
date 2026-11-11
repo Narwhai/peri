@@ -15,6 +15,7 @@ const ARTISTS_KEY: &str = "artists";
 const LASTFM_KEY: &str = "lastfm";
 const ZOOM_KEY: &str = "zoom";
 const GRAPH_KEY: &str = "graph";
+const TAB_KEY: &str = "tab";
 /// Bumped when the saved shape changes incompatibly.
 const VERSION: u32 = 1;
 
@@ -149,6 +150,18 @@ impl Store {
     /// Where the graph's layout is cached, beside the preferences; none when they're in memory.
     pub fn graph_cache(&self) -> Option<std::path::PathBuf> {
         self.prefs.path().and_then(|p| p.parent()).map(|dir| dir.join(crate::graph::state::CACHE_FILE))
+    }
+
+    /// The tab last open, shown at launch; none when unset, an error when unreadable.
+    pub fn load_tab(&self) -> Result<Option<crate::app::Tab>, String> {
+        if !self.prefs.contains(TAB_KEY) {
+            return Ok(None);
+        }
+        self.prefs.get(TAB_KEY).map(Some).ok_or_else(|| format!("Couldn't read \"{TAB_KEY}\" in the preferences"))
+    }
+
+    pub fn save_tab(&mut self, tab: &crate::app::Tab) -> Result<(), String> {
+        self.prefs.set(TAB_KEY, tab).map_err(|e| format!("Couldn't save the open tab: {e}"))
     }
 
     /// The window's zoom, 1.0 when unset or unreadable.

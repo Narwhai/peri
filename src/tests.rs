@@ -168,7 +168,7 @@ fn home_returns_to_the_views_and_clears_the_search() {
     settle(&mut rt);
     click(&mut rt, "open-artist");
     assert_eq!(rt.state.page, Page::Artist("Laraaji".into()));
-    click(&mut rt, "home");
+    click(&mut rt, "library-tab");
     assert_eq!(rt.state.page, Page::Library);
     assert!(rt.state.history.is_empty());
     assert_eq!(rt.state.search.text, "");

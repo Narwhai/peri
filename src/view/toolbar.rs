@@ -127,7 +127,7 @@ fn tool_button(key: &'static str, glyph: &'static rune::Icon, label: String, act
         .px(10.0)
         .gap(6.0)
         .center_y()
-        .radius(6.0)
+        .radius(3.0)
         .fill(if open { p.ui.alpha(0.6) } else { p.bg.alpha(0.0) })
         .hover(p.ui.alpha(0.45))
         .press(p.ui.alpha(0.7))
@@ -139,7 +139,7 @@ fn tool_button(key: &'static str, glyph: &'static rune::Icon, label: String, act
 
 /// A segmented control: one pill per option, the current one filled.
 pub(super) fn segmented(key: &'static str, options: &[(&'static str, &'static str)], current: &str, p: &Palette, choose: impl Fn(&mut App, &str) + Clone + 'static) -> El {
-    let mut seg = row().key(key).h(28.0).padding(2.0).gap(2.0).radius(8.0).fill(p.ui.alpha(0.45)).role("radiogroup").label(key).focus_group();
+    let mut seg = row().key(key).h(28.0).padding(2.0).gap(2.0).radius(4.0).fill(p.ui.alpha(0.45)).role("radiogroup").label(key).focus_group();
     for &(value, label) in options {
         let on = value == current;
         let choose = choose.clone();
@@ -148,7 +148,7 @@ pub(super) fn segmented(key: &'static str, options: &[(&'static str, &'static st
                 .key(value)
                 .h(24.0)
                 .px(10.0)
-                .radius(6.0)
+                .radius(3.0)
                 .center()
                 .fill(if on { p.bg2 } else { p.bg.alpha(0.0) })
                 .shadow(if on { 1.0 } else { 0.0 }, if on { 2.0 } else { 0.0 }, rune::Color::BLACK.alpha(if on { 0.18 } else { 0.0 }))
@@ -222,7 +222,7 @@ fn views_menu(s: &App, p: &Palette, kit: &Kit, layer: &mut Vec<El>) -> El {
         .px(10.0)
         .gap(6.0)
         .center_y()
-        .radius(6.0)
+        .radius(3.0)
         .fill(if open { p.ui.alpha(0.6) } else { p.bg.alpha(0.0) })
         .hover(p.ui.alpha(0.45))
         .cursor(Cursor::Pointer)
@@ -264,7 +264,7 @@ fn views_body(s: &App, p: &Palette, kit: &Kit) -> El {
             .pr(4.0)
             .gap(6.0)
             .center_y()
-            .radius(6.0)
+            .radius(3.0)
             .fill(if active { p.ui.alpha(0.55) } else { p.bg.alpha(0.0) })
             .hover(p.ui.alpha(0.35))
             .role("option")
@@ -501,7 +501,7 @@ fn columns_body<'a>(s: &'a App, p: &'a Palette) -> impl FnOnce(&mut Vec<El>) -> 
                 .pr(4.0)
                 .gap(8.0)
                 .center_y()
-                .radius(6.0)
+                .radius(3.0)
                 .hover(p.ui.alpha(0.35))
                 .cursor(Cursor::Pointer)
                 .role("checkbox")
@@ -552,7 +552,7 @@ fn covers_switch(on: bool, p: &Palette) -> El {
         .px(8.0)
         .gap(8.0)
         .center_y()
-        .radius(6.0)
+        .radius(3.0)
         .hover(p.ui.alpha(0.35))
         .cursor(Cursor::Pointer)
         .role("switch")
@@ -614,7 +614,7 @@ fn direction_button(key: String, direction: Direction, property: Property, p: &P
         .key(key)
         .h(24.0)
         .px(8.0)
-        .radius(4.0)
+        .radius(2.0)
         .center()
         .fill(p.ui.alpha(0.4))
         .hover(p.ui.alpha(0.35))
@@ -628,7 +628,7 @@ pub(super) fn small_icon_button(key: String, glyph: &'static rune::Icon, help: &
     el()
         .key(key)
         .size(24.0, 24.0)
-        .radius(4.0)
+        .radius(2.0)
         .center()
         .hover(p.ui.alpha(0.6))
         .press(p.ui)
@@ -645,7 +645,7 @@ pub(super) fn menu_row(key: &'static str, glyph: &'static rune::Icon, label: &st
         .px(8.0)
         .gap(8.0)
         .center_y()
-        .radius(6.0)
+        .radius(3.0)
         .hover(p.ui.alpha(0.35))
         .press(p.ui.alpha(0.6))
         .cursor(Cursor::Pointer)

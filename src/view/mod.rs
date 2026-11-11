@@ -5,6 +5,7 @@ mod artists;
 mod details;
 mod filters;
 mod graph;
+mod home;
 mod labels;
 mod list;
 mod player;
@@ -54,7 +55,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     let kit = Kit::from_palette(PaletteSeed { bg: p.bg2, fg: p.tx, accent: p.blue });
     let mut layer = Vec::new();
     // The view's toolbar does nothing to search results or settings, so they go without it.
-    let toolbar = (!matches!(s.page, crate::app::Page::Search | crate::app::Page::Settings | crate::app::Page::Graph)).then(|| toolbar::toolbar(s, &p, &kit, &mut layer));
+    let toolbar = (!matches!(s.page, crate::app::Page::Search | crate::app::Page::Settings | crate::app::Page::Graph | crate::app::Page::Home)).then(|| toolbar::toolbar(s, &p, &kit, &mut layer));
     let body = col()
         .w_full()
         .h_full()
@@ -68,6 +69,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
             (None, None, None) if s.page == crate::app::Page::Search => search::search_page(s, &p),
             (None, None, None) if s.page == crate::app::Page::Settings => settings::settings_page(s, &p, &kit),
             (None, None, None) if s.page == crate::app::Page::Graph => graph::graph_page(s, &p, &kit, &mut layer),
+            (None, None, None) if s.page == crate::app::Page::Home => home::home_page(s, &p),
             (None, None, None) => list::list(s, &p, cx),
         })
         .child(player::now_playing(s, &p))
@@ -87,7 +89,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     let drop_veil = s.drop_hover.then(|| {
         el().key("drop-veil")
             .pin(Some(8.0), Some(8.0), Some(8.0), Some(8.0))
-            .radius(12.0)
+            .radius(6.0)
             .border(2.0, p.blue)
             .fill(p.blue.alpha(0.08))
             .center()
@@ -200,7 +202,7 @@ fn header(s: &App, zoom: f32, p: &Palette, kit: &Kit) -> El {
         (None, n) => format!("{} of {}", s.filtered.len(), plural(n, "track")),
     };
     let search = TextInput::new(&s.search)
-        .placeholder("Search artists, albums, songs")
+        .placeholder("Search")
         .label("Search")
         .leading_icon(&rune_kit::glyphs::SEARCH)
         .width(Some(260.0))
@@ -238,13 +240,12 @@ fn header(s: &App, zoom: f32, p: &Palette, kit: &Kit) -> El {
         .child(text(count).key("count").font(SMALL).color(p.tx3).grow(1.0).shrink().truncate())
         .child(search)
         .child(zoom_control(s, zoom, p))
-        .child(pill_button("open", "Open folder…", p).on_press_tx(|s: &mut App, tx| s.open_folder(tx)))
         .child(icon_button("settings", &icons::SETTINGS, "Settings", p).role("button").on_press(|s: &mut App| s.show_settings()))
 }
 
-/// The header's tabs: Library (the views, and the pages opened from them) and Graph.
+/// The header's tabs: Home, Library (the views, and the pages opened from them) and Graph.
 fn tabs(s: &App, p: &Palette) -> El {
-    let graph = s.in_graph();
+    let (home, graph) = (s.in_home(), s.in_graph());
     let tab = |key: &'static str, glyph: &'static Icon, label: &'static str, help: &'static str, on: bool| {
         // Like the artist page's folder tabs: the active one fills with the page below and its seam covers the header's bottom line.
         let edge = if on { p.ui.alpha(0.7) } else { p.ui.alpha(0.35) };
@@ -279,7 +280,8 @@ fn tabs(s: &App, p: &Palette) -> El {
         .self_end()
         .role("tablist")
         .label("Sections")
-        .child(tab("home", &icons::NOTE, "Library", "Back to the library's views", !graph).on_press(|s: &mut App| s.go_home()))
+        .child(tab("home-tab", &icons::HOUSE, "Home", "Recently added and played", home).on_press(|s: &mut App| s.show_home()))
+        .child(tab("library-tab", &icons::NOTE, "Library", "Back to the library's views", !home && !graph).on_press(|s: &mut App| s.go_home()))
         .child(tab("graph-tab", &icons::GRAPH, "Graph", "Artists and who they've worked with", graph).on_press(|s: &mut App| s.show_graph()))
 }
 
