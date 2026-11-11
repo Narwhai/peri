@@ -61,7 +61,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
             (None, None, Some(name)) => labels::label_page(s, name, &p),
             (None, None, None) if s.page == crate::app::Page::Search => search::search_page(s, &p),
             (None, None, None) if s.page == crate::app::Page::Settings => settings::settings_page(s, &p, &kit),
-            (None, None, None) if s.page == crate::app::Page::Graph => graph::graph_page(s, &p, &kit),
+            (None, None, None) if s.page == crate::app::Page::Graph => graph::graph_page(s, &p, &kit, &mut layer),
             (None, None, None) => list::list(s, &p, cx),
         })
         .child(player::now_playing(s, &p))

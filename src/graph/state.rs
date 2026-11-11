@@ -7,14 +7,14 @@
 //! used as is. When it changed (music added, an artist linked), the known artists start where
 //! they were, new ones next to the artists they're linked to, and a shorter layout settles them.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 
-use rune::{Live, TextEdit, Waker};
+use rune::{Live, PointerPress, TextEdit, Waker};
 use serde::{Deserialize, Serialize};
 
 use super::layout;
@@ -33,6 +33,25 @@ const CELL: f32 = 64.0;
 const EDGE_CELL: f32 = 96.0;
 /// How near, in points on screen, the pointer has to be to a link to hover it.
 const EDGE_REACH: f32 = 5.0;
+/// Dots whose edges are within this many points on screen of the pointer's nearest are too
+/// close to tell apart: the most linked is picked.
+const PICK_TIE: f32 = 3.0;
+/// At most this many artists move with a dragged one: those within [`DRAG_HOPS`] links of it,
+/// nearest first. The rest hold still, so a drag costs the same in any library.
+const DRAG_MOVING: usize = 400;
+const DRAG_HOPS: usize = 2;
+/// The springs along links: stiffness (per second squared, per point the link is bent out of
+/// its shape), and damping (per second).
+const SPRING: f32 = 80.0;
+const DAMPING: f32 = 12.0;
+/// The simulation's step, in seconds; frames run as many as they need.
+const SIM_STEP: f32 = 1.0 / 120.0;
+/// After the drop, the artists have settled once none moves faster than this (points per
+/// second), or after [`SETTLE_MAX`] seconds.
+const SETTLED_SPEED: f32 = 3.0;
+const SETTLE_MAX: f64 = 4.0;
+/// How often a running simulation asks for a frame.
+pub const SIM_FRAME: Duration = Duration::from_millis(16);
 
 /// What the pointer is over on the canvas.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -75,15 +94,57 @@ struct Cached {
     fingerprint: String,
     /// Lowercased names, one per position.
     names: Vec<String>,
-    /// Layout positions, before [`layout::to_world`].
+    /// Layout positions, before [`layout::Transform::world`].
     positions: Vec<[f32; 2]>,
+    /// The artists dragged into place, lowercased: layouts leave them there. Caches written
+    /// before pinning have none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pinned: Vec<String>,
 }
 
 enum Msg {
     Progress { positions: Vec<[f32; 2]>, step: usize, steps: usize },
-    Done(Vec<[f32; 2]>),
+    /// The positions, and the artists pinned in them (lowercased).
+    Done(Vec<[f32; 2]>, HashSet<String>),
     Error(String),
 }
+
+/// An artist being dragged, and those moving with it on springs.
+pub struct Drag {
+    /// The dragged artist.
+    pub node: usize,
+    /// Which artists move, by node: their index into `slots`, else `NO_SLOT`.
+    slot: Vec<u32>,
+    /// The moving artists, the dragged one first.
+    pub moving: Vec<u32>,
+    /// Their speeds, in world points per second.
+    speed: Vec<[f32; 2]>,
+    /// Where each started, to put back if the drag is cancelled.
+    origin: Vec<[f32; 2]>,
+    /// The links touching a moving artist: both ends, and the offset from one to the other they
+    /// rest at (as drawn when the drag began). Springs that keep direction as well as length
+    /// carry a cluster along in its shape, where length alone would let it swing and fold.
+    springs: Vec<(u32, u32, [f32; 2])>,
+    /// How many springs pull each moving artist, which it divides their pull by.
+    weight: Vec<f32>,
+    /// The model's edges touching a moving artist, which draw with them.
+    pub edges: Vec<u32>,
+    /// Where the pointer holds the dragged artist, in world points, while it's held.
+    target: Option<[f32; 2]>,
+    /// The pointer's offset from the artist's centre where it grabbed it.
+    grab: [f32; 2],
+    /// The clock when the simulation last stepped, and when the artist was dropped.
+    last: Option<f64>,
+    dropped: Option<f64>,
+    /// Nothing moves (the pointer is still, or everything settled): no frames needed.
+    asleep: bool,
+    /// Bumped every step, for drawing what moves.
+    pub tick: u64,
+    /// Bumped per drag, for drawing what doesn't.
+    pub id: u64,
+}
+
+const NO_SLOT: u32 = u32::MAX;
 
 struct Job {
     rx: Receiver<Msg>,
@@ -134,6 +195,24 @@ pub struct Graph {
     pub moved_at: Option<Instant>,
     /// The region the view last drew names for.
     pub drawn_region: Region,
+    /// How layout positions map to the world, from the last layout.
+    transform: layout::Transform,
+    /// Where the artists are drawn, with room around: what Fit shows. (Dragged artists can
+    /// leave the world's laid-out size.)
+    bounds: [f32; 4],
+    /// The artists pinned where they were dropped, lowercased; `None` until the first layout
+    /// reads them from the cache.
+    pins: Option<HashSet<String>>,
+    /// Whether each node is pinned, from `pins`.
+    pub pinned: Vec<bool>,
+    /// The layout cache's file, when it has one.
+    cache: Option<PathBuf>,
+    /// A press on an artist that may become a drag.
+    pub press: Option<usize>,
+    pub drag: Option<Drag>,
+    drags: u64,
+    /// The artist whose menu is open, and where (in window points).
+    pub menu: Option<(usize, PointerPress)>,
 }
 
 impl Graph {
@@ -173,6 +252,15 @@ impl Graph {
             drag_from: start,
             moved_at: None,
             drawn_region: Region::default(),
+            transform: layout::Transform { scale: 1.0, origin: [0.0, 0.0], size: [0.0, 0.0] },
+            bounds: [0.0, 0.0, 0.0, 0.0],
+            pins: None,
+            pinned: Vec::new(),
+            cache: None,
+            press: None,
+            drag: None,
+            drags: 0,
+            menu: None,
         }
     }
 
@@ -191,10 +279,28 @@ impl Graph {
 
     /// Takes a freshly built `model`, keeping what's picked by name, and lays it out: from the
     /// cache at `cache` when it's still right, else on a worker thread (`waker` set) or here.
+    /// Pinned artists stay where they are.
     pub fn refresh(&mut self, model: Model, cache: Option<PathBuf>, waker: Option<Waker>) -> Result<(), String> {
+        self.relayout(model, cache, waker, false)
+    }
+
+    /// Reset layout: unpins every artist and lays the graph out from scratch.
+    pub fn reset_layout(&mut self, cache: Option<PathBuf>, waker: Option<Waker>) -> Result<(), String> {
+        let model = std::mem::take(&mut self.model);
+        self.pins = Some(HashSet::new());
+        self.camera = None;
+        self.moved_at = Some(Instant::now());
+        self.relayout(model, cache, waker, true)
+    }
+
+    fn relayout(&mut self, model: Model, cache: Option<PathBuf>, waker: Option<Waker>, cold: bool) -> Result<(), String> {
+        self.cancel_drag();
         let selected = self.selected.and_then(|i| self.model.nodes.get(i)).map(|n| n.name.clone());
-        let previous: HashMap<String, [f32; 2]> = self.model.nodes.iter().zip(&self.raw).map(|(n, p)| (n.name.to_lowercase(), *p)).collect();
+        let previous: HashMap<String, [f32; 2]> = if cold { HashMap::new() } else { self.model.nodes.iter().zip(&self.raw).map(|(n, p)| (n.name.to_lowercase(), *p)).collect() };
         self.stale = false;
+        self.cache = cache.clone();
+        self.menu = None;
+        self.press = None;
         self.model = model;
         self.selected = selected.and_then(|n| self.model.find(&n));
         self.hover = None;
@@ -206,7 +312,7 @@ impl Graph {
         let fingerprint = self.model.fingerprint();
         let cancel = Arc::new(AtomicBool::new(false));
         let (tx, rx) = channel();
-        let start = Start { names, links, fingerprint, cache, previous };
+        let start = Start { names, links, fingerprint, cache, previous, pins: self.pins.clone(), cold };
         self.raw.clear();
         self.world.clear();
         self.grid.clear();
@@ -240,8 +346,9 @@ impl Graph {
                     latest = Some(positions);
                     self.progress = Some((step, steps));
                 }
-                Msg::Done(positions) => {
+                Msg::Done(positions, pins) => {
                     latest = Some(positions);
+                    self.pins = Some(pins);
                     done = true;
                 }
                 Msg::Error(e) => error = Some(e),
@@ -266,17 +373,272 @@ impl Graph {
         if raw.len() != self.model.nodes.len() {
             return;
         }
-        let (world, size) = layout::to_world(raw, &self.model.links());
+        self.transform = layout::Transform::fit(raw, &self.model.links());
         self.raw = raw.to_vec();
-        self.world = world;
-        self.size = size;
+        self.world = raw.iter().map(|&p| self.transform.world(p)).collect();
+        self.size = self.transform.size;
+        self.pinned = self.model.nodes.iter().map(|n| self.pins.as_ref().is_some_and(|p| p.contains(&n.name.to_lowercase()))).collect();
+        self.placed();
+        self.sync_live();
+    }
+
+    /// The artists moved (a layout, or a drop): what finds them and what Fit shows follow.
+    fn placed(&mut self) {
         self.grid.clear();
         self.edge_grid = None;
+        let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
         for (i, &[x, y]) in self.world.iter().enumerate() {
             self.grid.entry(cell(x, y)).or_default().push(i as u32);
+            (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
+        }
+        let m = layout::MARGIN;
+        self.bounds = if self.world.is_empty() { [0.0, 0.0, self.size[0], self.size[1]] } else { [x0 - m, y0 - m, x1 + m, y1 + m] };
+        self.version += 1;
+    }
+
+    /// Where artist `name` sits in the layout's own units, which the cache keeps.
+    #[cfg(test)]
+    pub fn layout_raw(&self, name: &str) -> Option<[f32; 2]> {
+        self.model.find(name).and_then(|i| self.raw.get(i).copied())
+    }
+
+    // Dragging
+
+    /// Starts dragging artist `i`, grabbed at world point `at`: it and the artists within
+    /// [`DRAG_HOPS`] links of it (but not other pinned ones, which hold still) move with it.
+    pub fn start_drag(&mut self, i: usize, at: [f32; 2]) {
+        let n = self.model.nodes.len();
+        if i >= n || self.world.len() != n {
+            return;
+        }
+        self.cancel_drag();
+        self.hover = None;
+        self.menu = None;
+        // A camera fitting the drawing would refit when the drop changes its bounds, moving
+        // every artist out from under the pointer: hold it where it is. (Not saved: the user
+        // didn't move it.)
+        if self.camera.is_none() {
+            self.camera = Some(self.fit());
+        }
+        let mut neighbours: Vec<Vec<u32>> = vec![Vec::new(); n];
+        for (a, b) in self.model.links() {
+            neighbours[a as usize].push(b);
+            neighbours[b as usize].push(a);
+        }
+        let mut slot = vec![NO_SLOT; n];
+        let mut moving = vec![i as u32];
+        slot[i] = 0;
+        let mut queue = VecDeque::from([(i as u32, 0)]);
+        'search: while let Some((at, hops)) = queue.pop_front() {
+            if hops >= DRAG_HOPS {
+                continue;
+            }
+            for &j in &neighbours[at as usize] {
+                if slot[j as usize] != NO_SLOT || self.pinned.get(j as usize).copied().unwrap_or(false) {
+                    continue;
+                }
+                if moving.len() >= DRAG_MOVING {
+                    break 'search;
+                }
+                slot[j as usize] = moving.len() as u32;
+                moving.push(j);
+                queue.push_back((j, hops + 1));
+            }
+        }
+        let springs: Vec<(u32, u32, [f32; 2])> = self
+            .model
+            .links()
+            .into_iter()
+            .filter(|&(a, b)| slot[a as usize] != NO_SLOT || slot[b as usize] != NO_SLOT)
+            .map(|(a, b)| {
+                let (pa, pb) = (self.world[a as usize], self.world[b as usize]);
+                (a, b, [pb[0] - pa[0], pb[1] - pa[1]])
+            })
+            .collect();
+        let mut weight = vec![0.0_f32; moving.len()];
+        for &(a, b, _) in &springs {
+            for end in [a, b] {
+                if let Some(w) = weight.get_mut(slot[end as usize] as usize) {
+                    *w += 1.0;
+                }
+            }
+        }
+        let edges = (0..self.model.edges.len() as u32).filter(|&e| {
+            let edge = &self.model.edges[e as usize];
+            slot[edge.from as usize] != NO_SLOT || slot[edge.to as usize] != NO_SLOT
+        }).collect();
+        let origin: Vec<[f32; 2]> = moving.iter().map(|&j| self.world[j as usize]).collect();
+        let p = self.world[i];
+        self.drags += 1;
+        self.drag = Some(Drag {
+            node: i,
+            speed: vec![[0.0, 0.0]; moving.len()],
+            weight: weight.into_iter().map(|w| w.max(1.0)).collect(),
+            origin,
+            slot,
+            moving,
+            springs,
+            edges,
+            target: Some(p),
+            grab: [p[0] - at[0], p[1] - at[1]],
+            last: None,
+            dropped: None,
+            asleep: false,
+            tick: 0,
+            id: self.drags,
+        });
+    }
+
+    /// Whether the pointer is holding an artist: a drag that hasn't been let go. Once dropped,
+    /// a drag only settles, and no pointer moves it.
+    pub fn holding(&self) -> bool {
+        self.drag.as_ref().is_some_and(|d| d.target.is_some())
+    }
+
+    /// The pointer, holding the dragged artist, moved to world point `at`. Nothing, once
+    /// dropped.
+    pub fn drag_to(&mut self, at: [f32; 2]) {
+        if let Some(d) = self.drag.as_mut().filter(|d| d.target.is_some()) {
+            d.target = Some([at[0] + d.grab[0], at[1] + d.grab[1]]);
+            d.asleep = false;
+        }
+    }
+
+    /// A new press: a dropped drag still settling ends now, pinned where it was dropped and
+    /// its neighbours where they've got to, so the press starts from a still graph.
+    pub fn finish_drag(&mut self) -> Result<(), String> {
+        if self.drag.as_ref().is_some_and(|d| d.target.is_none()) {
+            return self.settle();
+        }
+        Ok(())
+    }
+
+    /// The pointer let go at world point `at`: the artist stays there, pinned, while the others
+    /// settle around it. (The simulation may not have stepped since the pointer last moved, so
+    /// the artist is put under it here.)
+    pub fn drop_drag(&mut self, at: [f32; 2]) {
+        self.drag_to(at);
+        if let Some(d) = self.drag.as_mut().filter(|d| d.target.is_some()) {
+            if let (Some(t), Some(p)) = (d.target, self.world.get_mut(d.node)) {
+                *p = t;
+            }
+            d.target = None;
+            d.asleep = false;
+        }
+    }
+
+    /// Puts every moving artist back where the drag found it.
+    pub fn cancel_drag(&mut self) {
+        let Some(d) = self.drag.take() else { return };
+        for (k, &j) in d.moving.iter().enumerate() {
+            if let Some(p) = self.world.get_mut(j as usize) {
+                *p = d.origin[k];
+            }
         }
         self.version += 1;
-        self.sync_live();
+    }
+
+    /// Whether a drag needs frames: something is moving.
+    pub fn animating(&self) -> bool {
+        self.drag.as_ref().is_some_and(|d| !d.asleep)
+    }
+
+    /// Steps the simulation to clock `now` (seconds); once the dropped artists settle, pins the
+    /// dragged one and saves. True when anything moved.
+    pub fn tick(&mut self, now: f64) -> Result<bool, String> {
+        let Some(d) = &mut self.drag else { return Ok(false) };
+        if d.asleep {
+            return Ok(false);
+        }
+        // A frame's worth of steps, but never so many that a stall replays seconds of motion.
+        let elapsed = d.last.map_or(SIM_STEP, |last| ((now - last) as f32).clamp(0.0, 0.05));
+        d.last = Some(now);
+        if d.target.is_none() && d.dropped.is_none() {
+            d.dropped = Some(now);
+        }
+        let steps = (elapsed / SIM_STEP).round().max(1.0) as usize;
+        let mut fastest = 0.0_f32;
+        let mut force = vec![[0.0_f32; 2]; d.moving.len()];
+        let damp = (-DAMPING * SIM_STEP).exp();
+        for _ in 0..steps {
+            if let Some(t) = d.target {
+                self.world[d.node] = t;
+            }
+            force.iter_mut().for_each(|f| *f = [0.0, 0.0]);
+            for &(a, b, rest) in &d.springs {
+                let (pa, pb) = (self.world[a as usize], self.world[b as usize]);
+                // How far the link is bent from its resting offset, pulling both ends back.
+                let bend = [SPRING * (pb[0] - pa[0] - rest[0]), SPRING * (pb[1] - pa[1] - rest[1])];
+                if let Some(f) = force.get_mut(d.slot[a as usize] as usize) {
+                    f[0] += bend[0];
+                    f[1] += bend[1];
+                }
+                if let Some(f) = force.get_mut(d.slot[b as usize] as usize) {
+                    f[0] -= bend[0];
+                    f[1] -= bend[1];
+                }
+            }
+            fastest = 0.0;
+            // The dragged artist (slot 0) goes where the pointer is, then stays where dropped.
+            for (k, ((&j, v), f)) in d.moving.iter().zip(d.speed.iter_mut()).zip(&force).enumerate().skip(1) {
+                let j = j as usize;
+                v[0] = (v[0] + f[0] / d.weight[k] * SIM_STEP) * damp;
+                v[1] = (v[1] + f[1] / d.weight[k] * SIM_STEP) * damp;
+                self.world[j][0] += v[0] * SIM_STEP;
+                self.world[j][1] += v[1] * SIM_STEP;
+                fastest = fastest.max((v[0] * v[0] + v[1] * v[1]).sqrt());
+            }
+        }
+        d.tick += 1;
+        if fastest < SETTLED_SPEED {
+            match d.dropped {
+                Some(_) => return self.settle().map(|()| true),
+                // Held still: sleep until the pointer moves again.
+                None => d.asleep = d.target.is_some_and(|t| self.world[d.node] == t),
+            }
+        } else if d.dropped.is_some_and(|at| now - at > SETTLE_MAX) {
+            return self.settle().map(|()| true);
+        }
+        Ok(true)
+    }
+
+    /// Ends the drag: the dragged artist is pinned where it was dropped, everything that
+    /// moved keeps its place, and the layout is saved.
+    fn settle(&mut self) -> Result<(), String> {
+        let Some(d) = self.drag.take() else { return Ok(()) };
+        for &j in &d.moving {
+            let j = j as usize;
+            self.raw[j] = self.transform.raw(self.world[j]);
+        }
+        let name = self.model.nodes[d.node].name.to_lowercase();
+        self.pins.get_or_insert_with(HashSet::new).insert(name);
+        self.pinned[d.node] = true;
+        self.placed();
+        self.save()
+    }
+
+    /// Unpins artist `i`: the next layout may move it.
+    pub fn unpin(&mut self, i: usize) -> Result<(), String> {
+        self.menu = None;
+        let Some(node) = self.model.nodes.get(i) else { return Ok(()) };
+        if let Some(pins) = &mut self.pins {
+            pins.remove(&node.name.to_lowercase());
+        }
+        if let Some(p) = self.pinned.get_mut(i) {
+            *p = false;
+        }
+        self.version += 1;
+        self.save()
+    }
+
+    /// Writes the layout as it shows, with its pins, to the cache.
+    fn save(&self) -> Result<(), String> {
+        let Some(path) = &self.cache else { return Ok(()) };
+        let names: Vec<String> = self.model.nodes.iter().map(|n| n.name.to_lowercase()).collect();
+        let mut pinned: Vec<String> = names.iter().zip(&self.pinned).filter(|(_, p)| **p).map(|(n, _)| n.clone()).collect();
+        pinned.sort_unstable();
+        let cached = Cached { fingerprint: format!("{:016x}", self.model.fingerprint()), names, positions: self.raw.clone(), pinned };
+        write(path, &cached).map_err(|e| format!("Couldn't save the graph layout to {}: {e}", path.display()))
     }
 
     /// The camera in use: the user's, else the one fitting the drawing to the canvas.
@@ -287,13 +649,15 @@ impl Graph {
     /// The camera showing the whole drawing, centred.
     pub fn fit(&self) -> Camera {
         let Some([w, h]) = self.viewport else { return Camera { pan: [0.0, 0.0], zoom: 1.0 } };
-        let [sw, sh] = self.size;
+        let [x0, y0, x1, y1] = self.bounds;
+        let (sw, sh) = (x1 - x0, y1 - y0);
         if sw <= 0.0 || sh <= 0.0 {
             return Camera { pan: [0.0, 0.0], zoom: 1.0 };
         }
         let zoom = (w / sw).min(h / sh).clamp(ZOOM_MIN, 1.5);
         let c = self.centre();
-        Camera { pan: [w / 2.0 - c[0], h / 2.0 - c[1]], zoom }
+        let m = [(x0 + x1) / 2.0, (y0 + y1) / 2.0];
+        Camera { pan: [w / 2.0 - c[0] - (m[0] - c[0]) * zoom, h / 2.0 - c[1] - (m[1] - c[1]) * zoom], zoom }
     }
 
     /// The world element's middle, which the live scale turns about.
@@ -359,28 +723,50 @@ impl Graph {
         self.live_zoom.set(cam.zoom);
     }
 
-    /// The node under canvas point `q`, if any: the nearest whose dot (plus a few points of
-    /// slack) holds it.
+    /// The node under canvas point `q`, if any: the dot (plus a few points of slack) nearest it,
+    /// or the most linked of those too close together on screen to tell apart.
     pub fn node_at(&self, q: [f32; 2]) -> Option<usize> {
         let cam = self.cam();
         let [x, y] = self.world_at(cam, q);
         let slack = 4.0 / cam.zoom;
-        let reach = ((20.0 + slack) / CELL).ceil() as i32;
+        // Zoomed out, a dot draws at least a point wide, which can be wider than its radius.
+        let widest = 20.0_f32.max(1.0 / cam.zoom);
+        let reach = ((widest + slack) / CELL).ceil() as i32;
         let (cx, cy) = cell(x, y);
-        let mut best: Option<(f32, usize)> = None;
+        // Every dot whose edge is within the slack, by how far outside its edge the point is
+        // (negative inside it).
+        let mut near: Vec<(f32, usize)> = Vec::new();
+        let mut consider = |i: usize| {
+            let [px, py] = self.world[i];
+            let d = ((px - x).powi(2) + (py - y).powi(2)).sqrt();
+            let r = radius(self.model.nodes[i].degree).max(1.0 / cam.zoom);
+            if d <= r + slack {
+                near.push((d - r, i));
+            }
+        };
+        // The grid files artists where the last layout or drop left them: those a drag is
+        // moving are looked at where they are now instead.
+        let moving = |i: u32| self.drag.as_ref().is_some_and(|d| d.slot.get(i as usize).is_some_and(|s| *s != NO_SLOT));
         for gx in cx - reach..=cx + reach {
             for gy in cy - reach..=cy + reach {
                 for &i in self.grid.get(&(gx, gy)).map_or(&[][..], Vec::as_slice) {
-                    let i = i as usize;
-                    let [px, py] = self.world[i];
-                    let d = ((px - x).powi(2) + (py - y).powi(2)).sqrt();
-                    if d <= radius(self.model.nodes[i].degree) + slack && best.is_none_or(|(b, _)| d < b) {
-                        best = Some((d, i));
+                    if !moving(i) {
+                        consider(i as usize);
                     }
                 }
             }
         }
-        best.map(|(_, i)| i)
+        if let Some(d) = &self.drag {
+            d.moving.iter().for_each(|&i| consider(i as usize));
+        }
+        // Dots this close on screen can't be told apart, as when a hub's neighbours crowd its
+        // dot zoomed out: the most linked of them wins, else the nearest.
+        let closest = near.iter().map(|&(off, _)| off).fold(f32::MAX, f32::min);
+        let tie = PICK_TIE / cam.zoom;
+        near.iter()
+            .filter(|&&(off, _)| off <= closest + tie)
+            .max_by(|a, b| self.model.nodes[a.1].degree.cmp(&self.model.nodes[b.1].degree).then(b.0.total_cmp(&a.0)))
+            .map(|&(_, i)| i)
     }
 
     /// What's under canvas point `q`: an artist's dot, else the links nearest it.
@@ -408,7 +794,8 @@ impl Graph {
     /// The links within [`EDGE_REACH`] points of canvas point `q`: the pair of artists of the
     /// nearest, and every shown link between them.
     pub fn link_at(&mut self, q: [f32; 2]) -> Option<Hover> {
-        if self.world.len() != self.model.nodes.len() {
+        // While artists move, the links grid is out of date.
+        if self.world.len() != self.model.nodes.len() || self.drag.is_some() {
             return None;
         }
         let cam = self.cam();
@@ -474,13 +861,18 @@ impl Graph {
     /// rebuild the view only now and then: see [`Graph::region`].
     pub fn region(&self) -> (Region, [f32; 4]) {
         let cam = self.cam();
-        let Some([w, h]) = self.viewport else { return (Region::default(), [f32::MIN, f32::MIN, f32::MAX, f32::MAX]) };
+        let everything = (Region::default(), [f32::MIN, f32::MIN, f32::MAX, f32::MAX]);
+        let Some([w, h]) = self.viewport.filter(|[w, h]| *w > 0.0 && *h > 0.0) else { return everything };
         let level = (cam.zoom.log2() * 2.0).round() as i32;
         let zoom = 2.0_f32.powf(level as f32 / 2.0);
         let (vw, vh) = (w / zoom, h / zoom);
         let mid = self.world_at(cam, [w / 2.0, h / 2.0]);
         let (sx, sy) = (vw / 2.0, vh / 2.0);
-        let (tx, ty) = ((mid[0] / sx).floor() as i32, (mid[1] / sy).floor() as i32);
+        let (fx, fy) = ((mid[0] / sx).floor(), (mid[1] / sy).floor());
+        if !fx.is_finite() || !fy.is_finite() || fx.abs() > 1e6 || fy.abs() > 1e6 {
+            return everything;
+        }
+        let (tx, ty) = (fx as i32, fy as i32);
         let rect = [tx as f32 * sx - vw, ty as f32 * sy - vh, (tx + 1) as f32 * sx + vw, (ty + 1) as f32 * sy + vh];
         (Region { level, tx, ty }, rect)
     }
@@ -526,6 +918,10 @@ struct Start {
     cache: Option<PathBuf>,
     /// Where each name sat in the layout shown before, by lowercased name.
     previous: HashMap<String, [f32; 2]>,
+    /// The pinned artists, lowercased; `None` takes the cache's.
+    pins: Option<HashSet<String>>,
+    /// Lay out from scratch, ignoring where anything was.
+    cold: bool,
 }
 
 /// Lays the graph out, reporting through `tx` and calling `wake` after each message.
@@ -537,9 +933,15 @@ fn compute(start: Start, cancel: &AtomicBool, tx: &Sender<Msg>, wake: &dyn Fn())
     let n = start.names.len();
     let fingerprint = format!("{:016x}", start.fingerprint);
     let cached = start.cache.as_ref().and_then(|path| std::fs::read(path).ok()).and_then(|bytes| serde_json::from_slice::<Cached>(&bytes).ok()).filter(|c| c.names.len() == c.positions.len());
+    let pins: HashSet<String> = match (&start.pins, &cached) {
+        (Some(pins), _) => pins.clone(),
+        (None, Some(c)) => c.pinned.iter().cloned().collect(),
+        (None, None) => HashSet::new(),
+    };
     let known: HashMap<String, [f32; 2]> = match &cached {
+        Some(_) if start.cold => HashMap::new(),
         Some(c) if c.fingerprint == fingerprint && c.names == start.names => {
-            send(Msg::Done(c.positions.clone()));
+            send(Msg::Done(c.positions.clone(), pins));
             return;
         }
         Some(c) => c.names.iter().cloned().zip(c.positions.iter().copied()).collect(),
@@ -550,6 +952,9 @@ fn compute(start: Start, cancel: &AtomicBool, tx: &Sender<Msg>, wake: &dyn Fn())
     if !start.previous.is_empty() {
         placed = start.names.iter().map(|name| start.previous.get(name).copied().or_else(|| known.get(name).copied())).collect();
     }
+    // A pinned artist stays where it was; one with no place yet is laid out as any other.
+    let fixed: Vec<bool> = start.names.iter().zip(&placed).map(|(name, p)| p.is_some() && pins.contains(name)).collect();
+    let pins: HashSet<String> = start.names.iter().zip(&fixed).filter(|(_, f)| **f).map(|(n, _)| n.clone()).collect();
     let warm = placed.iter().filter(|p| p.is_some()).count() * 2 > n;
     let mut neighbours: Vec<Vec<u32>> = vec![Vec::new(); n];
     for &(a, b) in &start.links {
@@ -575,7 +980,7 @@ fn compute(start: Start, cancel: &AtomicBool, tx: &Sender<Msg>, wake: &dyn Fn())
         .collect();
     let steps = if warm { layout::WARM_STEPS } else { layout::cold_steps(n) };
     let mut last = Instant::now();
-    let result = layout::run(n, &start.links, positions, steps, cancel, |step, pos| {
+    let result = layout::run(n, &start.links, positions, &fixed, steps, cancel, |step, pos| {
         if last.elapsed() >= PROGRESS_EVERY {
             last = Instant::now();
             send(Msg::Progress { positions: pos.to_vec(), step, steps });
@@ -585,12 +990,14 @@ fn compute(start: Start, cancel: &AtomicBool, tx: &Sender<Msg>, wake: &dyn Fn())
         return;
     }
     if let Some(path) = &start.cache {
-        let cached = Cached { fingerprint, names: start.names.clone(), positions: result.clone() };
+        let mut pinned: Vec<String> = pins.iter().cloned().collect();
+        pinned.sort_unstable();
+        let cached = Cached { fingerprint, names: start.names.clone(), positions: result.clone(), pinned };
         if let Err(e) = write(path, &cached) {
             send(Msg::Error(format!("Couldn't save the graph layout to {}: {e}", path.display())));
         }
     }
-    send(Msg::Done(result));
+    send(Msg::Done(result, pins));
 }
 
 fn write(path: &std::path::Path, cached: &Cached) -> std::io::Result<()> {

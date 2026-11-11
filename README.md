@@ -140,8 +140,9 @@ The **Graph** tab (next to **Library** at the top left) shows every artist in th
 - **Moving around:** drag (or middle-drag) or scroll with a trackpad to pan; pinch, Ctrl + scroll or a mouse wheel to zoom about the pointer. **Fit** shows everything again.
 - **Artists:** hover a dot for its name; click it to open the artist's page (Back or Esc returns to the graph). Names show for the most linked artists, and for more as you zoom in.
 - **Links:** hover a line to light it and the two artists it joins, with what it says: "Kenny Segal produced 2 songs by billy woods", one line per kind when they're linked several ways.
+- **Arranging by hand:** drag a dot to move it. Artists up to two links away follow on springs, keeping their shape, and settle after you let go; the rest stay put, so dragging costs the same in any library. A dropped artist is pinned (a small blue dot at its top right): new layouts, after music or links are added, leave it where you put it. Right-click a dot to unpin it (or open the artist), and **Reset layout** unpins everyone and arranges the graph from scratch.
 - **Find an artist:** type to centre the best match and highlight who they're linked to; Enter opens their page, Esc clears it.
-- **Saved:** the camera and hidden link kinds save under `graph` in `prefs.json`. The layout is cached in `graph-layout.json` next to it and reused while the artists and who's linked to whom stay the same; when music or links are added, the artists already placed keep their places and the new ones settle in around them on a background thread.
+- **Saved:** the camera and hidden link kinds save under `graph` in `prefs.json`. The layout, with what you've pinned, is cached in `graph-layout.json` next to it and reused while the artists and who's linked to whom stay the same; when music or links are added, the artists already placed keep their places and the new ones settle in around them on a background thread.
 
 ## Keys
 

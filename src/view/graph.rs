@@ -7,7 +7,7 @@
 //! run again, and the shapes are memoized on the graph's version so even then they're reused.
 
 use rune::{Color, Cursor, Drag, El, LineCap, MagnifyEvent, Phase, PointerButton, Shape, Tx, WheelEvent, canvas, col, el, memo, row, text};
-use rune_kit::{Kit, TextInput};
+use rune_kit::{Kit, MenuItem, TextInput, context_menu};
 
 use super::*;
 use crate::app::App;
@@ -51,14 +51,14 @@ fn edge_width(kind: EdgeKind) -> f32 {
     }
 }
 
-pub(super) fn graph_page(s: &App, p: &Palette, kit: &Kit) -> El {
+pub(super) fn graph_page(s: &App, p: &Palette, kit: &Kit, layer: &mut Vec<El>) -> El {
     let g = &s.graph;
     let body = if s.tracks.is_empty() && s.scan.is_none() {
         empty("No artists yet", "Open a folder to see how its artists are linked.", p)
     } else if g.model.nodes.is_empty() {
         empty(if s.scan.is_some() { "Reading your music…" } else { "No artists" }, "Artists show once songs with artist tags are in the library.", p)
     } else {
-        canvas_area(g, p)
+        canvas_area(g, p, kit, layer)
     };
     col().key("graph-page").w_full().grow(1.0).min_h(0.0).child(graph_toolbar(s, p, kit)).child(body)
 }
@@ -130,7 +130,12 @@ fn graph_toolbar(s: &App, p: &Palette, kit: &Kit) -> El {
                 .center_y()
                 .child(find)
                 .child(text(status).key("graph-status").font(SMALL).color(p.tx3).grow(1.0).shrink().truncate())
-                .child(pill_button("graph-fit", "Fit", p).help("Show every artist").on_press(|s: &mut App| s.graph.reset_camera())),
+                .child(pill_button("graph-fit", "Fit", p).help("Show every artist").on_press(|s: &mut App| s.graph.reset_camera()))
+                .child(
+                    pill_button("graph-reset", "Reset layout", p)
+                        .help(if g.pinned.iter().any(|p| *p) { "Unpin every artist and arrange the graph from scratch" } else { "Arrange the graph from scratch" })
+                        .on_press(|s: &mut App| s.reset_graph_layout()),
+                ),
         )
         .child(legend)
 }
@@ -158,26 +163,44 @@ fn legend_chip(kind: EdgeKind, on: bool, p: &Palette) -> El {
 }
 
 /// The canvas: the world under the camera, and what's hovered over it.
-fn canvas_area(g: &Graph, p: &Palette) -> El {
+fn canvas_area(g: &Graph, p: &Palette, kit: &Kit, layer: &mut Vec<El>) -> El {
     let (region, rect) = g.region();
     let p = *p;
-    let shapes = memo("graph-shapes", (g.version, g.hidden, g.selected, region.level, p.dark), || shapes(g, region.zoom(), &p));
-    let names = memo("graph-names", (g.version, g.selected, region, p.dark), || names(g, region.zoom(), rect, &p));
+    // While an artist is dragged, what moves draws on its own layer, every frame; the rest
+    // draws once for the drag, without what moves.
+    let drag = g.drag.as_ref().map(|d| d.id);
+    let shapes = memo("graph-shapes", (g.version, g.hidden, g.selected, region.level, drag, p.dark), || shapes(g, region.zoom(), &p));
+    let moving = g.drag.as_ref().map(|d| memo("graph-moving", (d.tick, g.hidden, g.selected, region.level, p.dark), || moving(g, region.zoom(), &p)));
+    let names = memo("graph-names", (g.version, g.selected, region, drag.map(|_| g.drag.as_ref().map_or(0, |d| d.tick)), p.dark), || names(g, region.zoom(), rect, &p));
     let [w, h] = g.size;
     let lit = memo("graph-hover", (g.version, g.hover.clone(), region.level, p.dark), || highlight(g, region.zoom(), &p));
-    let world = el().key("graph-world").pin(Some(0.0), Some(0.0), None, None).size(w.max(1.0), h.max(1.0)).live_offset(&g.live_pan).live_scale(&g.live_zoom).inert().child(shapes).child(lit).child(names);
+    let world = el()
+        .key("graph-world")
+        .pin(Some(0.0), Some(0.0), None, None)
+        .size(w.max(1.0), h.max(1.0))
+        .live_offset(&g.live_pan)
+        .live_scale(&g.live_zoom)
+        .inert()
+        .child(shapes)
+        .children(moving)
+        .child(lit)
+        .child(names);
     let tip = match &g.hover {
         Some(Hover::Node(i)) => hover_tip(g, *i, &p),
         Some(Hover::Link { edges, .. }) => link_tip(g, edges, &p),
         None => None,
     };
-    el().key("graph-canvas")
+    let canvas = el().key("graph-canvas")
         .w_full()
         .grow(1.0)
         .min_h(0.0)
         .fill(p.bg)
         .clip_soft(0.0)
-        .cursor(if g.hovered_node().is_some() { Cursor::Pointer } else { Cursor::Grab })
+        .cursor(match (&g.drag, g.hovered_node()) {
+            (Some(_), _) => Cursor::Grabbing,
+            (None, Some(_)) => Cursor::Pointer,
+            (None, None) => Cursor::Grab,
+        })
         .role("application")
         .label("Artist graph")
         .on_layout(|s: &mut App, r| s.graph.set_viewport([r[2], r[3]]))
@@ -200,6 +223,10 @@ fn canvas_area(g: &Graph, p: &Palette) -> El {
             true
         })
         .on_pointer_move_local(|s: &mut App, e, tx| {
+            if s.graph.holding() {
+                tx.live_only();
+                return;
+            }
             let hit = s.graph.hit([e.x, e.y]);
             if hit == s.graph.hover {
                 tx.live_only();
@@ -214,27 +241,92 @@ fn canvas_area(g: &Graph, p: &Palette) -> El {
             }
         })
         .pointer_buttons([PointerButton::Middle])
+        .on_secondary_press_local(|s: &mut App, e, _tx| {
+            s.graph.hover = None;
+            s.graph.menu = s.graph.node_at([e.x, e.y]).map(|i| (i, e.window()));
+        })
         .on_drag(|s: &mut App, d: &mut Drag, tx: &mut Tx| {
+            // The primary button on an artist moves it; on empty space, or with the middle
+            // button, it pans.
+            let artist = tx.button() == PointerButton::Primary;
             match d.phase {
-                Phase::Down => s.graph.drag_from = s.graph.cam(),
+                Phase::Down => {
+                    if let Err(e) = s.graph.finish_drag() {
+                        s.error = Some(e);
+                    }
+                    s.graph.drag_from = s.graph.cam();
+                    s.graph.press = if artist { s.graph.node_at([d.start_x, d.start_y]) } else { None };
+                    return;
+                }
                 Phase::Move => {
+                    let far = d.dx.abs() >= 4.0 || d.dy.abs() >= 4.0;
+                    if let Some(i) = s.graph.press.filter(|_| far && !s.graph.holding()) {
+                        let at = s.graph.world_at(s.graph.drag_from, [d.start_x, d.start_y]);
+                        s.graph.start_drag(i, at);
+                        tx.wake_after(crate::graph::state::SIM_FRAME);
+                        return;
+                    }
+                    if s.graph.holding() {
+                        let at = s.graph.world_at(s.graph.cam(), [d.x, d.y]);
+                        s.graph.drag_to(at);
+                        tx.wake_after(crate::graph::state::SIM_FRAME);
+                        tx.live_only();
+                        return;
+                    }
+                    if s.graph.press.is_some() {
+                        return;
+                    }
                     let from = s.graph.drag_from;
                     s.graph.set_camera(crate::graph::state::Camera { pan: [from.pan[0] + d.dx, from.pan[1] + d.dy], zoom: from.zoom });
                 }
                 Phase::Up => {
+                    let press = s.graph.press.take();
+                    if s.graph.holding() {
+                        if d.cancelled() {
+                            s.graph.cancel_drag();
+                        } else {
+                            let at = s.graph.world_at(s.graph.cam(), [d.x, d.y]);
+                            s.graph.drop_drag(at);
+                            tx.wake_after(crate::graph::state::SIM_FRAME);
+                        }
+                        return;
+                    }
                     if d.cancelled() {
                         s.graph.set_camera(s.graph.drag_from);
-                    } else if d.dx.abs() < 4.0 && d.dy.abs() < 4.0 && tx.button() == PointerButton::Primary {
-                        // A click, not a pan: open the artist under it.
-                        if let Some(name) = s.graph.node_at([d.start_x, d.start_y]).and_then(|i| s.graph.model.nodes.get(i)).map(|n| n.name.clone()) {
-                            s.show_artist(&name, tx);
-                            return;
-                        }
+                    } else if let Some(name) = press.filter(|_| d.dx.abs() < 4.0 && d.dy.abs() < 4.0).and_then(|i| s.graph.model.nodes.get(i)).map(|n| n.name.clone()) {
+                        // A click, not a drag: open the artist.
+                        s.show_artist(&name, tx);
+                        return;
                     }
                 }
             }
             moved(s, tx);
-        })
+        });
+    match g.menu {
+        Some((i, at)) => {
+            let name = g.model.nodes.get(i).map_or_else(String::new, |n| n.name.clone());
+            let pinned = g.pinned.get(i).copied().unwrap_or(false);
+            let open = name.clone();
+            // The menu's trigger is an empty point: wrapping the canvas in it would take the
+            // canvas out of the column's flex layout.
+            let menu = context_menu("graph-menu", el().size(0.0, 0.0), Some(at))
+                .group_label(name)
+                .item(MenuItem::new("Open artist").on_select_tx(move |s: &mut App, tx| {
+                    s.graph.menu = None;
+                    s.show_artist(&open, tx);
+                }))
+                .item(
+                    MenuItem::new("Unpin")
+                        .description(if pinned { "Layouts may move them" } else { "Drag to pin" })
+                        .disabled(!pinned)
+                        .on_select(move |s: &mut App| s.unpin_graph_artist(i)),
+                )
+                .on_close(|s: &mut App| s.graph.menu = None)
+                .build(kit, layer);
+            canvas.child(menu.pin(Some(0.0), Some(0.0), None, None))
+        }
+        None => canvas,
+    }
 }
 
 /// The camera moved: the view only needs to run when the drawn region changes, or to drop a
@@ -383,6 +475,9 @@ fn shapes(g: &Graph, zoom: f32, p: &Palette) -> El {
     let focus = g.selected;
     let near = near(g);
     let dim = |i: u32| focus.is_some() && !near[i as usize];
+    // What a drag moves draws on its own layer.
+    let moves = |i: u32| g.drag.as_ref().is_some_and(|d| d.moving.contains(&i));
+    let moving: Vec<bool> = (0..g.model.nodes.len() as u32).map(moves).collect();
     // Edges and dots draw in tiles, each sized to what it holds, so a zoomed-in camera skips
     // the tiles out of view.
     let mut tiles = Tiles::new(w, h);
@@ -390,11 +485,10 @@ fn shapes(g: &Graph, zoom: f32, p: &Palette) -> El {
     // a focus draw faded unless they touch it.
     let mut kinds: Vec<(EdgeKind, usize)> = EdgeKind::ALL.into_iter().filter(|k| g.hidden & k.bit() == 0).map(|k| (k, g.model.edges.iter().filter(|e| e.kind == k).count())).filter(|(_, n)| *n > 0).collect();
     kinds.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
-    let alpha = |count: usize| if count > 20000 { 0.25 } else if count > 3000 { 0.4 } else { 0.6 };
     for (kind, count) in kinds {
         let color = edge_color(kind, p);
-        let (faded, bright) = (color.alpha(0.06), color.alpha(if focus.is_some() { 0.9 } else { alpha(count) }));
-        for e in g.model.edges.iter().filter(|e| e.kind == kind) {
+        let (faded, bright) = (color.alpha(0.06), color.alpha(if focus.is_some() { 0.9 } else { edge_alpha(count) }));
+        for e in g.model.edges.iter().filter(|e| e.kind == kind && !moving[e.from as usize] && !moving[e.to as usize]) {
             let (a, b) = (g.world[e.from as usize], g.world[e.to as usize]);
             let touches = focus.is_none() || focus == Some(e.from as usize) || focus == Some(e.to as usize);
             let color = if dim(e.from) || dim(e.to) || !touches { faded } else { bright };
@@ -403,18 +497,75 @@ fn shapes(g: &Graph, zoom: f32, p: &Palette) -> El {
         // Each kind draws over the more numerous ones.
         world = tiles.flush(world, kind.id());
     }
-    // Dots: discs.
-    for (i, node) in g.model.nodes.iter().enumerate() {
-        let r = radius(node.degree).max(1.0 / zoom);
-        let c = g.world[i];
-        let color = if dim(i as u32) { p.ui2.alpha(0.25) } else if focus == Some(i) { p.blue } else { p.tx2 };
-        tiles.dot(c, r, color);
-        if focus == Some(i) {
-            // A 2-point ring 3 points clear of the dot, on screen at any zoom.
-            tiles.ring(c, r + 4.0 / zoom, 2.0 / zoom, p.blue);
-        }
+    for (i, _) in g.model.nodes.iter().enumerate().filter(|&(i, _)| !moving[i]) {
+        dot(&mut tiles, g, i, zoom, dim(i as u32), p);
     }
     tiles.flush(world, "dots")
+}
+
+/// How opaque a kind's lines draw, by how many there are: many lines fade so they don't swamp.
+fn edge_alpha(count: usize) -> f32 {
+    if count > 20000 {
+        0.25
+    } else if count > 3000 {
+        0.4
+    } else {
+        0.6
+    }
+}
+
+/// Artist `i`'s dot: ringed when picked, with a pin when pinned.
+fn dot(tiles: &mut Tiles, g: &Graph, i: usize, zoom: f32, dim: bool, p: &Palette) {
+    let r = radius(g.model.nodes[i].degree).max(1.0 / zoom);
+    let c = g.world[i];
+    let focus = g.selected;
+    let color = if dim { p.ui2.alpha(0.25) } else if focus == Some(i) { p.blue } else { p.tx2 };
+    tiles.dot(c, r, color);
+    if focus == Some(i) {
+        // A 2-point ring 3 points clear of the dot, on screen at any zoom.
+        tiles.ring(c, r + 4.0 / zoom, 2.0 / zoom, p.blue);
+    }
+    if g.pinned.get(i).copied().unwrap_or(false) {
+        // A pin's head just off the dot's top right, 2 points across on screen, outlined in the
+        // background so it reads over lines and dots.
+        let head = 2.0 / zoom;
+        let k = std::f32::consts::FRAC_1_SQRT_2 * (r + head);
+        let at = [c[0] + k, c[1] - k];
+        tiles.dot(at, head + 1.0 / zoom, if dim { p.bg.alpha(0.4) } else { p.bg });
+        tiles.dot(at, head, if dim { p.blue.alpha(0.3) } else { p.blue });
+    }
+}
+
+/// What a drag moves: the moving artists and their links, as they are now.
+fn moving(g: &Graph, zoom: f32, p: &Palette) -> El {
+    let [w, h] = g.size;
+    let mut world = el().key("graph-moving").pin(Some(0.0), Some(0.0), None, None).size(w.max(1.0), h.max(1.0));
+    let Some(d) = &g.drag else { return world };
+    let focus = g.selected;
+    let near = near(g);
+    let dim = |i: u32| focus.is_some() && !near[i as usize];
+    let mut tiles = Tiles::new(w, h);
+    let mut counts = [0_usize; EdgeKind::ALL.len()];
+    for e in &g.model.edges {
+        if let Some(k) = EdgeKind::ALL.iter().position(|k| *k == e.kind) {
+            counts[k] += 1;
+        }
+    }
+    for &e in &d.edges {
+        let Some(edge) = g.model.edges.get(e as usize) else { continue };
+        if g.hidden & edge.kind.bit() != 0 {
+            continue;
+        }
+        let touches = focus.is_none() || focus == Some(edge.from as usize) || focus == Some(edge.to as usize);
+        let bright = if focus.is_some() { 0.9 } else { edge_alpha(EdgeKind::ALL.iter().position(|k| *k == edge.kind).map_or(0, |k| counts[k])) };
+        let color = edge_color(edge.kind, p).alpha(if dim(edge.from) || dim(edge.to) || !touches { 0.06 } else { bright });
+        tiles.line(g.world[edge.from as usize], g.world[edge.to as usize], edge_width(edge.kind).max(0.9 / zoom), color);
+    }
+    world = tiles.flush(world, "moving-links");
+    for &i in &d.moving {
+        dot(&mut tiles, g, i as usize, zoom, dim(i), p);
+    }
+    tiles.flush(world, "moving-dots")
 }
 
 /// The names of the artists in `rect` worth naming at `zoom`: the most linked, the big enough

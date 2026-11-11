@@ -127,7 +127,7 @@ fn graph_at_scale() {
         let start: Vec<[f32; 2]> = m.nodes.iter().map(|n| layout::seed(&n.name, m.nodes.len())).collect();
         let steps = layout::cold_steps(m.nodes.len());
         let t = std::time::Instant::now();
-        let pos = layout::run(m.nodes.len(), &links, start, steps, &std::sync::atomic::AtomicBool::new(false), |_, _| {});
+        let pos = layout::run(m.nodes.len(), &links, start, &vec![false; m.nodes.len()], steps, &std::sync::atomic::AtomicBool::new(false), |_, _| {});
         let laid = t.elapsed();
         assert!(pos.iter().all(|p| p[0].is_finite() && p[1].is_finite()));
         println!("{} artists, {} edges ({} pairs): built in {built:.2?}, {steps} steps in {laid:.2?} ({:.2?}/step)", m.nodes.len(), m.edges.len(), links.len(), laid / steps as u32);

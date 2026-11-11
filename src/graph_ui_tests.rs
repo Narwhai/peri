@@ -41,6 +41,8 @@ fn runtime(store: Store) -> Runtime<App> {
     app.set_library(library(), false);
     let mut rt = Runtime::new(app, view, (1200.0, 800.0), Env::new(true, 1.0));
     rt.on_key = Some(crate::app::on_key);
+    // The drag simulation steps in poll, as in the app.
+    rt.poll = Some(crate::app::poll);
     settle(&mut rt);
     rt
 }
@@ -269,6 +271,34 @@ fn graph_frames_at_scale() {
     }
     times.sort();
     println!("hover frames ({links} on links): p50 {:.2?}, p95 {:.2?}, max {:.2?}", times[60], times[114], times[119]);
+    // Drag the most linked artist about.
+    rt.poll = Some(crate::app::poll);
+    let hub = (0..rt.state.graph.model.nodes.len()).max_by_key(|&i| rt.state.graph.model.nodes[i].degree).expect("artists");
+    let g = &rt.state.graph;
+    let [x, y] = g.screen(g.cam(), g.world[hub]);
+    let (x, y) = (canvas[0] + x, canvas[1] + y);
+    rt.pointer_move(x, y);
+    rt.pointer_down(x, y);
+    let mut times = Vec::new();
+    for k in 1..=120 {
+        let t = std::time::Instant::now();
+        let a = k as f32 * 0.1;
+        rt.pointer_move(x + 60.0 * a.sin(), y + 40.0 * (a * 0.7).cos());
+        rt.frame(1.0 / 60.0);
+        times.push(t.elapsed());
+    }
+    let moving = rt.state.graph.drag.as_ref().map_or(0, |d| d.moving.len());
+    rt.pointer_up(x, y);
+    let mut settle_frames = 0;
+    while rt.state.graph.drag.is_some() && settle_frames < 600 {
+        let t = std::time::Instant::now();
+        rt.frame(1.0 / 60.0);
+        times.push(t.elapsed());
+        settle_frames += 1;
+    }
+    times.sort();
+    let n = times.len();
+    println!("drag frames ({moving} moving, {settle_frames} to settle): p50 {:.2?}, p95 {:.2?}, max {:.2?}", times[n / 2], times[n * 95 / 100], times[n - 1]);
 }
 
 /// `RUNE_MUSIC_DIR=~/Music cargo test --release real_library_graph -- --ignored --nocapture`:
@@ -324,4 +354,197 @@ fn real_link_midpoint() {
     let (ax, ay) = node_on_screen(&rt, a);
     let (bx, by) = node_on_screen(&rt, b);
     println!("{a} at {ax},{ay}; {b} at {bx},{by}; midpoint {},{}", (ax + bx) / 2.0, (ay + by) / 2.0);
+}
+
+/// Drags artist `name` by (`dx`, `dy`) window points and lets go, then lets the others settle.
+fn drag_artist(rt: &mut Runtime<App>, name: &str, dx: f32, dy: f32) {
+    let (x, y) = node_on_screen(rt, name);
+    rt.pointer_move(x, y);
+    rt.pointer_down(x, y);
+    for k in 1..=9 {
+        let t = k as f32 / 10.0;
+        rt.pointer_move(x + dx * t, y + dy * t);
+        rt.frame(1.0 / 60.0);
+    }
+    // The last move and the release come together, before the simulation steps again.
+    rt.pointer_move(x + dx, y + dy);
+    rt.pointer_up(x + dx, y + dy);
+    for _ in 0..600 {
+        rt.frame(1.0 / 60.0);
+        if rt.state.graph.drag.is_none() {
+            break;
+        }
+    }
+    settle(rt);
+}
+
+fn world_of(rt: &Runtime<App>, name: &str) -> [f32; 2] {
+    let g = &rt.state.graph;
+    g.world[g.model.find(name).expect("a node")]
+}
+
+fn dist(a: [f32; 2], b: [f32; 2]) -> f32 {
+    ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)).sqrt()
+}
+
+#[test]
+fn dragging_an_artist_moves_it_pulls_its_neighbours_and_pins_it() {
+    let mut rt = runtime(Store::memory());
+    // Lord Sko is three links from Kenny Segal: Kenny Segal, Armand Hammer, The Alchemist.
+    rt.update(|s, _| {
+        let mut tracks = library();
+        tracks.push(song(5, &["Lord Sko"], &[], vec![Credit::parse(Role::Producer, "The Alchemist")]));
+        s.set_library(tracks, false);
+    });
+    settle(&mut rt);
+    click(&mut rt, "graph-tab");
+    let zoom = rt.state.graph.cam().zoom;
+    let (kenny, woods, far) = (world_of(&rt, "Kenny Segal"), world_of(&rt, "billy woods"), world_of(&rt, "Lord Sko"));
+    drag_artist(&mut rt, "Kenny Segal", 120.0, 80.0);
+    let g = &rt.state.graph;
+    assert!(g.drag.is_none(), "the drop settled");
+    assert_eq!(rt.state.page, Page::Graph, "a drag doesn't open the artist");
+    let moved = world_of(&rt, "Kenny Segal");
+    assert!((moved[0] - kenny[0] - 120.0 / zoom).abs() < 1.0 && (moved[1] - kenny[1] - 80.0 / zoom).abs() < 1.0, "the artist went with the pointer: {kenny:?} to {moved:?}");
+    let i = g.model.find("Kenny Segal").expect("node");
+    assert!(g.pinned[i], "dropped means pinned");
+    assert_eq!(g.pinned.iter().filter(|p| **p).count(), 1, "only the dragged artist is pinned");
+    let pulled = world_of(&rt, "billy woods");
+    assert!(dist(pulled, moved) < dist(woods, moved), "a linked artist followed: {woods:?} to {pulled:?}");
+    assert_eq!(world_of(&rt, "Lord Sko"), far, "artists more than two links away hold still");
+    // The moved artist is found where it now is.
+    let (x, y) = node_on_screen(&rt, "Kenny Segal");
+    rt.pointer_move(x, y);
+    settle(&mut rt);
+    assert_eq!(rt.state.graph.hovered_node(), Some(i));
+}
+
+#[test]
+fn a_cancelled_drag_puts_everything_back() {
+    let mut rt = runtime(Store::memory());
+    click(&mut rt, "graph-tab");
+    let before = rt.state.graph.world.clone();
+    let (x, y) = node_on_screen(&rt, "Kenny Segal");
+    rt.pointer_down(x, y);
+    for k in 1..=5 {
+        rt.pointer_move(x + 20.0 * k as f32, y);
+        rt.frame(1.0 / 60.0);
+    }
+    assert!(rt.state.graph.drag.is_some());
+    rt.update(|s, _| s.graph.cancel_drag());
+    rt.pointer_up(x + 100.0, y);
+    settle(&mut rt);
+    assert_eq!(rt.state.graph.world, before);
+    assert!(rt.state.graph.pinned.iter().all(|p| !p), "nothing was pinned");
+}
+
+#[test]
+fn pins_survive_a_restart_and_a_new_layout_and_reset_layout_clears_them() {
+    let dir = std::env::temp_dir().join(format!("rune-music-graph-pins-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let prefs = dir.join("prefs.json");
+    let dropped = {
+        let mut rt = runtime(Store::at(&prefs));
+        click(&mut rt, "graph-tab");
+        drag_artist(&mut rt, "Kenny Segal", 150.0, -60.0);
+        rt.state.graph.layout_raw("Kenny Segal").expect("placed")
+    };
+    let mut rt = runtime(Store::at(&prefs));
+    click(&mut rt, "graph-tab");
+    let i = rt.state.graph.model.find("Kenny Segal").expect("node");
+    assert!(rt.state.graph.pinned[i], "the pin came back");
+    assert_eq!(rt.state.graph.layout_raw("Kenny Segal"), Some(dropped), "where it was dropped");
+    // New music lays the graph out again: the pinned artist stays.
+    rt.update(|s, _| {
+        let mut tracks = library();
+        tracks.push(song(4, &["Elucid"], &[], vec![Credit::parse(Role::Producer, "Kenny Segal")]));
+        s.set_library(tracks, false);
+    });
+    settle(&mut rt);
+    assert_eq!(rt.state.graph.model.nodes.len(), 6);
+    assert_eq!(rt.state.graph.layout_raw("Kenny Segal"), Some(dropped), "a new layout leaves it be");
+    assert!(rt.state.graph.pinned[rt.state.graph.model.find("Kenny Segal").expect("node")]);
+    click(&mut rt, "graph-reset");
+    assert!(rt.state.graph.pinned.iter().all(|p| !p), "Reset layout unpins everyone");
+    assert_ne!(rt.state.graph.layout_raw("Kenny Segal"), Some(dropped), "and lays out from scratch");
+    let rt = runtime(Store::at(&prefs));
+    let mut rt = rt;
+    click(&mut rt, "graph-tab");
+    assert!(rt.state.graph.pinned.iter().all(|p| !p), "the reset was saved");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn right_clicking_a_pinned_artist_unpins_it() {
+    let mut rt = runtime(Store::memory());
+    click(&mut rt, "graph-tab");
+    drag_artist(&mut rt, "Kenny Segal", 100.0, 40.0);
+    let i = rt.state.graph.model.find("Kenny Segal").expect("node");
+    assert!(rt.state.graph.pinned[i]);
+    let (x, y) = node_on_screen(&rt, "Kenny Segal");
+    rt.secondary_down(x, y);
+    rt.secondary_up(x, y);
+    settle(&mut rt);
+    assert_eq!(rt.state.graph.menu.map(|(n, _)| n), Some(i));
+    // The menu's items: Open artist, then Unpin.
+    let (ux, uy) = rt.find("graph-menu-item2").expect("Unpin");
+    rt.pointer_down(ux, uy);
+    rt.pointer_up(ux, uy);
+    settle(&mut rt);
+    assert!(!rt.state.graph.pinned[i], "unpinned");
+    assert!(rt.state.graph.menu.is_none(), "the menu closed");
+}
+
+/// Presses and drags from window point (`x`, `y`) by (`dx`, `dy`), letting go without waiting
+/// for anything to settle.
+fn quick_drag(rt: &mut Runtime<App>, (x, y): (f32, f32), dx: f32, dy: f32) {
+    rt.pointer_move(x, y);
+    rt.pointer_down(x, y);
+    for k in 1..=6 {
+        let t = k as f32 / 6.0;
+        rt.pointer_move(x + dx * t, y + dy * t);
+        rt.frame(1.0 / 60.0);
+    }
+    rt.pointer_up(x + dx, y + dy);
+    rt.frame(1.0 / 60.0);
+}
+
+#[test]
+fn a_new_press_while_a_dropped_artist_settles_leaves_it_where_it_was_dropped() {
+    let mut rt = runtime(Store::memory());
+    click(&mut rt, "graph-tab");
+    let at = node_on_screen(&rt, "Kenny Segal");
+    quick_drag(&mut rt, at, 120.0, 80.0);
+    assert!(rt.state.graph.drag.is_some(), "its neighbours are still settling");
+    let dropped = world_of(&rt, "Kenny Segal");
+    // Straight away, pan from empty space: the dropped artist doesn't follow the pointer.
+    let canvas = rect(&rt, "graph-canvas");
+    quick_drag(&mut rt, (canvas[0] + 20.0, canvas[1] + 20.0), 90.0, 40.0);
+    assert_eq!(world_of(&rt, "Kenny Segal"), dropped, "panning doesn't move the dropped artist");
+    // And straight away again, drag another artist: that one moves, not the dropped one.
+    let woods = world_of(&rt, "The Alchemist");
+    let at = node_on_screen(&rt, "The Alchemist");
+    quick_drag(&mut rt, at, -100.0, 60.0);
+    assert_ne!(world_of(&rt, "The Alchemist"), woods, "the artist pressed moves");
+    // Moving the pointer with no button held moves nothing.
+    let before = rt.state.graph.world.clone();
+    let (x, y) = node_on_screen(&rt, "The Alchemist");
+    for k in 1..=6 {
+        rt.pointer_move(x + 15.0 * k as f32, y + 10.0 * k as f32);
+        rt.frame(1.0 / 60.0);
+    }
+    let g = &rt.state.graph;
+    for name in ["Kenny Segal", "The Alchemist"] {
+        let i = g.model.find(name).expect("node");
+        assert_eq!(g.world[i], before[i], "{name} stays put while the pointer merely moves");
+    }
+    for _ in 0..600 {
+        rt.frame(1.0 / 60.0);
+    }
+    let g = &rt.state.graph;
+    assert!(g.drag.is_none());
+    for name in ["Kenny Segal", "The Alchemist"] {
+        assert!(g.pinned[g.model.find(name).expect("node")], "{name} is pinned where it was dropped");
+    }
+    assert_eq!(world_of(&rt, "Kenny Segal"), dropped);
 }

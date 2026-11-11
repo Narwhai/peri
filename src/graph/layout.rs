@@ -8,9 +8,11 @@
 //!   "strong gravity"), so lone artists and small groups stay close instead of ringing the
 //!   drawing far out.
 //!
-//! Positions are in the layout's own units; [`to_world`] scales them for drawing.
+//! Positions are in the layout's own units; a [`Transform`] scales them for drawing.
 
 use std::sync::atomic::{AtomicBool, Ordering};
+
+use serde::{Deserialize, Serialize};
 
 const REPULSION: f32 = 10.0;
 const GRAVITY: f32 = 0.05;
@@ -34,10 +36,11 @@ pub fn cold_steps(n: usize) -> usize {
 pub const WARM_STEPS: usize = 300;
 
 /// Lays out `n` nodes joined by `links` from `start`, for `steps` steps or until `cancel` is set.
-/// `progress` hears the step count and positions now and then.
-pub fn run(n: usize, links: &[(u32, u32)], start: Vec<[f32; 2]>, steps: usize, cancel: &AtomicBool, mut progress: impl FnMut(usize, &[[f32; 2]])) -> Vec<[f32; 2]> {
+/// Nodes `fixed` marks (pinned by the user) stay where they start, and still push and pull the
+/// rest. `progress` hears the step count and positions now and then.
+pub fn run(n: usize, links: &[(u32, u32)], start: Vec<[f32; 2]>, fixed: &[bool], steps: usize, cancel: &AtomicBool, mut progress: impl FnMut(usize, &[[f32; 2]])) -> Vec<[f32; 2]> {
     let mut pos = start;
-    if n == 0 || pos.len() != n {
+    if n == 0 || pos.len() != n || fixed.len() != n {
         return pos;
     }
     let mut mass = vec![1.0_f32; n];
@@ -71,7 +74,7 @@ pub fn run(n: usize, links: &[(u32, u32)], start: Vec<[f32; 2]>, steps: usize, c
             force[b][0] += dx;
             force[b][1] += dy;
         }
-        speed.apply(&mut pos, &force, &old, &mass, step == 0);
+        speed.apply(&mut pos, &force, &old, &mass, fixed, step == 0);
         if step % 10 == 9 {
             progress(step + 1, &pos);
         }
@@ -110,7 +113,7 @@ impl Speed {
         Speed { speed: 1.0, efficiency: 1.0 }
     }
 
-    fn apply(&mut self, pos: &mut [[f32; 2]], force: &[[f32; 2]], old: &[[f32; 2]], mass: &[f32], first: bool) {
+    fn apply(&mut self, pos: &mut [[f32; 2]], force: &[[f32; 2]], old: &[[f32; 2]], mass: &[f32], fixed: &[bool], first: bool) {
         let n = pos.len() as f32;
         let (mut swinging, mut traction) = (0.0_f32, 0.0_f32);
         let swing = |i: usize| if first { 0.0 } else { len(force[i][0] - old[i][0], force[i][1] - old[i][1]) };
@@ -137,7 +140,7 @@ impl Speed {
             }
             self.speed += (target - self.speed).min(0.5 * self.speed);
         }
-        for i in 0..pos.len() {
+        for i in (0..pos.len()).filter(|&i| !fixed[i]) {
             let factor = self.speed / (1.0 + (self.speed * mass[i] * swing(i)).sqrt());
             let [fx, fy] = force[i];
             // A node never jumps further than this in one step, whatever the forces.
@@ -268,30 +271,51 @@ const LINK_LENGTH: f32 = 90.0;
 /// Room around the drawing.
 pub const MARGIN: f32 = 200.0;
 
-/// `raw` positions scaled so a typical link is [`LINK_LENGTH`] long, moved so the drawing starts
-/// at [`MARGIN`]; and the drawing's size with its margins.
-pub fn to_world(raw: &[[f32; 2]], links: &[(u32, u32)]) -> (Vec<[f32; 2]>, [f32; 2]) {
-    if raw.is_empty() {
-        return (Vec::new(), [2.0 * MARGIN, 2.0 * MARGIN]);
-    }
-    let mut lengths: Vec<f32> = links.iter().map(|&(a, b)| len(raw[a as usize][0] - raw[b as usize][0], raw[a as usize][1] - raw[b as usize][1])).filter(|d| *d > 0.0).collect();
-    let scale = if lengths.is_empty() {
-        1.0
-    } else {
-        let mid = lengths.len() / 2;
-        let (_, median, _) = lengths.select_nth_unstable_by(mid, f32::total_cmp);
-        LINK_LENGTH / *median
-    };
-    let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
-    for &[x, y] in raw {
-        x0 = x0.min(x);
-        y0 = y0.min(y);
-        x1 = x1.max(x);
-        y1 = y1.max(y);
-    }
-    let world = raw.iter().map(|&[x, y]| [(x - x0) * scale + MARGIN, (y - y0) * scale + MARGIN]).collect();
-    (world, [(x1 - x0) * scale + 2.0 * MARGIN, (y1 - y0) * scale + 2.0 * MARGIN])
+/// How layout positions map to world points: scaled by `scale` from `origin`, shifted by
+/// [`MARGIN`], in a world `size` points.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Transform {
+    pub scale: f32,
+    pub origin: [f32; 2],
+    pub size: [f32; 2],
 }
+
+impl Transform {
+    /// The transform that scales `raw` so a typical link is [`LINK_LENGTH`] long, and moves the
+    /// drawing to start at [`MARGIN`].
+    pub fn fit(raw: &[[f32; 2]], links: &[(u32, u32)]) -> Transform {
+        if raw.is_empty() {
+            return Transform { scale: 1.0, origin: [0.0, 0.0], size: [2.0 * MARGIN, 2.0 * MARGIN] };
+        }
+        let mut lengths: Vec<f32> = links.iter().map(|&(a, b)| len(raw[a as usize][0] - raw[b as usize][0], raw[a as usize][1] - raw[b as usize][1])).filter(|d| *d > 0.0).collect();
+        let scale = if lengths.is_empty() {
+            1.0
+        } else {
+            let mid = lengths.len() / 2;
+            let (_, median, _) = lengths.select_nth_unstable_by(mid, f32::total_cmp);
+            LINK_LENGTH / *median
+        };
+        let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+        for &[x, y] in raw {
+            x0 = x0.min(x);
+            y0 = y0.min(y);
+            x1 = x1.max(x);
+            y1 = y1.max(y);
+        }
+        Transform { scale, origin: [x0, y0], size: [(x1 - x0) * scale + 2.0 * MARGIN, (y1 - y0) * scale + 2.0 * MARGIN] }
+    }
+
+    /// Layout position `p` in world points.
+    pub fn world(&self, [x, y]: [f32; 2]) -> [f32; 2] {
+        [(x - self.origin[0]) * self.scale + MARGIN, (y - self.origin[1]) * self.scale + MARGIN]
+    }
+
+    /// World point `w` as a layout position.
+    pub fn raw(&self, [x, y]: [f32; 2]) -> [f32; 2] {
+        [(x - MARGIN) / self.scale + self.origin[0], (y - MARGIN) / self.scale + self.origin[1]]
+    }
+}
+
 
 /// A starting point for node `name`: spread over a square that grows with the node count, the
 /// same for the same name every time.
@@ -319,7 +343,7 @@ mod tests {
         // Two triangles joined by nothing.
         let links = [(0, 1), (1, 2), (2, 0), (3, 4), (4, 5), (5, 3)];
         let start: Vec<[f32; 2]> = (0..6).map(|i| seed(&format!("n{i}"), 6)).collect();
-        let pos = run(6, &links, start, 600, &AtomicBool::new(false), |_, _| {});
+        let pos = run(6, &links, start, &[false; 6], 600, &AtomicBool::new(false), |_, _| {});
         let within = dist(&pos, 0, 1).max(dist(&pos, 3, 4));
         let across = dist(&pos, 0, 3).min(dist(&pos, 1, 4)).min(dist(&pos, 2, 5));
         assert!(within < across, "links pull together: within {within}, across {across}");
@@ -350,14 +374,38 @@ mod tests {
     #[test]
     fn nodes_on_one_spot_stay_finite() {
         let start = vec![[0.0, 0.0]; 50];
-        let pos = run(50, &[(0, 1)], start, 50, &AtomicBool::new(false), |_, _| {});
+        let pos = run(50, &[(0, 1)], start, &[false; 50], 50, &AtomicBool::new(false), |_, _| {});
         assert!(pos.iter().all(|p| p[0].is_finite() && p[1].is_finite()));
+    }
+
+    #[test]
+    fn fixed_nodes_stay_put_and_still_pull_their_links() {
+        let links = [(0, 1), (1, 2), (2, 0), (2, 3)];
+        let start: Vec<[f32; 2]> = (0..4).map(|i| seed(&format!("n{i}"), 4)).collect();
+        let pinned = [50.0, -40.0];
+        let mut start = start;
+        start[3] = pinned;
+        let pos = run(4, &links, start, &[false, false, false, true], 600, &AtomicBool::new(false), |_, _| {});
+        assert_eq!(pos[3], pinned, "the pinned node didn't move");
+        let d = |a: usize, b: usize| len(pos[a][0] - pos[b][0], pos[a][1] - pos[b][1]);
+        assert!(d(2, 3) < d(0, 3), "its neighbour came towards it: {} vs {}", d(2, 3), d(0, 3));
+    }
+
+    #[test]
+    fn a_transform_maps_world_points_back_to_layout_positions() {
+        let raw = [[-5.0, 2.0], [5.0, 2.0], [0.0, 12.0]];
+        let t = Transform::fit(&raw, &[(0, 1)]);
+        for p in raw {
+            let back = t.raw(t.world(p));
+            assert!((back[0] - p[0]).abs() < 1e-4 && (back[1] - p[1]).abs() < 1e-4, "{p:?} came back as {back:?}");
+        }
     }
 
     #[test]
     fn world_positions_fit_inside_the_drawing() {
         let raw = [[-5.0, 2.0], [5.0, 2.0], [0.0, 12.0]];
-        let (world, size) = to_world(&raw, &[(0, 1)]);
+        let t = Transform::fit(&raw, &[(0, 1)]);
+        let (world, size): (Vec<[f32; 2]>, [f32; 2]) = (raw.iter().map(|&p| t.world(p)).collect(), t.size);
         assert!((world[1][0] - world[0][0] - LINK_LENGTH).abs() < 1e-3, "the median link is LINK_LENGTH long");
         for p in &world {
             assert!(p[0] >= MARGIN - 1e-3 && p[0] <= size[0] - MARGIN + 1e-3);

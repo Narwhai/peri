@@ -746,6 +746,22 @@ impl App {
         self.save_graph();
     }
 
+    /// The graph's Reset layout: unpins every artist and arranges the graph from scratch.
+    pub fn reset_graph_layout(&mut self) {
+        let waker = if matches!(self.output, Output::Silent) { None } else { self.waker.clone() };
+        if let Err(e) = self.graph.reset_layout(self.store.graph_cache(), waker) {
+            self.error = Some(e);
+        }
+        self.save_graph();
+    }
+
+    /// Unpins one artist on the graph.
+    pub fn unpin_graph_artist(&mut self, i: usize) {
+        if let Err(e) = self.graph.unpin(i) {
+            self.error = Some(e);
+        }
+    }
+
     /// The graph's find field changed: centre on the best match.
     pub fn graph_found(&mut self) {
         let found = self.graph.model.search(&self.graph.find.text);
@@ -1431,6 +1447,16 @@ pub fn poll(s: &mut App, now: f64, tx: &mut Tx) -> bool {
         }
     }
     changed |= s.poll_plays(now);
+    match s.graph.tick(now) {
+        Ok(moved) => changed |= moved,
+        Err(e) => {
+            s.error = Some(e);
+            changed = true;
+        }
+    }
+    if s.graph.animating() {
+        tx.wake_after(crate::graph::state::SIM_FRAME);
+    }
     let (graph_changed, graph_error) = s.graph.drain();
     changed |= graph_changed;
     if let Some(e) = graph_error {
