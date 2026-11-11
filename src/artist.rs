@@ -3,6 +3,8 @@
 //! Names match ignoring case, and an artist merged with other names (see
 //! [`crate::relations`]) gathers what each of them is credited with.
 
+use std::collections::HashSet;
+
 use crate::album::Album;
 use crate::credits::Role;
 use crate::library::Track;
@@ -57,6 +59,11 @@ impl ArtistPage {
         self.credited()
     }
 
+    /// Every song in their play list or crediting them, each once.
+    pub fn all_songs(&self, albums: &[Album]) -> Vec<usize> {
+        distinct(self.play_list(albums).into_iter().chain(self.credited()))
+    }
+
     /// The songs crediting them, in library order.
     pub fn credited(&self) -> Vec<usize> {
         self.credits.iter().map(|&(i, _)| i).collect()
@@ -103,6 +110,31 @@ pub fn page(name: &str, tracks: &[Track], albums: &[Album], relations: &Relation
     // The page's own names as it spells them, then their aliases'.
     let matched = names.iter().cloned().chain(all.iter().filter(|n| !has(&names, std::slice::from_ref(n))).cloned()).collect();
     ArtistPage { name: names[0].clone(), names, related, with_aliases, matched, albums: own, appears_on, songs, featured_on, credits, album_credits }
+}
+
+/// The artists involved with `name` (see [`Relations::involved`]), each with their page; those
+/// with nothing in the library left out.
+pub fn involved(name: &str, tracks: &[Track], albums: &[Album], relations: &Relations, with_aliases: bool) -> Vec<(Relation, ArtistPage)> {
+    relations
+        .involved(name, with_aliases)
+        .into_iter()
+        .map(|(relation, other)| (relation, page(&other, tracks, albums, relations, with_aliases)))
+        .filter(|(_, other)| !other.is_empty())
+        .collect()
+}
+
+/// What Play Everything plays: `name`'s play list, then each involved artist's, each song once
+/// where it first comes.
+pub fn everything(name: &str, tracks: &[Track], albums: &[Album], relations: &Relations, with_aliases: bool) -> Vec<usize> {
+    let own = page(name, tracks, albums, relations, with_aliases);
+    let others = involved(name, tracks, albums, relations, with_aliases);
+    distinct(own.play_list(albums).into_iter().chain(others.iter().flat_map(|(_, other)| other.play_list(albums))))
+}
+
+/// `songs` without repeats, each kept where it first comes.
+fn distinct(songs: impl IntoIterator<Item = usize>) -> Vec<usize> {
+    let mut seen = HashSet::new();
+    songs.into_iter().filter(|&i| seen.insert(i)).collect()
 }
 
 /// Whether any song names `name` as an artist, album artist or credit, ignoring case.
@@ -351,5 +383,19 @@ mod tests {
         assert_eq!(suggest("cleo", &tracks, &strings(&["CLEO REED"]), 5), Vec::<String>::new());
         assert_eq!(suggest("somebody", &tracks, &[], 5), ["Somebody"]);
         assert!(suggest("  ", &tracks, &[], 5).is_empty());
+    }
+
+    #[test]
+    fn play_everything_is_their_list_then_each_involved_artists_once_each_song() {
+        use crate::relations::{Link, LinkKind};
+        let (tracks, albums) = library();
+        let link = |from: &str, to: &str| Link { from: from.into(), kind: LinkKind::MemberOf, to: to.into() };
+        let relations = Relations { merges: Vec::new(), links: vec![link("Cleo Reed", "Armand Hammer"), link("Somebody", "Armand Hammer")] };
+        let members = involved("Armand Hammer", &tracks, &albums, &relations, false);
+        assert_eq!(members.iter().map(|(r, p)| (*r, p.name.as_str())).collect::<Vec<_>>(), [(Relation::Member, "Cleo Reed"), (Relation::Member, "Somebody")], "link order");
+        let names = |list: Vec<usize>| list.into_iter().map(|i| tracks[i].title.clone()).collect::<Vec<String>>();
+        assert_eq!(names(everything("Armand Hammer", &tracks, &albums, &relations, false)), ["Calypso Gene", "Laraaji", "Solo", "Wrote It"], "their own first, Calypso Gene once");
+        assert!(involved("Cleo Reed", &tracks, &albums, &relations, false).iter().all(|(r, _)| *r == Relation::MemberOf), "Cleo Reed's band is Armand Hammer");
+        assert!(involved("Somebody", &tracks, &albums, &Relations::default(), false).is_empty());
     }
 }

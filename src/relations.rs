@@ -201,6 +201,27 @@ impl Relations {
 }
 
 impl Relations {
+    /// The artists in a band with `name` (any of their merged names) or members of one: one
+    /// membership step out, each once, in link order. With `with_aliases`, starts from every
+    /// name they release as. Never their own names, nor artists merged with them, and never
+    /// the bands or members of those artists.
+    pub fn involved(&self, name: &str, with_aliases: bool) -> Vec<(Relation, String)> {
+        let starts = if with_aliases { self.with_aliases(name) } else { self.merged(name) };
+        let mut out: Vec<(Relation, String)> = Vec::new();
+        for (relation, other) in self.related(&starts) {
+            if relation == Relation::Alias {
+                continue;
+            }
+            let group = self.merged(&other);
+            let is_ours = group.iter().any(|n| among(&starts, n));
+            let seen = out.iter().any(|(_, n)| among(&group, n));
+            if !is_ours && !seen {
+                out.push((relation, other));
+            }
+        }
+        out
+    }
+
     /// Records `choice` between the artist `name` (any of their merged names) and `other`.
     /// Errs when `other` is blank, already one of their names, or already related that way.
     pub fn add(&mut self, name: &str, choice: LinkChoice, other: &str) -> Result<(), String> {
@@ -352,5 +373,40 @@ mod tests {
         assert_eq!(r.links, [link("A", LinkKind::MemberOf, "Band")]);
         assert!(serde_json::from_str::<Relations>(r#"{ "links": [{ "from": "A", "kind": "member", "to": "B" }] }"#).is_err());
         assert!(serde_json::from_str::<Relations>(r#"{ "merge": [] }"#).is_err());
+    }
+
+    #[test]
+    fn involved_is_one_membership_step_out_each_way() {
+        let r = Relations {
+            merges: vec![strings(&["Radiohead", "RH"])],
+            links: vec![
+                link("Thom Yorke", LinkKind::MemberOf, "Radiohead"),
+                link("Thom Yorke", LinkKind::MemberOf, "rh"),
+                link("Jonny Greenwood", LinkKind::MemberOf, "Radiohead"),
+                link("Jonny Greenwood", LinkKind::MemberOf, "Other Band"),
+            ],
+        };
+        assert_eq!(r.involved("Thom Yorke", false), [(Relation::MemberOf, "Radiohead".to_string())], "a band once, though linked under both merged names");
+        assert_eq!(
+            r.involved("Radiohead", false),
+            [(Relation::Member, "Thom Yorke".to_string()), (Relation::Member, "Jonny Greenwood".to_string())],
+            "members, not the other bands of their members"
+        );
+        assert!(r.involved("Other Band", false).iter().all(|(_, n)| n == "Jonny Greenwood"));
+        assert!(r.involved("Nobody", false).is_empty());
+    }
+
+    #[test]
+    fn involved_follows_aliases_only_when_asked_and_skips_their_own_names() {
+        let r = Relations {
+            merges: Vec::new(),
+            links: vec![
+                link("MF DOOM", LinkKind::Alias, "Viktor Vaughn"),
+                link("Viktor Vaughn", LinkKind::MemberOf, "X"),
+                link("Viktor Vaughn", LinkKind::MemberOf, "MF DOOM"),
+            ],
+        };
+        assert_eq!(r.involved("MF DOOM", false), [(Relation::Member, "Viktor Vaughn".to_string())], "Viktor is a member of MF DOOM; X is only Viktor's band");
+        assert_eq!(r.involved("MF DOOM", true), [(Relation::MemberOf, "X".to_string())], "with aliases, Viktor is one of their names, so their band is in and Viktor isn't");
     }
 }

@@ -127,6 +127,7 @@ They're saved under `artists` in `prefs.json`, which can also be edited by hand 
 - **Merges:** names of one artist. Any of them opens one page gathering everything each is credited with. It's named after the most prominent name (album artist outweighs artist, then featured, then other credits), with "Also credited as" listing the rest. Merges only affect artist pages, not views, filters or grouping.
 - **Links:** artists that keep their own pages. Each page lists the other under **Related**: `alias` shows as "Also releases as" on both, and `member_of` as "Member of" on the person's page and "Members" on the band's. Names the library doesn't have show but don't open a page.
 - **Include aliases:** a page with aliases has an **Include aliases** checkbox next to Play. It adds everything released or credited under their aliases (and aliases of those) to the page, with album cards naming each album's artist, and Play and Play Discography follow it. It stays on from page to page until unticked or the app restarts.
+- **Bands and members:** a `member_of` link also gets a collapsed section per band ("With …") or member ("… (solo)") on the page, with their releases, appearances and credits. **Play Everything** plays the page's music, then each of those sections' music once. Both follow **Include aliases**.
 - Names match ignoring case. If the `artists` entry can't be read (a typo in a key or kind), the app says so and ignores it.
 
 ## Graph

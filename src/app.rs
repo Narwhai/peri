@@ -102,6 +102,9 @@ pub struct App {
     pub artist_songs_open: Option<bool>,
     /// Whether the artist page's Credits section is folded. Reset on every page change.
     pub artist_credits_closed: bool,
+    /// The artist page's bands and members sections that are open, by the other artist's name.
+    /// Reset on every page change.
+    pub artist_related_open: Vec<String>,
     /// Whether artist pages take in what the artist released under their aliases. Kept from
     /// page to page for this run.
     pub artist_with_aliases: bool,
@@ -225,6 +228,7 @@ impl App {
             forward: Vec::new(),
             artist_songs_open: None,
             artist_credits_closed: false,
+            artist_related_open: Vec::new(),
             artist_with_aliases: false,
             library_scroll: Live::new([0.0, 0.0]),
             library_scroll_saved: [0.0, 0.0],
@@ -667,6 +671,7 @@ impl App {
     fn leave_for(&mut self, page: Page) {
         self.artist_songs_open = None;
         self.artist_credits_closed = false;
+        self.artist_related_open.clear();
         let left = std::mem::replace(&mut self.page, page);
         if left == Page::Library {
             self.library_scroll_saved = self.library_scroll.get();
@@ -688,6 +693,7 @@ impl App {
         self.forward.push(left);
         self.artist_songs_open = None;
         self.artist_credits_closed = false;
+        self.artist_related_open.clear();
         if self.page == Page::Library {
             let [x, y] = self.library_scroll_saved;
             tx.scroll_to_instant("tracks", x, y);
@@ -704,6 +710,7 @@ impl App {
         self.details = None;
         self.artist_songs_open = None;
         self.artist_credits_closed = false;
+        self.artist_related_open.clear();
         if self.page == Page::Library {
             self.library_scroll_saved = self.library_scroll.get();
         }
@@ -793,6 +800,7 @@ impl App {
         self.search.clear();
         self.artist_songs_open = None;
         self.artist_credits_closed = false;
+        self.artist_related_open.clear();
         self.show_library();
     }
 
@@ -813,7 +821,8 @@ impl App {
                     self.forward.clear();
                     self.page = Page::Search;
                     self.artist_songs_open = None;
-        self.artist_credits_closed = false;
+                    self.artist_credits_closed = false;
+                    self.artist_related_open.clear();
                 }
                 None => self.go_to(Page::Search),
             }

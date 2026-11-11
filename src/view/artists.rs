@@ -10,7 +10,7 @@ use super::toolbar::{hint, segmented};
 use super::*;
 use crate::album::ReleaseType;
 use crate::app::Panel;
-use crate::artist::{ArtistPage, known, page, suggest};
+use crate::artist::{ArtistPage, everything, involved, known, page, suggest};
 use crate::credits::Role;
 use crate::library::Track;
 use crate::palette::Palette;
@@ -38,17 +38,18 @@ pub(super) fn artist_page(s: &App, name: &str, p: &Palette, kit: &Kit, layer: &m
         .on_press_tx(|s: &mut App, tx| s.go_back(tx))
         .child(icon(&icons::BACK, 16.0).color(p.tx2))
         .child(text(back_label(s)).font(TITLE).color(p.tx2));
-    let mut body = col().key("artist-page-body").w_full().px(28.0).py(16.0).gap(22.0).child(back).child(head(s, &info, Some(link_artist(s, &info, p, kit, layer)), p));
+    let others = involved(name, &s.tracks, &s.albums, &s.relations, s.artist_with_aliases);
+    let mut body = col().key("artist-page-body").w_full().px(28.0).py(16.0).gap(22.0).child(back).child(head(s, &info, &others, Some(link_artist(s, &info, p, kit, layer)), p));
     if info.is_empty() {
         body = body.child(text(format!("Nothing in the library is by or credits {}.", info.name)).key("artist-empty").font(BODY).color(p.tx3));
     }
-    col().key("artist-page").w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: false }).child(body.children(sections(s, &info, p)))
+    col().key("artist-page").w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: false }).child(body.children(sections(s, &info, &others, p)))
 }
 
 /// Their albums, the songs they appear on, their credits, their songs, then related artists.
-pub(super) fn sections(s: &App, info: &ArtistPage, p: &Palette) -> Vec<El> {
+pub(super) fn sections(s: &App, info: &ArtistPage, others: &[(Relation, ArtistPage)], p: &Palette) -> Vec<El> {
     let mut out = Vec::new();
-    let pills: Vec<(usize, Vec<table::Pill>)> = info.album_credits.iter().map(|(a, roles)| (*a, album_pills(s.albums[*a].tracks.len(), roles, p))).collect();
+    let pills = album_pill_rows(s, info, p);
     // Mixed with their aliases' releases, cards say which name each is under.
     out.extend(release_strips(s, "artist", &info.albums, info.with_aliases, &pills, p));
     if !info.appears_on.is_empty() {
@@ -61,7 +62,7 @@ pub(super) fn sections(s: &App, info: &ArtistPage, p: &Palette) -> Vec<El> {
         let toggle = section_toggle("artist-credits-toggle", "Credits", info.credits.len(), open, p).on_press(move |s: &mut App| s.artist_credits_closed = open);
         let mut section = col().key("credits").w_full().gap(8.0).child(toggle);
         if open {
-            section = section.child(credits(s, info, p));
+            section = section.child(credits(s, "credits", info, p));
         }
         out.push(section);
     }
@@ -74,6 +75,7 @@ pub(super) fn sections(s: &App, info: &ArtistPage, p: &Palette) -> Vec<El> {
         }
         out.push(section);
     }
+    out.extend(others.iter().filter_map(|(relation, other)| involved_section(s, *relation, other, p)));
     if !info.related.is_empty() {
         out.push(related(s, info, p));
     }
@@ -95,7 +97,7 @@ pub(super) fn release_strips(s: &App, key: &str, albums: &[usize], artists: bool
 
 /// Picture (the first album's cover), name, counts, Play. On their page `link` is the Link
 /// artist button; in search results (`None`) the name and picture open the artist's page.
-pub(super) fn head(s: &App, info: &ArtistPage, link: Option<El>, p: &Palette) -> El {
+pub(super) fn head(s: &App, info: &ArtistPage, others: &[(Relation, ArtistPage)], link: Option<El>, p: &Palette) -> El {
     let linked = link.is_none();
     let first = info.albums.first().copied().or_else(|| info.appears_on.first().and_then(|&i| s.album_of(i)));
     let mut art = cover("artist-cover".into(), first.and_then(|a| cover_image(s, &s.albums[a])), Some(160.0), 80.0, p);
@@ -153,6 +155,16 @@ pub(super) fn head(s: &App, info: &ArtistPage, link: Option<El>, p: &Palette) ->
             }
         }));
     }
+    // Play Everything also plays the bands and members, when they have music.
+    if !linked && others.iter().any(|(_, o)| !o.all_songs(&s.albums).is_empty()) {
+        let (who, with_aliases) = (info.name.clone(), info.with_aliases);
+        buttons = buttons.child(secondary_button("artist-play-everything", &icons::PLAY, "Play Everything", p).on_press_tx(move |s: &mut App, tx| {
+            let list = everything(&who, &s.tracks, &s.albums, &s.relations, with_aliases);
+            if let Some(&first) = list.first() {
+                s.play_list(list, first, tx);
+            }
+        }));
+    }
     // Search results show the artist alone; their page can take in their aliases.
     if !linked && info.has_aliases() {
         let on = info.with_aliases;
@@ -167,6 +179,44 @@ pub(super) fn head(s: &App, info: &ArtistPage, link: Option<El>, p: &Palette) ->
     row().gap(28.0).center_y().child(art).child(details)
 }
 
+/// Their albums' pills, one row per album with credits on it.
+fn album_pill_rows(s: &App, info: &ArtistPage, p: &Palette) -> Vec<(usize, Vec<table::Pill>)> {
+    info.album_credits.iter().map(|(a, roles)| (*a, album_pills(s.albums[*a].tracks.len(), roles, p))).collect()
+}
+
+/// A collapsed section for a band the artist is in, or a member of their band: the other
+/// artist's releases, appearances and credits, shown when open. Keyed `related-{name}`; none
+/// for an alias, whose music the Include aliases toggle covers.
+fn involved_section(s: &App, relation: Relation, other: &ArtistPage, p: &Palette) -> Option<El> {
+    let key = format!("related-{}", other.name);
+    let title = match relation {
+        Relation::MemberOf => format!("With {}", other.name),
+        Relation::Member => format!("{} (solo)", other.name),
+        Relation::Alias => return None,
+    };
+    let count = other.all_songs(&s.albums).len();
+    let open = s.artist_related_open.contains(&other.name);
+    let who = other.name.clone();
+    let toggle = section_toggle(&format!("{key}-toggle"), &title, count, open, p).on_press(move |s: &mut App| {
+        if open {
+            s.artist_related_open.retain(|n| *n != who);
+        } else {
+            s.artist_related_open.push(who.clone());
+        }
+    });
+    let mut section = col().key(key.clone()).w_full().gap(8.0).child(toggle);
+    if open {
+        let pills = album_pill_rows(s, other, p);
+        section = section.children(release_strips(s, &key, &other.albums, other.with_aliases, &pills, p));
+        if !other.appears_on.is_empty() {
+            section = section.child(songs(s, &format!("{key}-appears-on"), "Appears on", &other.appears_on, p));
+        }
+        if !other.credits.is_empty() {
+            section = section.child(credits(s, &format!("{key}-credits"), other, p));
+        }
+    }
+    Some(section)
+}
 
 /// The artists linked to this one, a row of names per relation; names in the library open
 /// their pages.
@@ -381,7 +431,7 @@ fn untagged(list: &[usize]) -> Vec<(usize, Vec<Option<table::Pill>>)> {
 
 /// The Credits table: each song crediting the artist once, with a Roles column: one slot per
 /// role any of the songs credits them with, so a role's pills line up down the table.
-fn credits(s: &App, info: &ArtistPage, p: &Palette) -> El {
+fn credits(s: &App, key: &str, info: &ArtistPage, p: &Palette) -> El {
     let used: Vec<Role> = Role::ALL.into_iter().filter(|r| info.credits.iter().any(|(_, roles)| roles.contains(r))).collect();
     let rows: Vec<(usize, Vec<Option<table::Pill>>)> = info
         .credits
@@ -395,7 +445,7 @@ fn credits(s: &App, info: &ArtistPage, p: &Palette) -> El {
     let slots: Vec<f32> = (0..used.len())
         .map(|k| rows.iter().filter_map(|(_, pills)| pills[k].as_ref()).map(|pill| table::pill_width(&pill.label)).fold(0.0, f32::max))
         .collect();
-    song_table(s, "credits", rows, &slots, &info.credited(), p)
+    song_table(s, key, rows, &slots, &info.credited(), p)
 }
 
 /// The artist's roles on one of their albums of `songs` songs: "Producer" when they hold it
@@ -432,10 +482,10 @@ fn song_table(s: &App, key: &str, rows: Vec<(usize, Vec<Option<table::Pill>>)>, 
 
 /// A section heading with its count, which opens and closes the section; the caller adds
 /// the press.
-fn section_toggle(key: &'static str, title: &'static str, count: usize, open: bool, p: &Palette) -> El {
+fn section_toggle(key: &str, title: &str, count: usize, open: bool, p: &Palette) -> El {
     let chevron = icon(&rune_kit::glyphs::TRIANGLE_RIGHT, 12.0).color(p.tx3).icon_rotation(if open { std::f32::consts::FRAC_PI_2 } else { 0.0 }).motion(SNAPPY);
     row()
-        .key(key)
+        .key(key.to_string())
         .h(32.0)
         .pr(10.0)
         .gap(8.0)

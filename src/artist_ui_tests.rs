@@ -349,6 +349,8 @@ fn merged_names_open_one_page_and_links_lead_to_related_artists() {
     assert!(rt.find("artist-related").is_some());
     click(&mut rt, "artist-pill-Nobody Known");
     assert_eq!(text_of(&rt, "artist-name"), "The Alchemist", "a name the library lacks doesn't open a page");
+    rt.update(|_, tx| tx.scroll_into_view_in("artist-page", "artist-pill-Cleo Reed"));
+    settle(&mut rt);
     click(&mut rt, "artist-pill-Cleo Reed");
     assert_eq!(rt.state.page, Page::Artist("Cleo Reed".into()));
     assert!(rt.find("artist-pill-the alchemist").is_some(), "Cleo Reed's page lists the band she's a member of");
@@ -454,3 +456,37 @@ fn link_artist_refuses_while_the_saved_links_are_unreadable() {
     let file = std::fs::read_to_string(prefs.0.join("prefs.json")).unwrap();
     assert!(file.contains("linkz"), "the hand-edited entry is left alone");
 }
+
+#[test]
+fn a_band_section_is_collapsed_until_opened_and_play_everything_plays_it() {
+    // Somebody (on Elsewhere) is a member of The Alchemist's band, Armand Hammer's Mercy included.
+    let prefs = Prefs::new("bands", r#"{ "links": [{ "from": "Somebody", "kind": "member_of", "to": "Armand Hammer" }] }"#);
+    let mut rt = prefs.runtime();
+    rt.update(|s, tx| s.show_artist("Somebody", tx));
+    settle(&mut rt);
+    assert!(rt.find("related-Armand Hammer-toggle").is_some(), "the band is listed");
+    assert!(rt.find("related-Armand Hammer-albums").is_none(), "collapsed by default");
+    click(&mut rt, "related-Armand Hammer-toggle");
+    assert_eq!(rt.state.artist_related_open, ["Armand Hammer"]);
+    assert!(rt.find("related-Armand Hammer-albums").is_some(), "the band's album strip");
+    click(&mut rt, "related-Armand Hammer-toggle");
+    assert!(rt.find("related-Armand Hammer-albums").is_none(), "closed again");
+    click(&mut rt, "artist-play-everything");
+    let mut queue = rt.state.queue.clone().expect("a queue");
+    let mut order = vec![queue.current()];
+    while let Some(i) = queue.next(crate::queue::Repeat::Off) {
+        order.push(i);
+    }
+    let played: Vec<String> = order.into_iter().map(|i| rt.state.tracks[i].title.clone()).collect();
+    assert_eq!(played, ["Over There", "Far Off", "Laraaji", "Calypso Gene"], "Somebody's own, then the band's, each once");
+}
+
+#[test]
+fn play_everything_is_absent_without_membership_links() {
+    let mut rt = runtime();
+    rt.update(|s, tx| s.show_artist("The Alchemist", tx));
+    settle(&mut rt);
+    assert!(rt.find("artist-play-everything").is_none());
+    assert!(rt.find("related-Armand Hammer-toggle").is_none(), "no bands or members, no sections");
+}
+
