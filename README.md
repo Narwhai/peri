@@ -129,6 +129,20 @@ They're saved under `artists` in `prefs.json`, which can also be edited by hand 
 - **Include aliases:** a page with aliases has an **Include aliases** checkbox next to Play. It adds everything released or credited under their aliases (and aliases of those) to the page, with album cards naming each album's artist, and Play and Play Discography follow it. It stays on from page to page until unticked or the app restarts.
 - Names match ignoring case. If the `artists` entry can't be read (a typo in a key or kind), the app says so and ignores it.
 
+## Graph
+
+The **Graph** tab (next to **Library** at the top left) shows every artist in the library as a dot, joined by a line to each artist they've worked with. Dots grow with how many artists they're linked to.
+
+- **Links, colour-coded:**
+  - your artist relations: **Same artist** (merged names, each still its own dot), **Alias** and **Member of**;
+  - from the tags: **Featured** (a guest on another artist's song), **Together** (main artists of the same song) and one per credit role (**Producer**, **Composer**, **Performer**…: someone credited on another artist's song).
+- **Legend:** each kind in the graph has a chip; click it to hide or show those links.
+- **Moving around:** drag (or middle-drag) or scroll with a trackpad to pan; pinch, Ctrl + scroll or a mouse wheel to zoom about the pointer. **Fit** shows everything again.
+- **Artists:** hover a dot for its name; click it to open the artist's page (Back or Esc returns to the graph). Names show for the most linked artists, and for more as you zoom in.
+- **Links:** hover a line to light it and the two artists it joins, with what it says: "Kenny Segal produced 2 songs by billy woods", one line per kind when they're linked several ways.
+- **Find an artist:** type to centre the best match and highlight who they're linked to; Enter opens their page, Esc clears it.
+- **Saved:** the camera and hidden link kinds save under `graph` in `prefs.json`. The layout is cached in `graph-layout.json` next to it and reused while the artists and who's linked to whom stay the same; when music or links are added, the artists already placed keep their places and the new ones settle in around them on a background thread.
+
 ## Keys
 
 | Key | Action |
@@ -155,7 +169,7 @@ cargo test                                                   # unit + headless U
 RUNE_MUSIC_DIR=~/Music cargo test --release real_library -- --ignored --nocapture
 RUNE_MUSIC_FILE=song.flac cargo test --release real_output -- --ignored   # plays muted
 RUNE_MUSIC_DIR=~/Music cargo test --release real_library_groups -- --ignored --nocapture
-cargo run -- --snap out.png --scene playing --theme light    # scenes: library playing search error grouped filter views sort albums album-list album artist related link
+cargo run -- --snap out.png --scene playing --theme light    # scenes: library playing search error grouped filter views sort albums album-list album artist related link graph
 ```
 
 Headless runs (`--snap`, `--script`, `--tree`) never open the audio device and keep views in memory.

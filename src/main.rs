@@ -11,6 +11,7 @@ mod base;
 mod covers;
 mod credits;
 mod details;
+mod graph;
 mod icons;
 mod label;
 mod lastfm;
@@ -31,6 +32,8 @@ mod artist_ui_tests;
 mod table_ui_tests;
 #[cfg(test)]
 mod base_ui_tests;
+#[cfg(test)]
+mod graph_ui_tests;
 #[cfg(test)]
 mod label_ui_tests;
 #[cfg(test)]
@@ -305,6 +308,14 @@ fn scene_settings(s: &mut App) {
     s.show_settings();
 }
 
+/// The artist and related scenes' library on the Graph tab, The Alchemist picked.
+fn scene_graph(s: &mut App) {
+    scene_related(s);
+    s.show_graph();
+    s.graph.find = rune::TextEdit::new("alchemist");
+    s.graph_found();
+}
+
 fn main() {
     rune::run(AppSpec {
         scenes: &[
@@ -325,6 +336,7 @@ fn main() {
             ("link", scene_link),
             ("label", scene_label),
             ("settings", scene_settings),
+            ("graph", scene_graph),
         ],
         min_size: Some(view::MIN_SIZE),
         setup: Some(setup),

@@ -75,6 +75,8 @@ pub enum Page {
     Search,
     /// The app's settings: the library's folders.
     Settings,
+    /// Every artist, linked to those they've worked with.
+    Graph,
 }
 
 /// The song details dialog: which song, and what was read from its file when it opened.
@@ -188,6 +190,8 @@ pub struct App {
     plays: Plays,
     /// How long the loaded song has really played, until its play counts.
     listen: Option<Listen>,
+    /// The artist graph, built when its tab first shows.
+    pub graph: crate::graph::state::Graph,
 }
 
 impl App {
@@ -208,6 +212,10 @@ impl App {
         };
         let stale_session = lastfm.as_ref().is_some_and(|s| s.session.is_some());
         let (plays, plays_error) = store.plays();
+        let (graph, graph_error) = match store.load_graph().and_then(crate::graph::state::Graph::new) {
+            Ok(g) => (g, None),
+            Err(e) => (crate::graph::state::Graph::with(None, 0), Some(e)),
+        };
         let lastfm = Scrobbling::new(lastfm, built_in);
         let mut app = App {
             tracks: Vec::new(),
@@ -257,7 +265,7 @@ impl App {
             shuffle: false,
             repeat: Repeat::Off,
             cover: None,
-            error: relations_error.clone().or(lastfm_error).or(plays_error),
+            error: relations_error.clone().or(lastfm_error).or(plays_error).or(graph_error),
             scan: None,
             drop_hover: false,
             details: None,
@@ -268,6 +276,7 @@ impl App {
             lastfm,
             plays,
             listen: None,
+            graph,
         };
         // A session granted to another API key was dropped: forget it on disk too.
         if stale_session && app.lastfm.session().is_none() {
@@ -453,6 +462,10 @@ impl App {
         library::sort(&mut tracks);
         self.plays.apply(&mut tracks);
         self.tracks = tracks;
+        self.graph.invalidate();
+        if self.page == Page::Graph {
+            self.refresh_graph();
+        }
         self.albums = album::build(&self.tracks);
         let find = |path: &Option<PathBuf>, tracks: &[Track]| path.as_ref().and_then(|p| tracks.iter().position(|t| &t.path == p));
         self.selected = find(&selected_path, &self.tracks);
@@ -503,7 +516,7 @@ impl App {
     pub fn open_album(&self) -> Option<usize> {
         match &self.page {
             Page::Album(id) => self.albums.iter().position(|a| &a.id() == id),
-            Page::Library | Page::Artist(_) | Page::Label(_) | Page::Search | Page::Settings => None,
+            Page::Library | Page::Artist(_) | Page::Label(_) | Page::Search | Page::Settings | Page::Graph => None,
         }
     }
 
@@ -518,7 +531,7 @@ impl App {
     pub fn shown_columns(&self) -> &[Property] {
         match self.page {
             Page::Library => &self.base.active().columns,
-            Page::Album(_) | Page::Artist(_) | Page::Label(_) | Page::Search | Page::Settings => &self.base.page_columns,
+            Page::Album(_) | Page::Artist(_) | Page::Label(_) | Page::Search | Page::Settings | Page::Graph => &self.base.page_columns,
         }
     }
 
@@ -526,7 +539,7 @@ impl App {
     pub fn shown_columns_mut(&mut self) -> &mut Vec<Property> {
         match self.page {
             Page::Library => &mut self.base.active_mut().columns,
-            Page::Album(_) | Page::Artist(_) | Page::Label(_) | Page::Search | Page::Settings => &mut self.base.page_columns,
+            Page::Album(_) | Page::Artist(_) | Page::Label(_) | Page::Search | Page::Settings | Page::Graph => &mut self.base.page_columns,
         }
     }
 
@@ -534,14 +547,14 @@ impl App {
     pub fn shown_widths(&self) -> &Widths {
         match self.page {
             Page::Library => &self.base.active().widths,
-            Page::Album(_) | Page::Artist(_) | Page::Label(_) | Page::Search | Page::Settings => &self.base.page_widths,
+            Page::Album(_) | Page::Artist(_) | Page::Label(_) | Page::Search | Page::Settings | Page::Graph => &self.base.page_widths,
         }
     }
 
     pub fn shown_widths_mut(&mut self) -> &mut Widths {
         match self.page {
             Page::Library => &mut self.base.active_mut().widths,
-            Page::Album(_) | Page::Artist(_) | Page::Label(_) | Page::Search | Page::Settings => &mut self.base.page_widths,
+            Page::Album(_) | Page::Artist(_) | Page::Label(_) | Page::Search | Page::Settings | Page::Graph => &mut self.base.page_widths,
         }
     }
 
@@ -549,7 +562,7 @@ impl App {
     pub fn open_artist(&self) -> Option<&str> {
         match &self.page {
             Page::Artist(name) => Some(name),
-            Page::Library | Page::Album(_) | Page::Label(_) | Page::Search | Page::Settings => None,
+            Page::Library | Page::Album(_) | Page::Label(_) | Page::Search | Page::Settings | Page::Graph => None,
         }
     }
 
@@ -565,6 +578,7 @@ impl App {
             return Err("The artist links in the preferences file couldn't be read: fix or remove its \"artists\" entry first".into());
         }
         edit(&mut self.relations)?;
+        self.graph.invalidate();
         self.store.save_relations(&self.relations)
     }
 
@@ -629,7 +643,7 @@ impl App {
     pub fn open_label(&self) -> Option<&str> {
         match &self.page {
             Page::Label(name) => Some(name),
-            Page::Library | Page::Album(_) | Page::Artist(_) | Page::Search | Page::Settings => None,
+            Page::Library | Page::Album(_) | Page::Artist(_) | Page::Search | Page::Settings | Page::Graph => None,
         }
     }
 
@@ -665,8 +679,8 @@ impl App {
     pub fn go_back(&mut self, tx: &mut Tx) {
         self.close_panel();
         self.details = None;
-        // The library is where Back ends.
-        if self.page == Page::Library {
+        // The library and the graph are where Back ends.
+        if self.page == Page::Library || self.page == Page::Graph {
             return;
         }
         let back = self.history.pop().unwrap_or(Page::Library);
@@ -677,6 +691,67 @@ impl App {
         if self.page == Page::Library {
             let [x, y] = self.library_scroll_saved;
             tx.scroll_to_instant("tracks", x, y);
+        }
+        if self.page == Page::Graph {
+            // An artist linked on the page just left changes the graph.
+            self.refresh_graph();
+        }
+    }
+
+    /// The Graph tab: every artist and their links, building the graph if the library changed.
+    pub fn show_graph(&mut self) {
+        self.close_panel();
+        self.details = None;
+        self.artist_songs_open = None;
+        self.artist_credits_closed = false;
+        if self.page == Page::Library {
+            self.library_scroll_saved = self.library_scroll.get();
+        }
+        self.history.clear();
+        self.forward.clear();
+        self.page = Page::Graph;
+        self.refresh_graph();
+    }
+
+    /// Whether the Graph tab is the one open: its page, or a page opened from it.
+    pub fn in_graph(&self) -> bool {
+        self.page == Page::Graph || self.history.first() == Some(&Page::Graph)
+    }
+
+    /// Rebuilds the graph when the library or relations changed since it was built.
+    pub fn refresh_graph(&mut self) {
+        if !self.graph.is_stale() {
+            return;
+        }
+        let model = crate::graph::Model::build(&self.tracks, &self.relations);
+        // Headless runs lay out on this thread, so a snapshot shows the settled graph.
+        let waker = if matches!(self.output, Output::Silent) { None } else { self.waker.clone() };
+        if let Err(e) = self.graph.refresh(model, self.store.graph_cache(), waker) {
+            self.error = Some(e);
+        }
+    }
+
+    /// Saves the graph's camera and hidden link kinds.
+    pub fn save_graph(&mut self) {
+        self.graph.moved_at = None;
+        if let Err(e) = self.store.save_graph(&self.graph.saved()) {
+            self.error = Some(e);
+        }
+    }
+
+    /// Shows or hides one kind of link.
+    pub fn toggle_graph_kind(&mut self, kind: crate::graph::EdgeKind) {
+        self.graph.hidden ^= kind.bit();
+        self.graph.version += 1;
+        self.save_graph();
+    }
+
+    /// The graph's find field changed: centre on the best match.
+    pub fn graph_found(&mut self) {
+        let found = self.graph.model.search(&self.graph.find.text);
+        self.graph.selected = found;
+        if let Some(i) = found {
+            self.graph.centre_on(i, 0.8);
         }
     }
 
@@ -1356,6 +1431,21 @@ pub fn poll(s: &mut App, now: f64, tx: &mut Tx) -> bool {
         }
     }
     changed |= s.poll_plays(now);
+    let (graph_changed, graph_error) = s.graph.drain();
+    changed |= graph_changed;
+    if let Some(e) = graph_error {
+        s.error = Some(e);
+        changed = true;
+    }
+    if s.page == Page::Graph && s.graph.is_stale() {
+        s.refresh_graph();
+        changed = true;
+    }
+    match s.graph.moved_at {
+        Some(at) if at.elapsed() >= crate::graph::state::SAVE_AFTER => s.save_graph(),
+        Some(at) => tx.wake_after(crate::graph::state::SAVE_AFTER.saturating_sub(at.elapsed())),
+        None => {}
+    }
     changed |= s.poll_lastfm(now, tx);
     if s.zoom_toast.is_some_and(|at| at.elapsed() >= ZOOM_TOAST) {
         s.zoom_toast = None;
@@ -1382,6 +1472,14 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
     }
     if ev.key == Key::Escape && s.page == Page::Search {
         s.clear_search(tx);
+        return true;
+    }
+    if ev.key == Key::Escape && s.page == Page::Graph {
+        if s.graph.selected.is_none() && s.graph.find.text.is_empty() {
+            return false;
+        }
+        s.graph.selected = None;
+        s.graph.find.clear();
         return true;
     }
     if ev.key == Key::Escape && s.page != Page::Library {

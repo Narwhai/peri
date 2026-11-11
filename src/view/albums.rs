@@ -335,6 +335,7 @@ pub(super) fn back_label(s: &App) -> String {
         Some(crate::app::Page::Album(id)) => s.albums.iter().find(|a| &a.id() == id).map_or_else(|| "Back".to_string(), |a| a.title.clone()),
         Some(crate::app::Page::Search) => format!("Results for “{}”", s.search.text.trim()),
         Some(crate::app::Page::Settings) => "Settings".to_string(),
+        Some(crate::app::Page::Graph) => "Graph".to_string(),
         Some(crate::app::Page::Library) | None => s.base.active().name.clone(),
     }
 }

@@ -4,6 +4,7 @@ mod albums;
 mod artists;
 mod details;
 mod filters;
+mod graph;
 mod labels;
 mod list;
 mod player;
@@ -47,7 +48,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     let kit = Kit::from_palette(PaletteSeed { bg: p.bg2, fg: p.tx, accent: p.blue });
     let mut layer = Vec::new();
     // The view's toolbar does nothing to search results or settings, so they go without it.
-    let toolbar = (!matches!(s.page, crate::app::Page::Search | crate::app::Page::Settings)).then(|| toolbar::toolbar(s, &p, &kit, &mut layer));
+    let toolbar = (!matches!(s.page, crate::app::Page::Search | crate::app::Page::Settings | crate::app::Page::Graph)).then(|| toolbar::toolbar(s, &p, &kit, &mut layer));
     let body = col()
         .w_full()
         .h_full()
@@ -60,6 +61,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
             (None, None, Some(name)) => labels::label_page(s, name, &p),
             (None, None, None) if s.page == crate::app::Page::Search => search::search_page(s, &p),
             (None, None, None) if s.page == crate::app::Page::Settings => settings::settings_page(s, &p, &kit),
+            (None, None, None) if s.page == crate::app::Page::Graph => graph::graph_page(s, &p, &kit),
             (None, None, None) => list::list(s, &p, cx),
         })
         .child(player::now_playing(s, &p))
@@ -226,29 +228,44 @@ fn header(s: &App, zoom: f32, p: &Palette, kit: &Kit) -> El {
         .center_y()
         .fill(p.bg2)
         .border_bottom(p)
-        .child(
-            row()
-                .key("home")
-                .h(32.0)
-                .pl(6.0)
-                .pr(10.0)
-                .gap(8.0)
-                .radius(8.0)
-                .center_y()
-                .hover(p.ui.alpha(0.45))
-                .cursor(Cursor::Pointer)
-                .role("button")
-                .label("Library")
-                .help("Back to the library's views")
-                .on_press(|s: &mut App| s.go_home())
-                .child(icon(&icons::NOTE, 18.0).color(p.ui3))
-                .child(text("Library").font(HEADING).color(p.tx)),
-        )
+        .child(tabs(s, p))
         .child(text(count).key("count").font(SMALL).color(p.tx3).grow(1.0).shrink().truncate())
         .child(search)
         .child(zoom_control(s, zoom, p))
         .child(pill_button("open", "Open folder…", p).on_press_tx(|s: &mut App, tx| s.open_folder(tx)))
         .child(icon_button("settings", &icons::SETTINGS, "Settings", p).role("button").on_press(|s: &mut App| s.show_settings()))
+}
+
+/// The header's tabs: Library (the views, and the pages opened from them) and Graph.
+fn tabs(s: &App, p: &Palette) -> El {
+    let graph = s.in_graph();
+    let tab = |key: &'static str, glyph: &'static Icon, label: &'static str, help: &'static str, on: bool| {
+        row()
+            .key(key)
+            .h(32.0)
+            .pl(8.0)
+            .pr(12.0)
+            .gap(8.0)
+            .radius(8.0)
+            .center_y()
+            .fill(if on { p.ui.alpha(0.55) } else { p.bg2.alpha(0.0) })
+            .hover(p.ui.alpha(if on { 0.65 } else { 0.4 }))
+            .cursor(Cursor::Pointer)
+            .role("tab")
+            .checked(on)
+            .label(label)
+            .help(help)
+            .child(icon(glyph, 18.0).color(if on { p.ui3 } else { p.tx3 }))
+            .child(text(label).font(HEADING).color(if on { p.tx } else { p.tx2 }))
+    };
+    row()
+        .key("tabs")
+        .gap(4.0)
+        .center_y()
+        .role("tablist")
+        .label("Sections")
+        .child(tab("home", &icons::NOTE, "Library", "Back to the library's views", !graph).on_press(|s: &mut App| s.go_home()))
+        .child(tab("graph-tab", &icons::GRAPH, "Graph", "Artists and who they've worked with", graph).on_press(|s: &mut App| s.show_graph()))
 }
 
 fn icon_button(key: &'static str, glyph: &'static Icon, help: &str, p: &Palette) -> El {

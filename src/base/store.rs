@@ -14,6 +14,7 @@ const LIBRARY_KEY: &str = "library";
 const ARTISTS_KEY: &str = "artists";
 const LASTFM_KEY: &str = "lastfm";
 const ZOOM_KEY: &str = "zoom";
+const GRAPH_KEY: &str = "graph";
 /// Bumped when the saved shape changes incompatibly.
 const VERSION: u32 = 1;
 
@@ -131,6 +132,23 @@ impl Store {
 
     pub fn save_relations(&mut self, relations: &crate::relations::Relations) -> Result<(), String> {
         self.prefs.set(ARTISTS_KEY, relations).map_err(|e| format!("Couldn't save the artist links: {e}"))
+    }
+
+    /// The graph's camera and hidden link kinds; the default when unset, an error when unreadable.
+    pub fn load_graph(&self) -> Result<crate::graph::state::Saved, String> {
+        if !self.prefs.contains(GRAPH_KEY) {
+            return Ok(Default::default());
+        }
+        self.prefs.get(GRAPH_KEY).ok_or_else(|| format!("Couldn't read \"{GRAPH_KEY}\" in the preferences"))
+    }
+
+    pub fn save_graph(&mut self, saved: &crate::graph::state::Saved) -> Result<(), String> {
+        self.prefs.set(GRAPH_KEY, saved).map_err(|e| format!("Couldn't save the graph view: {e}"))
+    }
+
+    /// Where the graph's layout is cached, beside the preferences; none when they're in memory.
+    pub fn graph_cache(&self) -> Option<std::path::PathBuf> {
+        self.prefs.path().and_then(|p| p.parent()).map(|dir| dir.join(crate::graph::state::CACHE_FILE))
     }
 
     /// The window's zoom, 1.0 when unset or unreadable.
