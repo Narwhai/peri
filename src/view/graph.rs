@@ -6,7 +6,7 @@
 //! from a coarse [`Region`] that changes in steps as the camera moves: only then does the view
 //! run again, and the shapes are memoized on the graph's version so even then they're reused.
 
-use rune::{Color, Cursor, Drag, El, LineCap, MagnifyEvent, Phase, PointerButton, Shape, Tx, WheelEvent, canvas, col, el, memo, row, text};
+use rune::{Color, Cursor, Drag, El, LineCap, MagnifyEvent, Phase, PointerButton, Shape, Transition, Tx, WheelEvent, canvas, col, el, memo, row, text};
 use rune_kit::{Kit, MenuItem, TextInput, context_menu};
 
 use super::*;
@@ -183,6 +183,7 @@ fn canvas_area(g: &Graph, p: &Palette, kit: &Kit, layer: &mut Vec<El>) -> El {
         .inert()
         .child(shapes)
         .children(moving)
+        .children(pacer(g))
         .child(lit)
         .child(names);
     let tip = match &g.hover {
@@ -418,7 +419,7 @@ fn link_tip(g: &Graph, edges: &[usize], p: &Palette) -> Option<El> {
 /// dots lit and ringed.
 fn highlight(g: &Graph, zoom: f32, p: &Palette) -> El {
     let [w, h] = g.size;
-    let world = el().key("graph-lit").pin(Some(0.0), Some(0.0), None, None).size(w.max(1.0), h.max(1.0));
+    let world = el().key("graph-lit").pin(Some(0.0), Some(0.0), None, None).size(w.max(1.0), h.max(1.0)).instant_changes();
     let Some(Hover::Link { a, b, edges }) = &g.hover else { return world };
     if g.world.len() != g.model.nodes.len() {
         return world;
@@ -468,7 +469,8 @@ fn near(g: &Graph) -> Vec<bool> {
 /// a hairline on screen.
 fn shapes(g: &Graph, zoom: f32, p: &Palette) -> El {
     let [w, h] = g.size;
-    let mut world = el().key("graph-shapes").pin(Some(0.0), Some(0.0), None, None).size(w.max(1.0), h.max(1.0));
+    // A drop hands what moved back to this layer: it shows there at once, not animated in.
+    let mut world = el().key("graph-shapes").pin(Some(0.0), Some(0.0), None, None).size(w.max(1.0), h.max(1.0)).instant_changes();
     if g.world.len() != g.model.nodes.len() {
         return world;
     }
@@ -536,10 +538,26 @@ fn dot(tiles: &mut Tiles, g: &Graph, i: usize, zoom: f32, dim: bool, p: &Palette
     }
 }
 
+/// While the drag simulation moves, an invisible element bound to its running pacer track,
+/// which keeps the window drawing (and the simulation stepping) at the display's rate.
+fn pacer(g: &Graph) -> Option<El> {
+    let d = g.drag.as_ref().filter(|_| g.animating())?;
+    Some(el().key("graph-pacer").pin(Some(0.0), Some(0.0), None, None).size(1.0, 1.0).live_opacity(&d.pacer).transition(Transition::none()))
+}
+
 /// What a drag moves: the moving artists and their links, as they are now.
 fn moving(g: &Graph, zoom: f32, p: &Palette) -> El {
     let [w, h] = g.size;
-    let mut world = el().key("graph-moving").pin(Some(0.0), Some(0.0), None, None).size(w.max(1.0), h.max(1.0));
+    // The simulation is the animation: tiles land where each frame puts them, rather than
+    // springing there (stretching their lines) or fading in.
+    // And the layer goes the frame the drag ends, as the static layer takes what it held:
+    // fading out, both would draw for a moment.
+    let mut world = el()
+        .key("graph-moving")
+        .pin(Some(0.0), Some(0.0), None, None)
+        .size(w.max(1.0), h.max(1.0))
+        .instant_changes()
+        .transition(Transition::none());
     let Some(d) = &g.drag else { return world };
     let focus = g.selected;
     let near = near(g);
@@ -693,7 +711,15 @@ impl Tiles {
                 Mark::Dot(c, r, color) => shape.line(at(c), at(c), 2.0 * r, LineCap::Round, color),
                 Mark::Ring(c, r, w, color) => shape.stroke_with(circle(at(c), r), true, w, LineCap::Round, color),
             });
-            world = world.child(canvas(shape).key(format!("{id}-{t}")).pin(Some(x0), Some(y0), None, None).size((x1 - x0).max(1.0), (y1 - y0).max(1.0)));
+            // A tile comes and goes as what it holds moves across tiles: it shows and leaves at
+            // once, never fading.
+            world = world.child(
+                canvas(shape)
+                    .key(format!("{id}-{t}"))
+                    .pin(Some(x0), Some(y0), None, None)
+                    .size((x1 - x0).max(1.0), (y1 - y0).max(1.0))
+                    .transition(Transition::none()),
+            );
         }
         world
     }

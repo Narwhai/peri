@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 
-use rune::{Live, PointerPress, TextEdit, Waker};
+use rune::{Live, PointerPress, TextEdit, Tween, Waker};
 use serde::{Deserialize, Serialize};
 
 use super::layout;
@@ -50,8 +50,11 @@ const SIM_STEP: f32 = 1.0 / 120.0;
 /// second), or after [`SETTLE_MAX`] seconds.
 const SETTLED_SPEED: f32 = 3.0;
 const SETTLE_MAX: f64 = 4.0;
-/// How often a running simulation asks for a frame.
-pub const SIM_FRAME: Duration = Duration::from_millis(16);
+/// A running simulation asks for the next frame. (On a surface no display link paces, Rune
+/// takes this as about a frame at 60 Hz; [`Drag::pacer`] keeps it at the display's rate.)
+pub const SIM_FRAME: Duration = Duration::ZERO;
+/// How long a drag's pacer runs at most: far longer than anyone holds a drag.
+const PACER_SPAN: Duration = Duration::from_secs(3600);
 
 /// What the pointer is over on the canvas.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -119,6 +122,15 @@ pub struct Drag {
     pub moving: Vec<u32>,
     /// Their speeds, in world points per second.
     speed: Vec<[f32; 2]>,
+    /// Where the simulation has them, after its last step and the one before: what's drawn
+    /// lies between the two, by how far the clock has got into the next step. Steps are always
+    /// [`SIM_STEP`] long, so the motion is the same however unevenly frames come.
+    sim: Vec<[f32; 2]>,
+    prev: Vec<[f32; 2]>,
+    /// Time the clock has moved that no step has taken yet, in seconds.
+    carry: f32,
+    /// The fastest artist's speed after the last step.
+    fastest: f32,
     /// Where each started, to put back if the drag is cancelled.
     origin: Vec<[f32; 2]>,
     /// The links touching a moving artist: both ends, and the offset from one to the other they
@@ -142,6 +154,12 @@ pub struct Drag {
     pub tick: u64,
     /// Bumped per drag, for drawing what doesn't.
     pub id: u64,
+    /// A track that's always running, bound to an invisible element while the simulation
+    /// moves. Rune draws every display frame while a live track runs, and polls (stepping the
+    /// simulation) each frame it draws, so this paces the simulation at the display's rate,
+    /// 144 Hz on a 144 Hz display, where timer wakes alone are held to 60 Hz on Linux and
+    /// Windows. Removing the element stops it.
+    pub pacer: Tween<f32>,
 }
 
 const NO_SLOT: u32 = u32::MAX;
@@ -473,6 +491,10 @@ impl Graph {
         self.drag = Some(Drag {
             node: i,
             speed: vec![[0.0, 0.0]; moving.len()],
+            sim: origin.clone(),
+            prev: origin.clone(),
+            carry: 0.0,
+            fastest: 0.0,
             weight: weight.into_iter().map(|w| w.max(1.0)).collect(),
             origin,
             slot,
@@ -486,6 +508,7 @@ impl Graph {
             asleep: false,
             tick: 0,
             id: self.drags,
+            pacer: Tween::linear(0.0, 0.0, PACER_SPAN),
         });
     }
 
@@ -521,6 +544,8 @@ impl Graph {
         if let Some(d) = self.drag.as_mut().filter(|d| d.target.is_some()) {
             if let (Some(t), Some(p)) = (d.target, self.world.get_mut(d.node)) {
                 *p = t;
+                d.sim[0] = t;
+                d.prev[0] = t;
             }
             d.target = None;
             d.asleep = false;
@@ -545,28 +570,38 @@ impl Graph {
 
     /// Steps the simulation to clock `now` (seconds); once the dropped artists settle, pins the
     /// dragged one and saves. True when anything moved.
+    ///
+    /// The simulation runs in fixed steps of [`SIM_STEP`], however long frames take, carrying
+    /// over the time a frame leaves; what's drawn is interpolated between the last two steps.
+    /// Stepping a frame's time rounded to whole steps instead makes motion speed up and slow
+    /// down with the frame times, which shows as judder when frames come unevenly.
     pub fn tick(&mut self, now: f64) -> Result<bool, String> {
         let Some(d) = &mut self.drag else { return Ok(false) };
         if d.asleep {
             return Ok(false);
         }
-        // A frame's worth of steps, but never so many that a stall replays seconds of motion.
-        let elapsed = d.last.map_or(SIM_STEP, |last| ((now - last) as f32).clamp(0.0, 0.05));
+        // Never so much time that a stall replays a second of motion in one frame.
+        let elapsed = d.last.map_or(SIM_STEP, |last| ((now - last) as f32).clamp(0.0, 0.1));
         d.last = Some(now);
         if d.target.is_none() && d.dropped.is_none() {
             d.dropped = Some(now);
         }
-        let steps = (elapsed / SIM_STEP).round().max(1.0) as usize;
-        let mut fastest = 0.0_f32;
-        let mut force = vec![[0.0_f32; 2]; d.moving.len()];
+        d.carry += elapsed;
         let damp = (-DAMPING * SIM_STEP).exp();
-        for _ in 0..steps {
+        let mut force = vec![[0.0_f32; 2]; d.moving.len()];
+        while d.carry >= SIM_STEP {
+            d.carry -= SIM_STEP;
+            d.prev.clone_from(&d.sim);
             if let Some(t) = d.target {
-                self.world[d.node] = t;
+                d.sim[0] = t;
             }
             force.iter_mut().for_each(|f| *f = [0.0, 0.0]);
+            let at = |i: u32, sim: &[[f32; 2]]| match d.slot[i as usize] {
+                NO_SLOT => self.world[i as usize],
+                k => sim[k as usize],
+            };
             for &(a, b, rest) in &d.springs {
-                let (pa, pb) = (self.world[a as usize], self.world[b as usize]);
+                let (pa, pb) = (at(a, &d.sim), at(b, &d.sim));
                 // How far the link is bent from its resting offset, pulling both ends back.
                 let bend = [SPRING * (pb[0] - pa[0] - rest[0]), SPRING * (pb[1] - pa[1] - rest[1])];
                 if let Some(f) = force.get_mut(d.slot[a as usize] as usize) {
@@ -578,23 +613,32 @@ impl Graph {
                     f[1] -= bend[1];
                 }
             }
-            fastest = 0.0;
+            d.fastest = 0.0;
             // The dragged artist (slot 0) goes where the pointer is, then stays where dropped.
-            for (k, ((&j, v), f)) in d.moving.iter().zip(d.speed.iter_mut()).zip(&force).enumerate().skip(1) {
-                let j = j as usize;
+            for (k, ((p, v), f)) in d.sim.iter_mut().zip(d.speed.iter_mut()).zip(&force).enumerate().skip(1) {
                 v[0] = (v[0] + f[0] / d.weight[k] * SIM_STEP) * damp;
                 v[1] = (v[1] + f[1] / d.weight[k] * SIM_STEP) * damp;
-                self.world[j][0] += v[0] * SIM_STEP;
-                self.world[j][1] += v[1] * SIM_STEP;
-                fastest = fastest.max((v[0] * v[0] + v[1] * v[1]).sqrt());
+                p[0] += v[0] * SIM_STEP;
+                p[1] += v[1] * SIM_STEP;
+                d.fastest = d.fastest.max((v[0] * v[0] + v[1] * v[1]).sqrt());
             }
         }
+        // Drawn between the last two steps, by how far into the next the clock is. The held
+        // artist is drawn under the pointer, without the step's lag.
+        let t = d.carry / SIM_STEP;
+        for (k, &j) in d.moving.iter().enumerate() {
+            let (a, b) = (d.prev[k], d.sim[k]);
+            self.world[j as usize] = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+        }
+        if let Some(target) = d.target {
+            self.world[d.node] = target;
+        }
         d.tick += 1;
-        if fastest < SETTLED_SPEED {
+        if d.fastest < SETTLED_SPEED {
             match d.dropped {
                 Some(_) => return self.settle().map(|()| true),
                 // Held still: sleep until the pointer moves again.
-                None => d.asleep = d.target.is_some_and(|t| self.world[d.node] == t),
+                None => d.asleep = d.target.is_some_and(|t| d.sim[0] == t),
             }
         } else if d.dropped.is_some_and(|at| now - at > SETTLE_MAX) {
             return self.settle().map(|()| true);
@@ -606,8 +650,10 @@ impl Graph {
     /// moved keeps its place, and the layout is saved.
     fn settle(&mut self) -> Result<(), String> {
         let Some(d) = self.drag.take() else { return Ok(()) };
-        for &j in &d.moving {
+        // Where the simulation stopped, not between its last two steps.
+        for (k, &j) in d.moving.iter().enumerate() {
             let j = j as usize;
+            self.world[j] = d.sim[k];
             self.raw[j] = self.transform.raw(self.world[j]);
         }
         let name = self.model.nodes[d.node].name.to_lowercase();

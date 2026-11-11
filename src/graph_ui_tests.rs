@@ -548,3 +548,64 @@ fn a_new_press_while_a_dropped_artist_settles_leaves_it_where_it_was_dropped() {
     }
     assert_eq!(world_of(&rt, "Kenny Segal"), dropped);
 }
+
+/// How far, at most, the moving tiles draw from where the simulation puts them (in window
+/// points), and how many frames draw one fading, over a drag and its settling.
+#[test]
+#[ignore]
+fn settling_draws_where_the_simulation_is() {
+    let mut rt = runtime(Store::memory());
+    click(&mut rt, "graph-tab");
+    let (x, y) = node_on_screen(&rt, "Kenny Segal");
+    rt.pointer_move(x, y);
+    rt.pointer_down(x, y);
+    let (mut worst, mut fades) = (0.0_f32, 0);
+    let mut check = |rt: &Runtime<App>| {
+        let canvas = rect(rt, "graph-canvas");
+        let g = &rt.state.graph;
+        let cam = g.cam();
+        for e in rt.elements() {
+            if !e.key.as_deref().is_some_and(|k| k.starts_with("moving-")) {
+                continue;
+            }
+            // Where the tile's laid-out corner shows under the camera.
+            let [sx, sy] = g.screen(cam, [e.target[0] - canvas[0], e.target[1] - canvas[1]]);
+            let lag = (e.rect[0] - canvas[0] - sx).abs().max((e.rect[1] - canvas[1] - sy).abs());
+            worst = worst.max(lag);
+            fades += usize::from(e.opacity < 0.99);
+        }
+    };
+    for k in 1..=20 {
+        rt.pointer_move(x + 8.0 * k as f32, y + 5.0 * k as f32);
+        rt.frame(1.0 / 60.0);
+        check(&rt);
+    }
+    rt.pointer_up(x + 160.0, y + 100.0);
+    for _ in 0..240 {
+        rt.frame(1.0 / 60.0);
+        check(&rt);
+    }
+    println!("tiles drawn off the simulation: worst {worst:.2} pt; fading tile-frames: {fades}");
+}
+
+#[test]
+fn the_window_keeps_drawing_while_artists_settle_and_rests_after() {
+    let mut rt = runtime(Store::memory());
+    click(&mut rt, "graph-tab");
+    let at = node_on_screen(&rt, "Kenny Segal");
+    quick_drag(&mut rt, at, 120.0, 80.0);
+    assert!(rt.state.graph.drag.is_some(), "settling");
+    // A frame that says it's animating asks the host for the next display frame: the
+    // simulation steps at the display's rate, not a 60 Hz timer's.
+    let mut frames = 0;
+    while rt.state.graph.drag.is_some() && frames < 600 {
+        let asked = rt.frame(1.0 / 144.0);
+        // The frame the artists settle in has nothing more to draw.
+        assert!(asked || rt.state.graph.drag.is_none(), "frame {frames} of the settling asked for the next");
+        frames += 1;
+    }
+    assert!(rt.state.graph.drag.is_none(), "settled");
+    settle(&mut rt);
+    assert!(!rt.frame(1.0 / 144.0), "once settled, the window rests");
+}
+

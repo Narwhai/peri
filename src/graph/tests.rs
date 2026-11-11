@@ -143,3 +143,49 @@ fn a_link_reads_as_a_sentence_in_its_direction() {
     assert_eq!(EdgeKind::MemberOf.sentence("Thom Yorke", "Radiohead", 1), "Thom Yorke is a member of Radiohead");
     assert_eq!(EdgeKind::Alias.sentence("MF DOOM", "Viktor Vaughn", 1), "MF DOOM also releases as Viktor Vaughn");
 }
+
+/// How unevenly a settling artist moves from frame to frame at `hz`, its frames arriving up to
+/// `jitter` of an interval early or late: the worst change in speed between two frames, as a
+/// share of the speed it settles from. Smooth motion changes speed a little each frame.
+fn settling_jerk(hz: f64, jitter: f64) -> f32 {
+    use crate::graph::state::Graph;
+    let tracks = vec![song(&["Hub"], &[], vec![Credit::parse(Role::Producer, "A"), Credit::parse(Role::Producer, "B")]), song(&["A"], &[], Vec::new())];
+    let mut g = Graph::with(None, 0);
+    g.refresh(Model::build(&tracks, &Relations::default()), None, None).expect("laid out");
+    let (hub, a) = (g.model.find("Hub").expect("hub"), g.model.find("A").expect("a"));
+    let start = g.world[hub];
+    g.start_drag(hub, start);
+    let mut now = 0.0;
+    let interval = 1.0 / hz;
+    // Frames that come early and late in turn, as a busy machine's do.
+    let wobble = |k: usize| interval * (1.0 + jitter * [1.0, -1.0, 0.3][k % 3]);
+    for k in 0..(0.2 * hz) as usize {
+        now += wobble(k);
+        g.drag_to([start[0] + 200.0 * (now / 0.2) as f32, start[1]]);
+        g.tick(now).expect("steps");
+    }
+    g.drop_drag([start[0] + 200.0, start[1]]);
+    let (mut last, mut speeds) = (g.world[a], Vec::new());
+    for k in 0..(1.5 * hz) as usize {
+        let dt = wobble(k + 1);
+        now += dt;
+        if g.drag.is_none() {
+            break;
+        }
+        g.tick(now).expect("steps");
+        let p = g.world[a];
+        speeds.push((((p[0] - last[0]).powi(2) + (p[1] - last[1]).powi(2)).sqrt() / dt as f32, dt));
+        last = p;
+    }
+    let top = speeds.iter().map(|s| s.0).fold(0.0_f32, f32::max).max(1e-3);
+    speeds.windows(2).map(|w| (w[1].0 - w[0].0).abs() / top).fold(0.0, f32::max)
+}
+
+#[test]
+fn settling_moves_evenly_whatever_the_frame_rate() {
+    for (hz, jitter) in [(60.0, 0.0), (60.0, 0.25), (144.0, 0.0), (144.0, 0.25), (90.0, 0.1)] {
+        let jerk = settling_jerk(hz, jitter);
+        println!("{hz} Hz, ±{:.0}% timing: worst speed change between frames {:.0}% of top speed", jitter * 100.0, jerk * 100.0);
+        assert!(jerk < 0.15, "{hz} Hz ±{jitter}: a frame's speed jumps by {:.0}% of the top speed", jerk * 100.0);
+    }
+}
