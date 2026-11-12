@@ -119,6 +119,15 @@ fn assert_header_layout(rt: &Runtime<App>) {
 }
 
 #[test]
+fn the_search_input_has_two_point_corners() {
+    let mut rt = runtime();
+    let radius = |rt: &Runtime<App>| rt.elements().into_iter().find(|e| e.key.as_deref() == Some("search")).expect("search").radius;
+    assert_eq!(radius(&rt), 2.0);
+    click(&mut rt, "search");
+    assert_eq!(radius(&rt), 2.0, "the corners stay the same when focused");
+}
+
+#[test]
 fn search_is_centred_in_the_header_at_different_sizes_and_zoom_levels() {
     for width in [720.0, 800.0, 980.0, 1200.0] {
         let rt = runtime_sized((width, 900.0));

@@ -217,6 +217,7 @@ fn header(s: &App, zoom: f32, p: &Palette, kit: &Kit, cx: &mut Cx<App>) -> El {
         })
         .build(kit)
         .key("search")
+        .radius(2.0)
         // Gives way to the side controls in a narrow (or zoomed-in) window.
         .shrink()
         .min_w(80.0);
