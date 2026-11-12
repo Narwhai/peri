@@ -137,7 +137,7 @@ fn tool_button(key: &'static str, glyph: &'static rune::Icon, label: String, act
         .child(text(label).key("label").font(TITLE).color(ink))
 }
 
-/// A segmented control: one pill per option, the current one filled.
+/// A segmented control: one pill per option, the current one tinted with the mode accent.
 pub(super) fn segmented(key: &'static str, options: &[(&'static str, &'static str)], current: &str, p: &Palette, choose: impl Fn(&mut App, &str) + Clone + 'static) -> El {
     let mut seg = row().key(key).h(28.0).padding(2.0).gap(2.0).radius(4.0).fill(p.ui.alpha(0.45)).role("radiogroup").label(key).focus_group();
     for &(value, label) in options {
@@ -150,8 +150,7 @@ pub(super) fn segmented(key: &'static str, options: &[(&'static str, &'static st
                 .px(10.0)
                 .radius(3.0)
                 .center()
-                .fill(if on { p.bg2 } else { p.bg.alpha(0.0) })
-                .shadow(if on { 1.0 } else { 0.0 }, if on { 2.0 } else { 0.0 }, rune::Color::BLACK.alpha(if on { 0.18 } else { 0.0 }))
+                .fill(if on { p.cyan.alpha(if p.dark { 0.24 } else { 0.18 }) } else { p.bg.alpha(0.0) })
                 .hover(p.ui.alpha(0.3))
                 .cursor(Cursor::Pointer)
                 .role("radio")
@@ -160,7 +159,7 @@ pub(super) fn segmented(key: &'static str, options: &[(&'static str, &'static st
                 .label(label)
                 .motion(SNAPPY)
                 .on_press(move |s: &mut App| choose(s, value))
-                .child(text(label).font(TITLE).color(if on { p.tx } else { p.tx2 })),
+                .child(text(label).font(TITLE).color(if on { p.cyan } else { p.tx2 })),
         );
     }
     seg

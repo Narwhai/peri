@@ -233,6 +233,24 @@ pub(super) fn play_button(key: &'static str, label: &'static str, p: &Palette) -
         .child(text(label).font(TITLE).color(rune::Color::WHITE))
 }
 
+/// A playback button beside Play: the neutral secondary fill with Play's blue for its ink.
+pub(super) fn tinted_button(key: &'static str, glyph: &'static rune::Icon, label: &'static str, p: &Palette) -> El {
+    row()
+        .key(key)
+        .h(32.0)
+        .px(14.0)
+        .gap(8.0)
+        .radius(16.0)
+        .center_y()
+        .fill(p.ui.alpha(0.6))
+        .hover(p.ui.alpha(0.4))
+        .press_scale(0.97)
+        .cursor(Cursor::Pointer)
+        .label(label)
+        .child(icon(glyph, 15.0).color(p.blue))
+        .child(text(label).font(TITLE).color(p.blue))
+}
+
 pub(super) fn secondary_button(key: &'static str, glyph: &'static rune::Icon, label: &'static str, p: &Palette) -> El {
     row()
         .key(key)
@@ -303,7 +321,7 @@ pub(super) fn album_page(s: &App, a: usize, p: &Palette) -> El {
             row()
                 .gap(8.0)
                 .child(play_button("page-play", "Play", p).on_press_tx(move |s: &mut App, tx| s.play_album(a, None, tx)))
-                .child(secondary_button("page-shuffle", &icons::SHUFFLE, "Shuffle", p).on_press_tx(move |s: &mut App, tx| s.shuffle_album(a, tx))),
+                .child(tinted_button("page-shuffle", &icons::SHUFFLE, "Shuffle", p).on_press_tx(move |s: &mut App, tx| s.shuffle_album(a, tx))),
         );
     let top = row().gap(28.0).items_start().child(cover("page-cover".into(), cover_image(s, album), Some(PAGE_COVER), p)).child(head);
     let mut page = col()

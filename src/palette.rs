@@ -22,7 +22,13 @@ pub struct Palette {
     pub tx2: Color,
     pub tx3: Color,
     pub red: Color,
+    pub orange: Color,
+    pub yellow: Color,
+    pub green: Color,
+    pub cyan: Color,
     pub blue: Color,
+    pub purple: Color,
+    pub magenta: Color,
 }
 
 /// `0xRRGGBB` in sRGB to Rune's linear colour.
@@ -68,7 +74,13 @@ impl Palette {
                 tx2: rgb(0x98a0a5),
                 tx3: rgb(0x6b6f74),
                 red: rgb(0xe9434b),
+                orange: rgb(0xc7693c),
+                yellow: rgb(0xad8f4e),
+                green: rgb(0x829750),
+                cyan: rgb(0x599b94),
                 blue: rgb(0x3d85f3),
+                purple: rgb(0x9560fd),
+                magenta: rgb(0xe34284),
             }
         } else {
             Palette {
@@ -82,7 +94,13 @@ impl Palette {
                 tx2: rgb(0x4b5257),
                 tx3: rgb(0x7c8085),
                 red: rgb(0xc4182d),
+                orange: rgb(0xa34918),
+                yellow: rgb(0x73570c),
+                green: rgb(0x576a23),
+                cyan: rgb(0x2a6e67),
                 blue: rgb(0x155fca),
+                purple: rgb(0x8000fa),
+                magenta: rgb(0xbf1567),
             }
         }
     }

@@ -4,7 +4,7 @@
 use rune::{Cursor, El, ScrollSpec, col, el, icon, row, text};
 use rune_kit::{Kit, Placement, TextInput, popover, scrim};
 
-use super::albums::{album_strip, back_label, cover, cover_image, play_button, secondary_button, song_cover};
+use super::albums::{album_strip, back_label, cover, cover_image, play_button, secondary_button, song_cover, tinted_button};
 use super::table;
 use super::toolbar::{hint, segmented};
 use super::*;
@@ -206,7 +206,7 @@ pub(super) fn head(s: &App, info: &ArtistPage, others: &[(Relation, ArtistPage)]
     }
     if !info.discography(&s.albums).is_empty() {
         let (who, with_aliases) = (info.name.clone(), info.with_aliases);
-        buttons = buttons.child(secondary_button("artist-discography", &icons::PLAY, "Play Discography", p).on_press_tx(move |s: &mut App, tx| {
+        buttons = buttons.child(tinted_button("artist-discography", &icons::PLAY, "Play Discography", p).on_press_tx(move |s: &mut App, tx| {
             let list = page(&who, &s.tracks, &s.albums, &s.relations, with_aliases).discography(&s.albums);
             if let Some(&first) = list.first() {
                 s.play_list(list, first, tx);
@@ -216,7 +216,7 @@ pub(super) fn head(s: &App, info: &ArtistPage, others: &[(Relation, ArtistPage)]
     // Play Everything also plays the bands and members, when they have music.
     if !linked && others.iter().any(|(_, o)| !o.all_songs(&s.albums).is_empty()) {
         let (who, with_aliases) = (info.name.clone(), info.with_aliases);
-        buttons = buttons.child(secondary_button("artist-play-everything", &icons::PLAY, "Play Everything", p).on_press_tx(move |s: &mut App, tx| {
+        buttons = buttons.child(tinted_button("artist-play-everything", &icons::PLAY, "Play Everything", p).on_press_tx(move |s: &mut App, tx| {
             let list = everything(&who, &s.tracks, &s.albums, &s.relations, with_aliases);
             if let Some(&first) = list.first() {
                 s.play_list(list, first, tx);
