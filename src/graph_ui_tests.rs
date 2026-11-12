@@ -4,7 +4,7 @@
 use rune::{Env, Runtime, WheelEvent};
 
 use crate::app::{App, Output, Page};
-use crate::base::store::Store;
+use crate::query::store::Store;
 use crate::credits::{Credit, Role};
 use crate::graph::EdgeKind;
 use crate::graph::state::Hover;

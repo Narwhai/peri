@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use super::filter::{Condition, Conjunction, Group, Node, Operator, parse_duration};
 use super::property::{Property, Value};
-use super::store::{Base, Store};
+use super::store::{Views, Store};
 use super::view::{Direction, GroupBy, Sort, View, evaluate};
 use crate::library::Track;
 
@@ -44,7 +44,7 @@ fn an_empty_view_is_the_whole_library_in_library_order() {
 }
 
 #[test]
-fn and_or_not_and_nested_groups_combine_like_obsidian() {
+fn and_or_not_and_nested_groups_combine() {
     let lib = library();
     let mut view = View::new("v");
     // Year ≥ 2000 AND (genre has jazz OR artist has ann)
@@ -172,23 +172,23 @@ fn nodes_are_addressed_by_path() {
 }
 
 #[test]
-fn bases_save_and_load_as_json() {
+fn views_save_and_load_as_json() {
     let mut view = View::new("Recent jazz");
     view.filter.children = vec![cond(Property::Genre, Operator::Has, "Jazz"), Node::Group(Group { conjunction: Conjunction::Or, children: vec![] })];
     view.sorts = vec![Sort { property: Property::Added, direction: Direction::Desc }];
     view.group_by = Some(GroupBy { property: Property::Year, direction: Direction::Desc });
-    let base = Base { views: vec![View::new("All songs"), view], active: 1, ..Base::default() };
-    let json = serde_json::to_string(&base).unwrap();
+    let views = Views { list: vec![View::new("All songs"), view], active: 1, ..Views::default() };
+    let json = serde_json::to_string(&views).unwrap();
     assert!(json.contains("\"genre\"") && json.contains("\"has\"") && json.contains("\"desc\""), "{json}");
-    assert_eq!(serde_json::from_str::<Base>(&json).unwrap(), base);
+    assert_eq!(serde_json::from_str::<Views>(&json).unwrap(), views);
 
     let dir = std::env::temp_dir().join(format!("rune-music-store-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let file = dir.join("rune-music/prefs.json");
     let mut store = Store::at(&file);
-    assert_eq!(store.load(), Base::default(), "nothing saved yet");
-    store.save(&base).unwrap();
-    assert_eq!(Store::at(&file).load(), base);
+    assert_eq!(store.load(), Views::default(), "nothing saved yet");
+    store.save(&views).unwrap();
+    assert_eq!(Store::at(&file).load(), views);
     assert!(file.exists());
     std::fs::remove_dir_all(&dir).unwrap();
 }

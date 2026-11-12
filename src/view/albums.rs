@@ -173,7 +173,7 @@ pub(super) fn list_card(s: &App, a: usize, section: Option<usize>, p: &Palette) 
         .fill(p.bg2)
         .gap(14.0)
         .child(row().gap(18.0).items_start().child(art).child(head))
-        .child(track_table(s, a, table::Columns { shown: &s.base.active().columns, widths: &s.base.active().widths, pills: &[], covers: false }, p));
+        .child(track_table(s, a, table::Columns { shown: &s.views.active().columns, widths: &s.views.active().widths, pills: &[], covers: false }, p));
     // Padding, not margin: virtual rows size each row by its box, so the gap sits inside it.
     col().w_full().pb(16.0).child(card)
 }
@@ -332,7 +332,7 @@ pub(super) fn album_page(s: &App, a: usize, p: &Palette) -> El {
         .gap(22.0)
         .child(back)
         .child(top)
-        .child(track_table(s, a, table::Columns { shown: &s.base.page_columns, widths: &s.base.page_widths, pills: &[], covers: false }, p));
+        .child(track_table(s, a, table::Columns { shown: &s.views.page_columns, widths: &s.views.page_widths, pills: &[], covers: false }, p));
     let more = more_by(s, a, p);
     if let Some(more) = more {
         page = page.child(more);
@@ -356,7 +356,7 @@ pub(super) fn back_label(s: &App) -> String {
         Some(crate::app::Page::Settings) => "Settings".to_string(),
         Some(crate::app::Page::Graph) => "Graph".to_string(),
         Some(crate::app::Page::Home) => "Home".to_string(),
-        Some(crate::app::Page::Library) | None => s.base.active().name.clone(),
+        Some(crate::app::Page::Library) | None => s.views.active().name.clone(),
     }
 }
 

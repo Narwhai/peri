@@ -70,7 +70,7 @@ fn body(s: &App, i: usize, open: &DetailsDialog, p: &Palette) -> El {
         n => format!("{n} times"),
     };
     plays = plays.child(fact("Plays", plain(count, p).key("details-play-count"), p));
-    plays = plays.children(t.last_played.map(|at| fact("Last played", plain(crate::base::property::format_date(at), p), p)));
+    plays = plays.children(t.last_played.map(|at| fact("Last played", plain(crate::query::property::format_date(at), p), p)));
     b = b.child(plays);
 
     let roles = Role::ALL.into_iter().filter(|&r| t.credits.iter().any(|c| c.role == r));

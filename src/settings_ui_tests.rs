@@ -6,7 +6,7 @@ use std::sync::Arc;
 use rune::{Env, Runtime};
 
 use crate::app::{App, Output, Page};
-use crate::base::store::Store;
+use crate::query::store::Store;
 use crate::view::view;
 
 /// A temp folder holding `prefs.json` and a music folder with `songs` (fake audio files).

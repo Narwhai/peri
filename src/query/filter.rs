@@ -1,5 +1,5 @@
-//! Filters as in Obsidian's Bases: a group's conjunction (all, any or none of the following are
-//! true) over conditions and nested groups.
+//! Filters: a group's conjunction (all, any or none of the following are true) over
+//! conditions and nested groups.
 
 use serde::{Deserialize, Serialize};
 
@@ -122,7 +122,7 @@ impl Condition {
     }
 
     /// Whether the condition is complete enough to filter by: a condition still waiting for
-    /// its value matches everything, as an unfinished row in Obsidian's builder does.
+    /// its value matches everything.
     pub fn is_active(&self) -> bool {
         !self.op.takes_value() || !self.value.trim().is_empty()
     }

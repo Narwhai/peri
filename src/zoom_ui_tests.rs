@@ -3,8 +3,8 @@
 use rune::{Env, Key, KeyEvent, Mods, Runtime};
 
 use crate::app::{App, Output, album_key};
-use crate::base::store::Store;
-use crate::base::view::{CARD_SIZE_DEFAULT, CARD_SIZE_MAX, CARD_SIZE_MIN, Layout};
+use crate::query::store::Store;
+use crate::query::view::{CARD_SIZE_DEFAULT, CARD_SIZE_MAX, CARD_SIZE_MIN, Layout};
 use crate::view::view;
 
 struct Prefs(std::path::PathBuf);
@@ -74,7 +74,7 @@ fn command(rt: &mut Runtime<App>, c: char) {
 
 fn album_grid(rt: &mut Runtime<App>) {
     click(rt, "mode/albums");
-    assert_eq!(rt.state.base.active().layout, Layout::Grid);
+    assert_eq!(rt.state.views.active().layout, Layout::Grid);
 }
 
 #[test]
@@ -90,7 +90,7 @@ fn the_card_size_slider_resizes_cards_and_refits_the_columns() {
     slide_to(&mut rt, "card-size", 1.0);
     let large = rt.state.card_size();
     assert!(large > CARD_SIZE_MAX - 4.0, "the slider's end is near the largest size, got {large}");
-    assert_eq!(rt.state.base.active().card_size, Some(large), "the view keeps its own size");
+    assert_eq!(rt.state.views.active().card_size, Some(large), "the view keeps its own size");
     assert!(rt.state.columns < small_columns, "bigger cards fit fewer columns: {} vs {small_columns}", rt.state.columns);
     let wide = rect_of(&rt, &album_key(0, None))[2];
     assert!((wide - large.floor()).abs() < 1.0, "cards follow the size: {wide} vs {large}");
@@ -101,7 +101,7 @@ fn the_card_size_slider_resizes_cards_and_refits_the_columns() {
 
     // Saved with the view.
     let reopened = runtime(prefs.store());
-    assert_eq!(reopened.state.base.active().card_size, rt.state.base.active().card_size);
+    assert_eq!(reopened.state.views.active().card_size, rt.state.views.active().card_size);
 }
 
 #[test]
@@ -112,16 +112,16 @@ fn views_without_their_own_card_size_follow_the_default() {
     slide_to(&mut rt, "card-size", 1.0);
     let size = rt.state.card_size();
     click(&mut rt, "card-size-default");
-    assert_eq!(rt.state.base.card_size, size, "the view's size becomes the default");
-    assert_eq!(rt.state.base.active().card_size, None, "and the view follows it");
+    assert_eq!(rt.state.views.card_size, size, "the view's size becomes the default");
+    assert_eq!(rt.state.views.active().card_size, None, "and the view follows it");
     assert!(rt.find("card-size-default").is_none(), "nothing left to make the default");
 
     // A new view starts at the default.
     rt.update(|s, _| {
-        let mut other = crate::base::view::View::new("Other");
-        other.set_mode(crate::base::property::Mode::Albums);
-        s.base.views.push(other);
-        s.base.active = s.base.views.len() - 1;
+        let mut other = crate::query::view::View::new("Other");
+        other.set_mode(crate::query::property::Mode::Albums);
+        s.views.list.push(other);
+        s.views.active = s.views.list.len() - 1;
         s.views_changed();
     });
     settle(&mut rt);
@@ -136,11 +136,11 @@ fn views_without_their_own_card_size_follow_the_default() {
         rt.pointer_up(x, y);
     }
     settle(&mut rt);
-    assert_eq!(rt.state.base.active().card_size, None, "double-click follows the default again");
+    assert_eq!(rt.state.views.active().card_size, None, "double-click follows the default again");
     assert_eq!(rt.state.card_size(), size);
 
     let reopened = runtime(prefs.store());
-    assert_eq!(reopened.state.base.card_size, size, "the default is saved");
+    assert_eq!(reopened.state.views.card_size, size, "the default is saved");
 }
 
 #[test]

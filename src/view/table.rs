@@ -7,8 +7,8 @@
 use rune::{Align, Color, Cursor, Drag, El, Phase, Tx, col, el, icon, row, text};
 
 use super::*;
-use crate::base::property::{Kind, Property, Value};
-use crate::base::view::Widths;
+use crate::query::property::{Kind, Property, Value};
+use crate::query::view::Widths;
 use crate::icons;
 use crate::library::Track;
 use crate::palette::Palette;

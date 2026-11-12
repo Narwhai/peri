@@ -4,8 +4,8 @@
 use rune::{Env, Key, KeyEvent, Mods, Runtime};
 
 use crate::app::{App, ArtistTab, Output, Page, album_key};
-use crate::base::property::Mode;
-use crate::base::store::Store;
+use crate::query::property::Mode;
+use crate::query::store::Store;
 use crate::credits::{Credit, Role};
 use crate::library::{TaggedArtists, Track};
 use crate::view::view;
@@ -119,7 +119,7 @@ fn a_featured_artists_name_in_a_song_row_opens_their_page() {
 fn each_artist_of_a_collaborative_album_opens_from_the_album_page_and_back_retraces() {
     let mut rt = runtime();
     rt.update(|s, _| {
-        s.base.active_mut().set_mode(Mode::Albums);
+        s.views.active_mut().set_mode(Mode::Albums);
         s.views_changed();
     });
     settle(&mut rt);
@@ -149,7 +149,7 @@ fn the_ampersand_between_album_artists_opens_what_they_made_together() {
     let mut rt = runtime();
     rt.update(|s, _| {
         s.set_library(with_older_album(), false);
-        s.base.active_mut().set_mode(Mode::Albums);
+        s.views.active_mut().set_mode(Mode::Albums);
         s.views_changed();
     });
     settle(&mut rt);
@@ -546,7 +546,7 @@ fn link_artist_merges_links_and_removes_names_and_saves_them() {
     let mut rt = prefs.runtime();
     rt.update(|s, tx| s.show_artist("Somebody", tx));
     settle(&mut rt);
-    let saved = || crate::base::store::Store::at(prefs.0.join("prefs.json")).load_relations().expect("readable");
+    let saved = || crate::query::store::Store::at(prefs.0.join("prefs.json")).load_relations().expect("readable");
 
     // Same artist, picked from the library's names as typed.
     click(&mut rt, "artist-link");

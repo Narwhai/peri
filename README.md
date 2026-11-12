@@ -50,7 +50,7 @@ On Linux, building needs `libxkbcommon`, `wayland` and `alsa-lib` (PipeWire work
 
 ## Views, filters and grouping
 
-Views work like Obsidian's [Bases](https://help.obsidian.md/bases/views). By default a view lists every song in a flat list. Change it from the toolbar under the header:
+A view is a saved query over the library: a filter, sorts and an optional grouping (the design follows Obsidian's [Bases](https://help.obsidian.md/bases/views)). By default a view lists every song in a flat list. Change it from the toolbar under the header:
 
 - **Views** (top left): create, rename (double-click or ✎), duplicate, delete and switch views. Each view keeps its own filter, sorts and grouping.
 - **Sort:** add several sorts and reorder them with ↑. Each sorts A→Z / 0→9 / old→new or the reverse. Songs missing a value always go last.

@@ -9,7 +9,7 @@ use super::property::Property;
 use super::view::View;
 
 const APP_ID: &str = "rune-music";
-const KEY: &str = "base";
+const KEY: &str = "views";
 const LIBRARY_KEY: &str = "library";
 const ARTISTS_KEY: &str = "artists";
 const LASTFM_KEY: &str = "lastfm";
@@ -20,10 +20,10 @@ const TAB_KEY: &str = "tab";
 const VERSION: u32 = 1;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Base {
+pub struct Views {
     pub version: u32,
     /// Never empty: the first view is "All songs" until the user renames or reorders it.
-    pub views: Vec<View>,
+    pub list: Vec<View>,
     pub active: usize,
     /// The columns of album pages' and artist pages' song tables, which belong to no view.
     #[serde(default = "page_columns")]
@@ -45,29 +45,29 @@ pub fn page_columns() -> Vec<Property> {
     vec![Property::Artist, Property::Format, Property::Duration]
 }
 
-impl Default for Base {
-    fn default() -> Base {
-        Base { version: VERSION, views: vec![View::new("All songs")], active: 0, page_columns: page_columns(), page_widths: Default::default(), card_size: default_card_size() }
+impl Default for Views {
+    fn default() -> Views {
+        Views { version: VERSION, list: vec![View::new("All songs")], active: 0, page_columns: page_columns(), page_widths: Default::default(), card_size: default_card_size() }
     }
 }
 
-impl Base {
+impl Views {
     pub fn active(&self) -> &View {
-        &self.views[self.active]
+        &self.list[self.active]
     }
 
     pub fn active_mut(&mut self) -> &mut View {
-        &mut self.views[self.active]
+        &mut self.list[self.active]
     }
 
     /// Repairs what a hand-edited file could break: no views, or an active index past the end.
-    fn normalized(mut self) -> Base {
-        if self.views.is_empty() {
-            self.views.push(View::new("All songs"));
+    fn normalized(mut self) -> Views {
+        if self.list.is_empty() {
+            self.list.push(View::new("All songs"));
         }
-        self.active = self.active.min(self.views.len() - 1);
+        self.active = self.active.min(self.list.len() - 1);
         self.card_size = super::view::clamp_card_size(self.card_size);
-        for view in &mut self.views {
+        for view in &mut self.list {
             view.card_size = view.card_size.map(super::view::clamp_card_size);
         }
         self
@@ -104,13 +104,13 @@ impl Store {
         }
     }
 
-    /// The saved base, or the default when there is none or it's from an incompatible version.
-    pub fn load(&self) -> Base {
-        self.prefs.get::<Base>(KEY).filter(|b| b.version == VERSION).map_or_else(Base::default, Base::normalized)
+    /// The saved views, or the default when there is none or it's from an incompatible version.
+    pub fn load(&self) -> Views {
+        self.prefs.get::<Views>(KEY).filter(|b| b.version == VERSION).map_or_else(Views::default, Views::normalized)
     }
 
-    pub fn save(&mut self, base: &Base) -> Result<(), String> {
-        self.prefs.set(KEY, base).map_err(|e| format!("Couldn't save views: {e}"))
+    pub fn save(&mut self, views: &Views) -> Result<(), String> {
+        self.prefs.set(KEY, views).map_err(|e| format!("Couldn't save views: {e}"))
     }
 
     /// The saved library folders and files, scanned at launch; none when nothing is saved.

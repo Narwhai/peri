@@ -8,7 +8,7 @@ use std::sync::mpsc::{Receiver, Sender};
 use rune::{Env, Key, KeyEvent, Mods, Runtime};
 
 use crate::app::{App, Output};
-use crate::base::store::Store;
+use crate::query::store::Store;
 use crate::lastfm::{Answer, Call, Client, Credentials, Error, INVALID_SESSION, Job, Reply, Saved, Session};
 use crate::view::view;
 

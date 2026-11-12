@@ -3,8 +3,8 @@
 use rune::{Env, Key, KeyEvent, Mods, Runtime};
 
 use crate::app::{App, Output, Page, Panel, album_key, row_key};
-use crate::base::property::{Mode, Property};
-use crate::base::store::Store;
+use crate::query::property::{Mode, Property};
+use crate::query::store::Store;
 use crate::credits::{Credit, Role};
 use crate::library::Track;
 use crate::view::view;
@@ -65,21 +65,21 @@ fn columns_show_and_hide_from_the_popover_and_save_with_the_view() {
     assert_eq!(rt.state.panel, Some(Panel::Columns));
     click(&mut rt, "column-producer");
     click(&mut rt, "column-album");
-    assert_eq!(rt.state.base.active().columns, [Property::Artist, Property::Duration, Property::Producer]);
+    assert_eq!(rt.state.views.active().columns, [Property::Artist, Property::Duration, Property::Producer]);
     assert_eq!(cell(&rt, &dance, "col-producer").as_deref(), Some("Brian Eno"));
     assert!(cell(&rt, &dance, "col-album").is_none());
     // ↑ moves Producer before Duration.
     click(&mut rt, "column-producer-up");
-    assert_eq!(rt.state.base.active().columns, [Property::Artist, Property::Producer, Property::Duration]);
+    assert_eq!(rt.state.views.active().columns, [Property::Artist, Property::Producer, Property::Duration]);
     click(&mut rt, "columns-reset");
-    assert_eq!(rt.state.base.active().columns, crate::base::view::default_columns());
+    assert_eq!(rt.state.views.active().columns, crate::query::view::default_columns());
 }
 
 #[test]
 fn a_credit_columns_names_open_the_artist_page() {
     let mut rt = runtime();
     rt.update(|s, _| {
-        s.base.active_mut().columns = vec![Property::Producer];
+        s.views.active_mut().columns = vec![Property::Producer];
         s.views_changed();
     });
     settle(&mut rt);
@@ -105,13 +105,13 @@ fn song_views_show_covers_until_switched_off_and_save_it() {
     let row = row_key(dance, None);
     let cover = format!("cover{dance}");
     let in_row = |rt: &Runtime<App>| rt.elements().into_iter().any(|e| e.key.as_deref() == Some(cover.as_str()) && e.path.contains(&format!("/{row}/")));
-    assert!(rt.state.base.active().covers, "new views show covers");
+    assert!(rt.state.views.active().covers, "new views show covers");
     assert!(in_row(&rt));
     click(&mut rt, "columns");
     click(&mut rt, "columns-covers");
-    assert!(!rt.state.base.active().covers);
+    assert!(!rt.state.views.active().covers);
     assert!(!in_row(&rt));
-    assert!(rt.state.base.views.iter().filter(|v| v.covers).count() < rt.state.base.views.len(), "only the active view changes");
+    assert!(rt.state.views.list.iter().filter(|v| v.covers).count() < rt.state.views.list.len(), "only the active view changes");
 }
 
 #[test]
@@ -133,7 +133,7 @@ fn the_covers_switch_shows_only_for_song_views() {
     click(&mut rt, "columns");
     assert!(has(&rt, "columns-covers"));
     rt.update(|s, _| {
-        s.base.active_mut().set_mode(Mode::Albums);
+        s.views.active_mut().set_mode(Mode::Albums);
         s.views_changed();
     });
     settle(&mut rt);
@@ -144,7 +144,7 @@ fn the_covers_switch_shows_only_for_song_views() {
 fn album_pages_use_their_own_columns() {
     let mut rt = runtime();
     rt.update(|s, _| {
-        s.base.active_mut().set_mode(Mode::Albums);
+        s.views.active_mut().set_mode(Mode::Albums);
         s.views_changed();
     });
     settle(&mut rt);
@@ -155,8 +155,8 @@ fn album_pages_use_their_own_columns() {
     click(&mut rt, "columns");
     click(&mut rt, "column-composer");
     assert_eq!(cell(&rt, &row, "col-composer").as_deref(), Some("Laraaji"));
-    assert!(rt.state.base.page_columns.contains(&Property::Composer));
-    assert!(!rt.state.base.active().columns.contains(&Property::Composer), "the view's columns don't change");
+    assert!(rt.state.views.page_columns.contains(&Property::Composer));
+    assert!(!rt.state.views.active().columns.contains(&Property::Composer), "the view's columns don't change");
 }
 
 #[test]
@@ -238,13 +238,13 @@ fn dragging_a_header_edge_resizes_the_column_and_double_click_or_reset_restores_
     let grown = width_of(&rt, album);
     assert!(grown > crate::view::table_width(Property::Album), "album names grow with spare room, got {grown}");
     drag(&mut rt, &format!("{album}-resize"), 60.0);
-    let set = rt.state.base.active().widths.get(&Property::Album).copied().expect("dragging sets a width");
+    let set = rt.state.views.active().widths.get(&Property::Album).copied().expect("dragging sets a width");
     assert!((set - (grown + 60.0)).abs() <= 1.0, "the drag starts from the width on screen: {grown} + 60 ≠ {set}");
     assert!((width_of(&rt, album) - set).abs() <= 1.0);
     assert!((width_of(&rt, "col-album") - set).abs() <= 1.0, "rows follow the header");
     // Never narrower than the minimum.
     drag(&mut rt, &format!("{album}-resize"), -1000.0);
-    assert_eq!(rt.state.base.active().widths.get(&Property::Album).copied(), Some(40.0));
+    assert_eq!(rt.state.views.active().widths.get(&Property::Album).copied(), Some(40.0));
     // Double-click lets it size itself again.
     let (x, y) = rt.find(&format!("{album}-resize")).expect("handle");
     for _ in 0..2 {
@@ -252,13 +252,13 @@ fn dragging_a_header_edge_resizes_the_column_and_double_click_or_reset_restores_
         rt.pointer_up(x, y);
     }
     settle(&mut rt);
-    assert!(rt.state.base.active().widths.is_empty());
+    assert!(rt.state.views.active().widths.is_empty());
     // Reset widths in the Columns popover clears every dragged width.
     drag(&mut rt, "table-header-col-duration-resize", 30.0);
-    assert!(!rt.state.base.active().widths.is_empty());
+    assert!(!rt.state.views.active().widths.is_empty());
     click(&mut rt, "columns");
     click(&mut rt, "columns-reset-widths");
-    assert!(rt.state.base.active().widths.is_empty());
+    assert!(rt.state.views.active().widths.is_empty());
 }
 
 #[test]
@@ -268,6 +268,6 @@ fn page_tables_keep_their_own_widths() {
     rt.update(|s, tx| s.show_artist("Brian Eno", tx));
     settle(&mut rt);
     drag(&mut rt, "credits-header-col-artist-resize", 50.0);
-    assert!(rt.state.base.page_widths.contains_key(&Property::Artist));
-    assert!(rt.state.base.active().widths.is_empty(), "the view's widths are its own");
+    assert!(rt.state.views.page_widths.contains_key(&Property::Artist));
+    assert!(rt.state.views.active().widths.is_empty(), "the view's widths are its own");
 }

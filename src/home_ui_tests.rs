@@ -4,7 +4,7 @@
 use rune::{Env, Key, KeyEvent, Mods, Runtime};
 
 use crate::app::{App, Output, Page, RECENT_COUNT};
-use crate::base::store::Store;
+use crate::query::store::Store;
 use crate::library::Track;
 use crate::view::view;
 

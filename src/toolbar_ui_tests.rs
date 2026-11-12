@@ -1,12 +1,12 @@
-//! The Bases toolbar driven headlessly: views, sort, group and filter popovers.
+//! The toolbar driven headlessly: views, sort, group and filter popovers.
 
 use rune::{Env, Key, KeyEvent, Mods, Runtime};
 
 use crate::app::{App, Output, Row, header_key, row_key};
-use crate::base::filter::{Conjunction, Node, Operator};
-use crate::base::property::Property;
-use crate::base::store::Store;
-use crate::base::view::Direction;
+use crate::query::filter::{Conjunction, Node, Operator};
+use crate::query::property::Property;
+use crate::query::store::Store;
+use crate::query::view::Direction;
 use crate::view::view;
 
 fn runtime() -> Runtime<App> {
@@ -88,10 +88,23 @@ fn building_a_filter_from_the_popover_narrows_the_list() {
         edit.focus = 0;
     });
     type_text(&mut rt, "2020");
-    let Node::Condition(c) = &rt.state.base.active().filter.children[0] else { panic!("a condition") };
+    let Node::Condition(c) = &rt.state.views.active().filter.children[0] else { panic!("a condition") };
     assert_eq!((c.property, c.op, c.value.as_str()), (Property::Year, Operator::Ge, "2020"));
     assert_eq!(titles(&rt), ["Mary", "Change", "New Jeans", "Super Shy", "ETA", "Cool With You"]);
     assert_eq!(rt.elements().into_iter().find(|e| e.key.as_deref() == Some("filter")).and_then(|e| e.label).as_deref(), Some("1 filter"));
+    assert_eq!(result_count(&rt), "6 songs");
+}
+
+fn result_count(rt: &Runtime<App>) -> String {
+    rt.elements().into_iter().find(|e| e.key.as_deref() == Some("result-count")).and_then(|e| e.text).expect("the result count")
+}
+
+#[test]
+fn the_toolbar_counts_the_views_songs_or_albums() {
+    let mut rt = runtime();
+    assert_eq!(result_count(&rt), "13 songs");
+    click(&mut rt, "albums");
+    assert_eq!(result_count(&rt), format!("{} albums", rt.state.shown_albums.len()));
 }
 
 #[test]
@@ -99,14 +112,14 @@ fn nested_groups_are_added_switched_and_removed() {
     let mut rt = runtime();
     click(&mut rt, "filter");
     click(&mut rt, "add-group");
-    assert!(matches!(&rt.state.base.active().filter.children[0], Node::Group(g) if g.conjunction == Conjunction::Or));
+    assert!(matches!(&rt.state.views.active().filter.children[0], Node::Group(g) if g.conjunction == Conjunction::Or));
     choose(&mut rt, "conj-0", "None of the following are true");
     click(&mut rt, "cond-0-0-value");
     type_text(&mut rt, "pop");
     assert!(titles(&rt).iter().all(|t| !["New Jeans", "ETA"].contains(&t.as_str())), "none of: genre has pop");
     assert_eq!(rt.state.filtered.len(), 9);
     click(&mut rt, "group-0-remove");
-    assert!(rt.state.base.active().filter.children.is_empty());
+    assert!(rt.state.views.active().filter.children.is_empty());
     assert_eq!(rt.state.filtered.len(), 13);
 }
 
@@ -117,7 +130,7 @@ fn grouping_shows_sticky_headers_that_collapse_and_next_follows_the_view() {
     click(&mut rt, "add-group");
     choose(&mut rt, "group-prop", "Genre");
     click(&mut rt, "group-dir");
-    assert_eq!(rt.state.base.active().group_by.map(|g| g.direction), Some(Direction::Desc));
+    assert_eq!(rt.state.views.active().group_by.map(|g| g.direction), Some(Direction::Desc));
     rt.key(KeyEvent { key: Key::Escape, mods: Mods::default() });
     settle(&mut rt);
     assert_eq!(rt.state.panel, None, "Escape closes the popover");
@@ -154,7 +167,7 @@ fn sorts_are_added_reordered_and_flipped_from_the_popover() {
     click(&mut rt, "add-sort");
     choose(&mut rt, "sort1-prop", "Year");
     click(&mut rt, "sort1-up");
-    let sorts = &rt.state.base.active().sorts;
+    let sorts = &rt.state.views.active().sorts;
     assert_eq!((sorts[0].property, sorts[1].property), (Property::Year, Property::Duration));
     assert_eq!(titles(&rt)[0], "Meditation #1", "1980 first, then the longest of them");
     click(&mut rt, "sort0-remove");
@@ -172,26 +185,26 @@ fn views_are_created_renamed_switched_duplicated_and_deleted() {
 
     click(&mut rt, "views");
     click(&mut rt, "add-view");
-    assert_eq!(rt.state.base.active, 1);
-    assert!(rt.state.base.active().group_by.is_none(), "a new view starts flat");
+    assert_eq!(rt.state.views.active, 1);
+    assert!(rt.state.views.active().group_by.is_none(), "a new view starts flat");
     assert!(rt.state.sections.is_empty());
     // The new view's name is selected for renaming: typing replaces it.
     type_text(&mut rt, "Short songs");
     rt.key(KeyEvent { key: Key::Enter, mods: Mods::default() });
     settle(&mut rt);
-    assert_eq!(rt.state.base.views[1].name, "Short songs");
+    assert_eq!(rt.state.views.list[1].name, "Short songs");
 
     click(&mut rt, "view0");
-    assert_eq!(rt.state.base.active, 0);
+    assert_eq!(rt.state.views.active, 0);
     assert!(!rt.state.sections.is_empty(), "back to the grouped view");
 
     click(&mut rt, "views");
     click(&mut rt, "duplicate0");
-    assert_eq!(rt.state.base.views.iter().map(|v| v.name.as_str()).collect::<Vec<_>>(), ["All songs", "All songs copy", "Short songs"]);
-    assert!(rt.state.base.views[1].group_by.is_some());
+    assert_eq!(rt.state.views.list.iter().map(|v| v.name.as_str()).collect::<Vec<_>>(), ["All songs", "All songs copy", "Short songs"]);
+    assert!(rt.state.views.list[1].group_by.is_some());
     click(&mut rt, "delete0");
-    assert_eq!(rt.state.base.views.len(), 2);
-    assert_eq!(rt.state.base.active().name, "All songs copy", "deleting the active view moves to its neighbour");
+    assert_eq!(rt.state.views.list.len(), 2);
+    assert_eq!(rt.state.views.active().name, "All songs copy", "deleting the active view moves to its neighbour");
 }
 
 #[test]
@@ -209,7 +222,7 @@ fn views_save_as_they_change_and_load_on_the_next_launch() {
 
     let mut next = App::new(Output::Silent, Store::at(&file));
     crate::scene_library(&mut next);
-    assert_eq!(next.base.active().group_by.map(|g| g.property), Some(Property::Year));
+    assert_eq!(next.views.active().group_by.map(|g| g.property), Some(Property::Year));
     assert_eq!(next.sections.first().map(|s| s.title.as_str()), Some("1980"));
     std::fs::remove_dir_all(&dir).unwrap();
 }

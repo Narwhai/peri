@@ -1,20 +1,19 @@
-//! The toolbar under the header: the view menu, and Sort, Group and Filter popovers, as in
-//! Obsidian's Bases.
+//! The toolbar under the header: the view menu, and Sort, Group and Filter popovers.
 
 use rune::{Cursor, El, Tx, col, el, icon, row, text};
 use rune_kit::{Kit, Placement, Select, TextInput, popover, scrim};
 
 use super::*;
 use crate::app::{App, Panel};
-use crate::base::property::{Mode, Property};
-use crate::base::view::{Direction, GroupBy, Layout, Sort, View};
+use crate::query::property::{Mode, Property};
+use crate::query::view::{Direction, GroupBy, Layout, Sort, View};
 use crate::icons;
 use crate::palette::Palette;
 
 const BAR_H: f32 = 40.0;
 
 pub(super) fn toolbar(s: &App, p: &Palette, kit: &Kit, layer: &mut Vec<El>) -> El {
-    let view = s.base.active();
+    let view = s.views.active();
     let views = views_menu(s, p, kit, layer);
     let sort_label = match view.sorts.len() {
         0 => "Sort".to_string(),
@@ -54,8 +53,8 @@ pub(super) fn toolbar(s: &App, p: &Palette, kit: &Kit, layer: &mut Vec<El>) -> E
         .child(el().w(8.0))
         .child(segmented("mode", &[("songs", "Songs"), ("albums", "Albums")], if albums { "albums" } else { "songs" }, p, |s: &mut App, v: &str| {
             let mode = if v == "albums" { Mode::Albums } else { Mode::Songs };
-            if s.base.active().mode != mode {
-                s.base.active_mut().set_mode(mode);
+            if s.views.active().mode != mode {
+                s.views.active_mut().set_mode(mode);
                 s.collapsed.clear();
                 s.filter_edits.clear();
                 s.show_library();
@@ -66,8 +65,8 @@ pub(super) fn toolbar(s: &App, p: &Palette, kit: &Kit, layer: &mut Vec<El>) -> E
         let layout = if view.layout == Layout::Grid { "grid" } else { "list" };
         bar = bar.child(el().w(4.0)).child(segmented("layout", &[("grid", "Grid"), ("list", "List")], layout, p, |s: &mut App, v: &str| {
             let layout = if v == "grid" { Layout::Grid } else { Layout::List };
-            if s.base.active().layout != layout {
-                s.base.active_mut().layout = layout;
+            if s.views.active().layout != layout {
+                s.views.active_mut().layout = layout;
                 s.show_library();
                 s.views_changed();
             }
@@ -79,10 +78,18 @@ pub(super) fn toolbar(s: &App, p: &Palette, kit: &Kit, layer: &mut Vec<El>) -> E
     // Album grids show no song tables, unless an album page is open.
     let tables = !(albums && view.layout == Layout::Grid) || s.page != crate::app::Page::Library;
     bar.child(el().grow(1.0))
+        .children((s.page == crate::app::Page::Library).then(|| result_count(s, albums, p)))
         .children(tables.then_some(columns))
         .child(sort)
         .child(group)
         .child(filter)
+}
+
+/// A toolbar popover: `trigger` toggles `panel`, and the body shows while it's open. Selects
+/// How many songs, or albums in an album view, the active view shows.
+fn result_count(s: &App, albums: bool, p: &Palette) -> El {
+    let label = if albums { plural(s.shown_albums.len(), "album") } else { plural(s.filtered.len(), "song") };
+    text(label.clone()).key("result-count").label(label).font(SMALL).color(p.tx3).px(8.0)
 }
 
 /// A toolbar popover: `trigger` toggles `panel`, and the body shows while it's open. Selects
@@ -169,10 +176,10 @@ pub(super) fn segmented(key: &'static str, options: &[(&'static str, &'static st
 /// view keeps its own once dragged; double-click the slider to follow the default again, and
 /// the dot after it makes this size the default.
 fn card_size_slider(s: &App, p: &Palette) -> El {
-    use crate::base::view::{CARD_SIZE_MAX, CARD_SIZE_MIN};
+    use crate::query::view::{CARD_SIZE_MAX, CARD_SIZE_MIN};
     let size = s.card_size();
     let fraction = (size - CARD_SIZE_MIN) / (CARD_SIZE_MAX - CARD_SIZE_MIN);
-    let own = s.base.active().card_size.is_some();
+    let own = s.views.active().card_size.is_some();
     let track = super::player::slider_track("card-size", fraction, true, p)
         .w(96.0)
         .label("Card size")
@@ -199,7 +206,7 @@ fn card_size_slider(s: &App, p: &Palette) -> El {
         .child(icon(&icons::GRID_SMALL, 14.0).color(p.tx3))
         .child(track)
         .child(icon(&icons::GRID_LARGE, 14.0).color(p.tx3));
-    if own && (size - s.base.card_size).abs() >= 0.5 {
+    if own && (size - s.views.card_size).abs() >= 0.5 {
         r = r.child(el().w(4.0)).child(
             super::pill_button("card-size-default", "Set as default", p)
                 .help("Album grids without their own size use this one")
@@ -212,7 +219,7 @@ fn card_size_slider(s: &App, p: &Palette) -> El {
 // Views
 
 fn views_menu(s: &App, p: &Palette, kit: &Kit, layer: &mut Vec<El>) -> El {
-    let view = s.base.active();
+    let view = s.views.active();
     let open = s.panel == Some(Panel::Views);
     let body = |_: &mut Vec<El>| views_body(s, p, kit);
     let trigger = row()
@@ -234,8 +241,8 @@ fn views_menu(s: &App, p: &Palette, kit: &Kit, layer: &mut Vec<El>) -> El {
 
 fn views_body(s: &App, p: &Palette, kit: &Kit) -> El {
     let mut list = col().key("view-list").padding(6.0).gap(2.0).w(300.0);
-    for (i, view) in s.base.views.iter().enumerate() {
-        let active = i == s.base.active;
+    for (i, view) in s.views.list.iter().enumerate() {
+        let active = i == s.views.active;
         let renaming = s.renaming == Some(i);
         let name: El = match renaming {
             true => TextInput::new(&s.rename)
@@ -282,7 +289,7 @@ fn views_body(s: &App, p: &Palette, kit: &Kit) -> El {
                 .on_double_press(move |s: &mut App| start_rename(s, i))
                 .child(small_icon_button(format!("rename{i}"), &icons::EDIT, "Rename view", p).on_press(move |s: &mut App| start_rename(s, i)))
                 .child(small_icon_button(format!("duplicate{i}"), &icons::COPY, "Duplicate view", p).on_press(move |s: &mut App| duplicate_view(s, i)));
-            if s.base.views.len() > 1 {
+            if s.views.list.len() > 1 {
                 item = item.child(small_icon_button(format!("delete{i}"), &icons::TRASH, "Delete view", p).on_press(move |s: &mut App| delete_view(s, i)));
             }
         }
@@ -294,9 +301,9 @@ fn views_body(s: &App, p: &Palette, kit: &Kit) -> El {
         .child(
             col().padding(6.0).child(
                 menu_row("add-view", &icons::PLUS, "New view", p).on_press_tx(|s: &mut App, tx| {
-                    let name = unique_name(&s.base.views, "New view");
-                    s.base.views.push(View::new(name));
-                    let i = s.base.views.len() - 1;
+                    let name = unique_name(&s.views.list, "New view");
+                    s.views.list.push(View::new(name));
+                    let i = s.views.list.len() - 1;
                     switch_view(s, i, tx);
                     start_rename(s, i);
                 }),
@@ -305,8 +312,8 @@ fn views_body(s: &App, p: &Palette, kit: &Kit) -> El {
 }
 
 fn switch_view(s: &mut App, i: usize, tx: &mut Tx) {
-    if s.base.active != i {
-        s.base.active = i;
+    if s.views.active != i {
+        s.views.active = i;
         s.collapsed.clear();
         s.filter_edits.clear();
         s.views_changed();
@@ -315,7 +322,7 @@ fn switch_view(s: &mut App, i: usize, tx: &mut Tx) {
 }
 
 fn start_rename(s: &mut App, i: usize) {
-    let name = s.base.views[i].name.clone();
+    let name = s.views.list[i].name.clone();
     let mut edit = rune::TextEdit::new(name.clone());
     // The whole name selected, so typing replaces it.
     edit.anchor = 0;
@@ -329,7 +336,7 @@ fn commit_rename(s: &mut App, tx: &mut Tx) {
     if let Some(i) = s.renaming.take() {
         let name = s.rename.text.trim().to_string();
         if !name.is_empty() {
-            s.base.views[i].name = name;
+            s.views.list[i].name = name;
             s.views_changed();
         }
     }
@@ -337,22 +344,22 @@ fn commit_rename(s: &mut App, tx: &mut Tx) {
 }
 
 fn duplicate_view(s: &mut App, i: usize) {
-    let mut copy = s.base.views[i].clone();
-    copy.name = unique_name(&s.base.views, &format!("{} copy", copy.name));
-    s.base.views.insert(i + 1, copy);
-    if s.base.active > i {
-        s.base.active += 1;
+    let mut copy = s.views.list[i].clone();
+    copy.name = unique_name(&s.views.list, &format!("{} copy", copy.name));
+    s.views.list.insert(i + 1, copy);
+    if s.views.active > i {
+        s.views.active += 1;
     }
     s.views_changed();
 }
 
 fn delete_view(s: &mut App, i: usize) {
-    if s.base.views.len() <= 1 {
+    if s.views.list.len() <= 1 {
         return;
     }
-    s.base.views.remove(i);
-    if s.base.active > i || s.base.active == s.base.views.len() {
-        s.base.active = s.base.active.saturating_sub(1);
+    s.views.list.remove(i);
+    if s.views.active > i || s.views.active == s.views.list.len() {
+        s.views.active = s.views.active.saturating_sub(1);
     }
     s.renaming = None;
     s.collapsed.clear();
@@ -373,7 +380,7 @@ pub(super) fn unique_name(views: &[View], base: &str) -> String {
 
 fn sort_body<'a>(s: &'a App, p: &'a Palette, kit: &'a Kit) -> impl FnOnce(&mut Vec<El>) -> El + 'a {
     move |layer| {
-        let view = s.base.active();
+        let view = s.views.active();
         let mut body = col().key("sort-body").w(360.0).padding(8.0).gap(4.0);
         if view.sorts.is_empty() {
             body = body.child(hint(if view.mode == Mode::Albums { "Albums are in library order: artist, then album." } else { "Songs are in library order: artist, album, then track." }, p));
@@ -381,10 +388,10 @@ fn sort_body<'a>(s: &'a App, p: &'a Palette, kit: &'a Kit) -> impl FnOnce(&mut V
         for (n, sort) in view.sorts.iter().enumerate() {
             let key = format!("sort{n}");
             let prop = property_select(s, kit, layer, format!("{key}-prop"), sort.property, move |s, prop| {
-                s.base.active_mut().sorts[n].property = prop;
+                s.views.active_mut().sorts[n].property = prop;
             });
             let dir = direction_button(format!("{key}-dir"), sort.direction, sort.property, p).on_press(move |s: &mut App| {
-                let d = &mut s.base.active_mut().sorts[n].direction;
+                let d = &mut s.views.active_mut().sorts[n].direction;
                 *d = d.flip();
                 s.views_changed();
             });
@@ -393,12 +400,12 @@ fn sort_body<'a>(s: &'a App, p: &'a Palette, kit: &'a Kit) -> impl FnOnce(&mut V
             r = r.child(prop).child(dir).child(el().grow(1.0));
             if n > 0 {
                 r = r.child(small_icon_button(format!("sort{n}-up"), &icons::ARROW_UP, "Sort first", p).on_press(move |s: &mut App| {
-                    s.base.active_mut().sorts.swap(n, n - 1);
+                    s.views.active_mut().sorts.swap(n, n - 1);
                     s.views_changed();
                 }));
             }
             r = r.child(small_icon_button(format!("sort{n}-remove"), &icons::TRASH, "Remove sort", p).on_press(move |s: &mut App| {
-                s.base.active_mut().sorts.remove(n);
+                s.views.active_mut().sorts.remove(n);
                 s.views_changed();
             }));
             body = body.child(r);
@@ -406,7 +413,7 @@ fn sort_body<'a>(s: &'a App, p: &'a Palette, kit: &'a Kit) -> impl FnOnce(&mut V
         let unused = Property::for_mode(view.mode).iter().copied().find(|p| !view.sorts.iter().any(|s| s.property == *p));
         if let Some(next) = unused {
             body = body.child(menu_row("add-sort", &icons::PLUS, "Add sort", p).on_press(move |s: &mut App| {
-                s.base.active_mut().sorts.push(Sort { property: next, direction: Direction::Asc });
+                s.views.active_mut().sorts.push(Sort { property: next, direction: Direction::Asc });
                 s.views_changed();
             }));
         }
@@ -418,7 +425,7 @@ fn sort_body<'a>(s: &'a App, p: &'a Palette, kit: &'a Kit) -> impl FnOnce(&mut V
 
 fn group_body<'a>(s: &'a App, p: &'a Palette, kit: &'a Kit) -> impl FnOnce(&mut Vec<El>) -> El + 'a {
     move |layer| {
-        let view = s.base.active();
+        let view = s.views.active();
         let mut body = col().key("group-body").w(360.0).padding(8.0).gap(4.0);
         match view.group_by {
             None => {
@@ -426,26 +433,26 @@ fn group_body<'a>(s: &'a App, p: &'a Palette, kit: &'a Kit) -> impl FnOnce(&mut 
                 body = body.child(hint(&format!("Group {what} into sections by one property. One with several artists or genres shows under each."), p));
                 body = body.child(menu_row("add-group", &icons::PLUS, "Group by…", p).on_press(|s: &mut App| {
                     let property = if s.mode() == Mode::Albums { Property::AlbumArtist } else { Property::Album };
-                    s.base.active_mut().group_by = Some(GroupBy { property, direction: Direction::Asc });
+                    s.views.active_mut().group_by = Some(GroupBy { property, direction: Direction::Asc });
                     s.collapsed.clear();
                     s.views_changed();
                 }));
             }
             Some(group) => {
                 let prop = property_select(s, kit, layer, "group-prop".into(), group.property, |s, prop| {
-                    if let Some(g) = &mut s.base.active_mut().group_by {
+                    if let Some(g) = &mut s.views.active_mut().group_by {
                         g.property = prop;
                     }
                     s.collapsed.clear();
                 });
                 let dir = direction_button("group-dir".into(), group.direction, group.property, p).on_press(|s: &mut App| {
-                    if let Some(g) = &mut s.base.active_mut().group_by {
+                    if let Some(g) = &mut s.views.active_mut().group_by {
                         g.direction = g.direction.flip();
                     }
                     s.views_changed();
                 });
                 let remove = small_icon_button("group-remove".into(), &icons::TRASH, "Stop grouping", p).on_press(|s: &mut App| {
-                    s.base.active_mut().group_by = None;
+                    s.views.active_mut().group_by = None;
                     s.collapsed.clear();
                     s.views_changed();
                 });
@@ -483,8 +490,8 @@ fn columns_body<'a>(s: &'a App, p: &'a Palette) -> impl FnOnce(&mut Vec<El>) -> 
         let page = s.page != crate::app::Page::Library;
         let mut body = col().key("columns-body").w(300.0).padding(8.0).gap(2.0);
         body = body.child(hint(if page { "Shown after the title in album and artist pages' song tables. Click to show or hide; ↑ moves a column left." } else { "Shown after the title in this view's song tables. Click to show or hide; ↑ moves a column left." }, p));
-        if !page && s.mode() == crate::base::property::Mode::Songs {
-            body = body.child(covers_switch(s.base.active().covers, p)).child(divider(p));
+        if !page && s.mode() == crate::query::property::Mode::Songs {
+            body = body.child(covers_switch(s.views.active().covers, p)).child(divider(p));
         }
         let mut list = col().key("column-list").w_full().gap(2.0);
         // Shown columns first in their order, then the rest in property order.
@@ -528,7 +535,7 @@ fn columns_body<'a>(s: &'a App, p: &'a Palette) -> impl FnOnce(&mut Vec<El>) -> 
         }
         body = body.child(col().key("column-scroll").w_full().max_h(420.0).scroll(rune::ScrollSpec { stick_bottom: false }).child(list));
         body.child(divider(p)).child(menu_row("columns-reset", &icons::COLLAPSE, "Reset to default", p).on_press(|s: &mut App| {
-            let default = if s.page == crate::app::Page::Library { crate::base::view::default_columns() } else { crate::base::store::page_columns() };
+            let default = if s.page == crate::app::Page::Library { crate::query::view::default_columns() } else { crate::query::store::page_columns() };
             *s.shown_columns_mut() = default;
             s.views_changed();
         }))
@@ -558,7 +565,7 @@ fn covers_switch(on: bool, p: &Palette) -> El {
         .checked(on)
         .label("Show covers")
         .on_press(|s: &mut App| {
-            let view = s.base.active_mut();
+            let view = s.views.active_mut();
             view.covers = !view.covers;
             s.views_changed();
         })
@@ -600,7 +607,7 @@ pub(super) fn select(s: &App, kit: &Kit, layer: &mut Vec<El>, key: String, optio
 }
 
 fn direction_button(key: String, direction: Direction, property: Property, p: &Palette) -> El {
-    use crate::base::property::Kind;
+    use crate::query::property::Kind;
     let label = match (property.kind(), direction) {
         (Kind::Text | Kind::List, Direction::Asc) => "A → Z",
         (Kind::Text | Kind::List, Direction::Desc) => "Z → A",

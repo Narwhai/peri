@@ -1,6 +1,6 @@
-//! Bases, after Obsidian's: saved views over the library, each with a nested filter, sorts and
-//! an optional group-by. With no filters, sorts or grouping a view is the whole library in
-//! library order.
+//! Queries over the library: saved views, each with a nested filter, sorts and an optional
+//! group-by. With no filters, sorts or grouping a view is the whole library in library order.
+//! The design follows Obsidian's Bases.
 //!
 //! - [`property`]: the song attributes views read, and their values.
 //! - [`filter`]: conditions (property, operator, value) in all/any/none groups, nested.

@@ -7,7 +7,7 @@ mod album;
 mod app;
 mod artist;
 mod audio;
-mod base;
+mod query;
 mod covers;
 mod collab;
 mod credits;
@@ -32,7 +32,7 @@ mod artist_ui_tests;
 #[cfg(test)]
 mod table_ui_tests;
 #[cfg(test)]
-mod base_ui_tests;
+mod toolbar_ui_tests;
 #[cfg(test)]
 mod graph_ui_tests;
 #[cfg(test)]
@@ -51,11 +51,11 @@ mod tests;
 mod zoom_ui_tests;
 
 use app::{App, Output, Panel};
-use base::filter::{Condition, Conjunction, Group, Node, Operator};
-use base::property::Property;
-use base::store::Store;
-use base::property::Mode;
-use base::view::{Direction, GroupBy, Layout, Sort, View};
+use query::filter::{Condition, Conjunction, Group, Node, Operator};
+use query::property::Property;
+use query::store::Store;
+use query::property::Mode;
+use query::view::{Direction, GroupBy, Layout, Sort, View};
 use library::Track;
 use rune::AppSpec;
 
@@ -133,8 +133,8 @@ fn scene_grouped(s: &mut App) {
     let mut view = View::new("By genre");
     view.group_by = Some(GroupBy { property: Property::Genre, direction: Direction::Asc });
     view.sorts = vec![Sort { property: Property::Year, direction: Direction::Desc }];
-    s.base.views.push(view);
-    s.base.active = 1;
+    s.views.list.push(view);
+    s.views.active = 1;
     s.views_changed();
 }
 
@@ -142,7 +142,7 @@ fn scene_grouped(s: &mut App) {
 fn scene_filter(s: &mut App) {
     scene_grouped(s);
     let cond = |property, op, value: &str| Node::Condition(Condition { property, op, value: value.into() });
-    s.base.active_mut().filter = Group {
+    s.views.active_mut().filter = Group {
         conjunction: Conjunction::And,
         children: vec![
             cond(Property::Year, Operator::Ge, "2000"),
@@ -173,8 +173,8 @@ fn album_view(s: &mut App, layout: Layout) {
     view.set_mode(Mode::Albums);
     view.layout = layout;
     view.sorts = vec![Sort { property: Property::AlbumArtist, direction: Direction::Asc }, Sort { property: Property::Year, direction: Direction::Desc }];
-    s.base.views.push(view);
-    s.base.active = s.base.views.len() - 1;
+    s.views.list.push(view);
+    s.views.active = s.views.list.len() - 1;
     s.views_changed();
 }
 

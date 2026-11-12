@@ -457,7 +457,7 @@ impl Borders for El {
 
 /// A column's default width, for tests.
 #[cfg(test)]
-pub fn table_width(c: crate::base::property::Property) -> f32 {
+pub fn table_width(c: crate::query::property::Property) -> f32 {
     table::width(c)
 }
 

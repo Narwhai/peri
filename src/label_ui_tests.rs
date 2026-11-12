@@ -3,7 +3,7 @@
 use rune::{Env, Runtime};
 
 use crate::app::{App, Output, Page};
-use crate::base::store::Store;
+use crate::query::store::Store;
 use crate::view::view;
 
 fn runtime() -> Runtime<App> {

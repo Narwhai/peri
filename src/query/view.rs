@@ -78,8 +78,8 @@ pub struct View {
     /// Widths the user dragged columns to; the rest size themselves.
     #[serde(default)]
     pub widths: Widths,
-    /// Album grids: the cover width cards aim for, in points; `None` follows the base's
-    /// default.
+    /// Album grids: the cover width cards aim for, in points; `None` follows
+    /// `Views::card_size`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub card_size: Option<f32>,
     /// Song views: whether rows show their album's cover between the number and the title.

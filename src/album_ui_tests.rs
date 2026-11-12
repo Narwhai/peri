@@ -3,10 +3,10 @@
 use rune::{Env, Key, KeyEvent, Mods, Runtime};
 
 use crate::app::{App, Output, Page, album_key};
-use crate::base::filter::{Condition, Node, Operator};
-use crate::base::property::{Mode, Property};
-use crate::base::store::Store;
-use crate::base::view::Layout;
+use crate::query::filter::{Condition, Node, Operator};
+use crate::query::property::{Mode, Property};
+use crate::query::store::Store;
+use crate::query::view::Layout;
 use crate::view::view;
 
 fn runtime() -> Runtime<App> {
@@ -55,8 +55,8 @@ fn text_of(rt: &Runtime<App>, key: &str) -> String {
 fn switching_to_albums_shows_a_grid_of_every_album() {
     let mut rt = runtime();
     click(&mut rt, "mode/albums");
-    assert_eq!(rt.state.base.active().mode, Mode::Albums);
-    assert_eq!(rt.state.base.active().layout, Layout::Grid);
+    assert_eq!(rt.state.views.active().mode, Mode::Albums);
+    assert_eq!(rt.state.views.active().layout, Layout::Grid);
     assert!(!rt.elements().iter().any(|e| e.path.contains("header") && e.text.as_deref() == Some("4 albums")), "the header has no album count");
     assert_eq!(shown_titles(&rt), ["Live Sessions", "Day of Radiance", "Get Up", "Spaces"]);
     for a in 0..4 {
@@ -64,7 +64,7 @@ fn switching_to_albums_shows_a_grid_of_every_album() {
     }
     assert!(rt.state.columns >= 4, "980 points fit at least four columns, got {}", rt.state.columns);
     click(&mut rt, "layout/list");
-    assert_eq!(rt.state.base.active().layout, Layout::List);
+    assert_eq!(rt.state.views.active().layout, Layout::List);
     assert!(rt.find("play-album").is_some(), "list cards have a play button");
 }
 
@@ -73,13 +73,13 @@ fn sorting_albums_by_artist_clusters_each_artists_albums() {
     let mut rt = runtime();
     click(&mut rt, "mode/albums");
     rt.update(|s, _| {
-        s.base.active_mut().sorts = vec![crate::base::view::Sort { property: Property::Year, direction: crate::base::view::Direction::Asc }];
+        s.views.active_mut().sorts = vec![crate::query::view::Sort { property: Property::Year, direction: crate::query::view::Direction::Asc }];
         s.views_changed();
     });
     settle(&mut rt);
     assert_eq!(shown_titles(&rt), ["Day of Radiance", "Spaces", "Get Up", "Live Sessions"], "1980, 2013, 2023, 2024");
     rt.update(|s, _| {
-        s.base.active_mut().group_by = Some(crate::base::view::GroupBy { property: Property::Genre, direction: crate::base::view::Direction::Asc });
+        s.views.active_mut().group_by = Some(crate::query::view::GroupBy { property: Property::Genre, direction: crate::query::view::Direction::Asc });
         s.views_changed();
     });
     settle(&mut rt);
@@ -178,15 +178,15 @@ fn album_filters_use_album_properties_and_switching_modes_drops_song_only_ones()
     let mut rt = runtime();
     rt.update(|s, _| {
         let cond = |property, op, value: &str| Node::Condition(Condition { property, op, value: value.into() });
-        s.base.active_mut().filter.children = vec![cond(Property::Year, Operator::Ge, "2013"), cond(Property::Track, Operator::Is, "1")];
+        s.views.active_mut().filter.children = vec![cond(Property::Year, Operator::Ge, "2013"), cond(Property::Track, Operator::Is, "1")];
         s.views_changed();
     });
     click(&mut rt, "mode/albums");
-    let filter = &rt.state.base.active().filter.children;
+    let filter = &rt.state.views.active().filter.children;
     assert_eq!(filter.len(), 1, "albums have no track number, so that condition goes");
     assert_eq!(shown_titles(&rt), ["Live Sessions", "Get Up", "Spaces"]);
     rt.update(|s, _| {
-        s.base.active_mut().filter.children = vec![Node::Condition(Condition { property: Property::Tracks, op: Operator::Gt, value: "3".into() })];
+        s.views.active_mut().filter.children = vec![Node::Condition(Condition { property: Property::Tracks, op: Operator::Gt, value: "3".into() })];
         s.views_changed();
     });
     settle(&mut rt);

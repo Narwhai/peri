@@ -531,7 +531,7 @@ fn role_pill(t: &Track, role: Role, names: &[String], p: &Palette) -> table::Pil
 
 /// `rows` are the songs with what fills their Roles slots; `list` is what double-click plays.
 fn song_table(s: &App, key: &str, rows: Vec<(usize, Vec<Option<table::Pill>>)>, pills: &[f32], list: &[usize], p: &Palette) -> El {
-    let columns = table::Columns { shown: &s.base.page_columns, widths: &s.base.page_widths, pills, covers: false };
+    let columns = table::Columns { shown: &s.views.page_columns, widths: &s.views.page_widths, pills, covers: false };
     let mut body = col().child(table::header(&format!("{key}-header"), "", columns, 8.0, p));
     for (n, (i, pills)) in rows.into_iter().enumerate() {
         body = body.child(song_line(s, key, i, list, pills, !n.is_multiple_of(2), columns, p));

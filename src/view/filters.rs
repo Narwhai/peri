@@ -1,13 +1,13 @@
 //! The filter builder: a group's conjunction, its conditions (property, operator, value) and
-//! nested groups, as in Obsidian's Bases.
+//! nested groups.
 
 use rune::{El, TextEdit, col, el, row};
 use rune_kit::{Kit, TextInput};
 
 use super::toolbar::{hint, menu_row, property_select, select, small_icon_button};
 use crate::app::App;
-use crate::base::filter::{Condition, Conjunction, Group, Node, Operator};
-use crate::base::property::{Kind, Property};
+use crate::query::filter::{Condition, Conjunction, Group, Node, Operator};
+use crate::query::property::{Kind, Property};
 use crate::icons;
 use crate::palette::Palette;
 
@@ -15,7 +15,7 @@ use crate::palette::Palette;
 const MAX_DEPTH: usize = 3;
 
 pub(super) fn filter_body(s: &App, p: &Palette, kit: &Kit, layer: &mut Vec<El>) -> El {
-    let filter = &s.base.active().filter;
+    let filter = &s.views.active().filter;
     let mut body = col().key("filter-body").w(560.0).padding(8.0).gap(6.0);
     if filter.children.is_empty() {
         body = body.child(hint("No filters: every song shows. Add a filter to narrow the view.", p));
@@ -29,7 +29,7 @@ fn group(s: &App, p: &Palette, kit: &Kit, layer: &mut Vec<El>, g: &Group, path: 
     let conj_labels: Vec<&str> = Conjunction::ALL.iter().map(|c| c.label()).collect();
     let conj_path = at.clone();
     let conjunction = select(s, kit, layer, format!("conj{id}"), &conj_labels, g.conjunction.label(), 236.0, move |s, label| {
-        if let (Some(c), Some(group)) = (Conjunction::from_label(label), s.base.active_mut().filter.group_mut(&conj_path)) {
+        if let (Some(c), Some(group)) = (Conjunction::from_label(label), s.views.active_mut().filter.group_mut(&conj_path)) {
             group.conjunction = c;
         }
         s.views_changed();
@@ -38,7 +38,7 @@ fn group(s: &App, p: &Palette, kit: &Kit, layer: &mut Vec<El>, g: &Group, path: 
     if !path.is_empty() {
         let remove_path = at.clone();
         head = head.child(small_icon_button(format!("group{id}-remove"), &icons::TRASH, "Remove group", p).on_press(move |s: &mut App| {
-            s.base.active_mut().filter.remove(&remove_path);
+            s.views.active_mut().filter.remove(&remove_path);
             s.filter_edits.clear();
             s.views_changed();
         }));
@@ -54,7 +54,7 @@ fn group(s: &App, p: &Palette, kit: &Kit, layer: &mut Vec<El>, g: &Group, path: 
     }
     let add_path = at.clone();
     let mut actions = row().gap(4.0).child(menu_row_keyed(format!("add-filter{id}"), &icons::PLUS, "Add filter", p).on_press(move |s: &mut App| {
-        if let Some(group) = s.base.active_mut().filter.group_mut(&add_path) {
+        if let Some(group) = s.views.active_mut().filter.group_mut(&add_path) {
             group.children.push(Node::Condition(Condition::new(Property::Genre)));
         }
         s.views_changed();
@@ -62,7 +62,7 @@ fn group(s: &App, p: &Palette, kit: &Kit, layer: &mut Vec<El>, g: &Group, path: 
     if path.len() < MAX_DEPTH {
         let add_path = at.clone();
         actions = actions.child(menu_row_keyed(format!("add-group{id}"), &icons::GROUP, "Add filter group", p).on_press(move |s: &mut App| {
-            if let Some(group) = s.base.active_mut().filter.group_mut(&add_path) {
+            if let Some(group) = s.views.active_mut().filter.group_mut(&add_path) {
                 group.children.push(Node::Group(Group { conjunction: Conjunction::Or, children: vec![Node::Condition(Condition::new(Property::Genre))] }));
             }
             s.views_changed();
@@ -84,7 +84,7 @@ fn condition(s: &App, p: &Palette, kit: &Kit, layer: &mut Vec<El>, c: &Condition
 
     let prop_path = at.clone();
     let property = property_select(s, kit, layer, format!("cond{id}-prop"), c.property, move |s, prop| {
-        if let Some(Node::Condition(c)) = s.base.active_mut().filter.node_mut(&prop_path) {
+        if let Some(Node::Condition(c)) = s.views.active_mut().filter.node_mut(&prop_path) {
             c.set_property(prop);
         }
     });
@@ -92,7 +92,7 @@ fn condition(s: &App, p: &Palette, kit: &Kit, layer: &mut Vec<El>, c: &Condition
     let op_labels: Vec<&str> = Operator::for_kind(kind).iter().map(|o| o.label(kind)).collect();
     let op_path = at.clone();
     let operator = select(s, kit, layer, format!("cond{id}-op"), &op_labels, c.op.label(kind), 128.0, move |s, label| {
-        if let Some(Node::Condition(c)) = s.base.active_mut().filter.node_mut(&op_path)
+        if let Some(Node::Condition(c)) = s.views.active_mut().filter.node_mut(&op_path)
             && let Some(op) = Operator::from_label(c.property.kind(), label)
         {
             c.op = op;
@@ -108,7 +108,7 @@ fn condition(s: &App, p: &Palette, kit: &Kit, layer: &mut Vec<El>, c: &Condition
     }
     let remove_path = at.clone();
     r.child(small_icon_button(format!("cond{id}-remove"), &icons::TRASH, "Remove filter", p).on_press(move |s: &mut App| {
-        s.base.active_mut().filter.remove(&remove_path);
+        s.views.active_mut().filter.remove(&remove_path);
         // Paths after the removed one shift, so their editors would point at the wrong rows.
         s.filter_edits.clear();
         s.views_changed();
@@ -131,7 +131,7 @@ fn value_input(s: &App, _p: &Palette, kit: &Kit, c: &Condition, path: &[usize], 
         .width(None)
         .invalid(c.is_invalid())
         .on_edit(move |s: &mut App| {
-            let value = match s.base.active_mut().filter.node_mut(&edit_path) {
+            let value = match s.views.active_mut().filter.node_mut(&edit_path) {
                 Some(Node::Condition(c)) => c.value.clone(),
                 // TODO: the condition was removed under a pending edit; this editor is discarded.
                 _ => String::new(),
@@ -140,7 +140,7 @@ fn value_input(s: &App, _p: &Palette, kit: &Kit, c: &Condition, path: &[usize], 
         })
         .on_change(move |s: &mut App, _tx| {
             let Some(text) = s.filter_edits.get(&change_path).map(|e| e.text.clone()) else { return };
-            if let Some(Node::Condition(c)) = s.base.active_mut().filter.node_mut(&change_path) {
+            if let Some(Node::Condition(c)) = s.views.active_mut().filter.node_mut(&change_path) {
                 c.value = text;
             }
             s.views_changed();

@@ -6,9 +6,9 @@ use super::albums::{grid_row, grid_row_h, list_card, song_cover};
 use super::table;
 use super::*;
 use crate::app::{App, Row, album_key, grid_key, header_key, row_key};
-use crate::base::property::Mode;
-use crate::base::view::Layout;
-use crate::base::view::Section;
+use crate::query::property::Mode;
+use crate::query::view::Layout;
+use crate::query::view::Section;
 use crate::icons;
 use crate::library::{AUDIO_EXTENSIONS, Track};
 use crate::palette::Palette;
@@ -24,11 +24,11 @@ pub(super) fn list(s: &App, p: &Palette, cx: &mut Cx<App>) -> El {
         return empty_state(s, p);
     }
     let albums = s.mode() == Mode::Albums;
-    let grid = albums && s.base.active().layout == Layout::Grid;
+    let grid = albums && s.views.active().layout == Layout::Grid;
     let empty = if albums { s.shown_albums.is_empty() } else { s.filtered.is_empty() };
     if empty {
         let what = if albums { "albums" } else { "songs" };
-        let detail = format!("No {what} match the filters of “{}”.", s.base.active().name);
+        let detail = format!("No {what} match the filters of “{}”.", s.views.active().name);
         return col()
             .key("no-results")
             .w_full()
@@ -88,7 +88,7 @@ pub(super) fn list(s: &App, p: &Palette, cx: &mut Cx<App>) -> El {
                     let current = s.current == Some(track);
                     let playing = current && s.playing;
                     let number = number_in(s, track, section);
-                    let view = s.base.active();
+                    let view = s.views.active();
                     let columns = table::Columns { shown: &view.columns, widths: &view.widths, pills: &[], covers: view.covers };
                     let covers = if view.covers { s.covers.as_ref().map_or(0, |c| c.generation()) } else { 0 };
                     memo(row_key(track, section), (s.list_version, number, selected, current, playing, p.dark, columns.version(), covers), || {
@@ -113,7 +113,7 @@ pub(super) fn list(s: &App, p: &Palette, cx: &mut Cx<App>) -> El {
             }
         })
         .on_layout_tx(move |s: &mut App, r, tx: &mut Tx| {
-            if s.mode() == Mode::Albums && s.base.active().layout == Layout::Grid {
+            if s.mode() == Mode::Albums && s.views.active().layout == Layout::Grid {
                 // Refitting the columns rebuilds every grid row: land it at once, so the
                 // first layout (and a window resize) doesn't slide the rows into place.
                 tx.instant();
@@ -125,7 +125,7 @@ pub(super) fn list(s: &App, p: &Palette, cx: &mut Cx<App>) -> El {
     }
     // Songs: a table as wide as its columns need, scrolling sideways when the window is
     // narrower. The column header sits above the viewport and follows its sideways scroll.
-    let view = s.base.active();
+    let view = s.views.active();
     let columns = table::Columns { shown: &view.columns, widths: &view.widths, pills: &[], covers: view.covers };
     // A viewport scrolling both ways lays its content out at its natural width, so the table
     // fills the viewport itself, and is wider when its columns need it.

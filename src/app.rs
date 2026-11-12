@@ -9,10 +9,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::album::{self, Album, AlbumId};
 use crate::audio::{self, Engine};
-use crate::base::property::{Mode, Property};
+use crate::query::property::{Mode, Property};
 use crate::covers::Covers;
-use crate::base::store::{Base, Store};
-use crate::base::view::{Evaluated, Layout, Section, Widths, evaluate};
+use crate::query::store::{Views, Store};
+use crate::query::view::{Evaluated, Layout, Section, Widths, evaluate};
 use crate::lastfm::{self, scrobbling::{Effect, Scrobbling}};
 use crate::library::{self, ScanMsg, Track};
 use crate::listen::{Listen, unix_now};
@@ -166,7 +166,7 @@ pub struct App {
     /// Bumped whenever `filtered` or `sections` change, so the list knows its rows did.
     pub list_version: u64,
     /// The saved views; edits save at once.
-    pub base: Base,
+    pub views: Views,
     /// The folders and files the library is made of, saved and scanned at launch.
     pub library: Vec<PathBuf>,
     /// Merges and links between artists, from the preferences file (edited by hand for now).
@@ -284,7 +284,7 @@ impl App {
             zoom_preview: None,
             zoom_toast: None,
             list_version: 0,
-            base: store.load(),
+            views: store.load(),
             library: store.load_library(),
             relations_unreadable: relations_error.is_some(),
             relations,
@@ -538,7 +538,7 @@ impl App {
 
     /// Re-evaluates the active view over the library.
     pub fn refilter(&mut self) {
-        let view = self.base.active();
+        let view = self.views.active();
         match view.mode {
             Mode::Songs => {
                 let Evaluated { order, sections } = evaluate(view, &self.tracks, "");
@@ -561,7 +561,7 @@ impl App {
     }
 
     pub fn mode(&self) -> Mode {
-        self.base.active().mode
+        self.views.active().mode
     }
 
     /// The albums on the home page: the newest added, newest first; albums with no date are left out.
@@ -596,31 +596,31 @@ impl App {
     /// The song table columns on screen: the album or artist page's, else the view's.
     pub fn shown_columns(&self) -> &[Property] {
         match self.page {
-            Page::Library => &self.base.active().columns,
-            Page::Album(_) | Page::Artist(_) | Page::Label(_) | Page::Collab(_) | Page::Search | Page::Settings | Page::Graph | Page::Home => &self.base.page_columns,
+            Page::Library => &self.views.active().columns,
+            Page::Album(_) | Page::Artist(_) | Page::Label(_) | Page::Collab(_) | Page::Search | Page::Settings | Page::Graph | Page::Home => &self.views.page_columns,
         }
     }
 
     /// The columns the Columns popover edits: the ones on screen.
     pub fn shown_columns_mut(&mut self) -> &mut Vec<Property> {
         match self.page {
-            Page::Library => &mut self.base.active_mut().columns,
-            Page::Album(_) | Page::Artist(_) | Page::Label(_) | Page::Collab(_) | Page::Search | Page::Settings | Page::Graph | Page::Home => &mut self.base.page_columns,
+            Page::Library => &mut self.views.active_mut().columns,
+            Page::Album(_) | Page::Artist(_) | Page::Label(_) | Page::Collab(_) | Page::Search | Page::Settings | Page::Graph | Page::Home => &mut self.views.page_columns,
         }
     }
 
     /// The dragged column widths of the tables on screen, which go with their columns.
     pub fn shown_widths(&self) -> &Widths {
         match self.page {
-            Page::Library => &self.base.active().widths,
-            Page::Album(_) | Page::Artist(_) | Page::Label(_) | Page::Collab(_) | Page::Search | Page::Settings | Page::Graph | Page::Home => &self.base.page_widths,
+            Page::Library => &self.views.active().widths,
+            Page::Album(_) | Page::Artist(_) | Page::Label(_) | Page::Collab(_) | Page::Search | Page::Settings | Page::Graph | Page::Home => &self.views.page_widths,
         }
     }
 
     pub fn shown_widths_mut(&mut self) -> &mut Widths {
         match self.page {
-            Page::Library => &mut self.base.active_mut().widths,
-            Page::Album(_) | Page::Artist(_) | Page::Label(_) | Page::Collab(_) | Page::Search | Page::Settings | Page::Graph | Page::Home => &mut self.base.page_widths,
+            Page::Library => &mut self.views.active_mut().widths,
+            Page::Album(_) | Page::Artist(_) | Page::Label(_) | Page::Collab(_) | Page::Search | Page::Settings | Page::Graph | Page::Home => &mut self.views.page_widths,
         }
     }
 
@@ -1021,7 +1021,7 @@ impl App {
 
     /// Saves the views and re-evaluates the active one.
     pub fn views_changed(&mut self) {
-        if let Err(e) = self.store.save(&self.base) {
+        if let Err(e) = self.store.save(&self.views) {
             self.error = Some(e);
         }
         self.refilter();
@@ -1033,7 +1033,7 @@ impl App {
     }
 
     fn compute_rows(&self) -> Vec<Row> {
-        let grid = self.mode() == Mode::Albums && self.base.active().layout == Layout::Grid;
+        let grid = self.mode() == Mode::Albums && self.views.active().layout == Layout::Grid;
         let columns = self.columns.max(1);
         let items = |list: &[usize], section: Option<usize>, rows: &mut Vec<Row>| {
             if grid {
@@ -1081,12 +1081,12 @@ impl App {
 
     /// The active view's grid card size: its own, else the default.
     pub fn card_size(&self) -> f32 {
-        self.base.active().card_size.unwrap_or(self.base.card_size)
+        self.views.active().card_size.unwrap_or(self.views.card_size)
     }
 
     /// Sizes the active view's grid cards; `save` writes it out (a slider saves when let go).
     pub fn set_card_size(&mut self, size: f32, save: bool) {
-        self.base.active_mut().card_size = Some(crate::base::view::clamp_card_size(size));
+        self.views.active_mut().card_size = Some(crate::query::view::clamp_card_size(size));
         self.fit_columns();
         if save {
             self.save_views();
@@ -1095,21 +1095,21 @@ impl App {
 
     /// Makes the active view's card size the default, which views without their own follow.
     pub fn make_card_size_default(&mut self) {
-        self.base.card_size = self.card_size();
-        self.base.active_mut().card_size = None;
+        self.views.card_size = self.card_size();
+        self.views.active_mut().card_size = None;
         self.fit_columns();
         self.save_views();
     }
 
     /// The active view follows the default card size again.
     pub fn reset_card_size(&mut self) {
-        self.base.active_mut().card_size = None;
+        self.views.active_mut().card_size = None;
         self.fit_columns();
         self.save_views();
     }
 
     fn save_views(&mut self) {
-        if let Err(e) = self.store.save(&self.base) {
+        if let Err(e) = self.store.save(&self.views) {
             self.error = Some(e);
         }
     }

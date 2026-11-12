@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use crate::base::property::{Property, Record, Value, list, number, text};
+use crate::query::property::{Property, Record, Value, list, number, text};
 use crate::credits::{self, Credit};
 use crate::library::Track;
 
@@ -301,8 +301,8 @@ mod tests {
 
     #[test]
     fn a_collaborative_album_groups_and_filters_under_each_album_artist() {
-        use crate::base::filter::{Condition, Group, Node, Operator};
-        use crate::base::view::{Direction, GroupBy, View, evaluate};
+        use crate::query::filter::{Condition, Group, Node, Operator};
+        use crate::query::view::{Direction, GroupBy, View, evaluate};
         use crate::library::TaggedArtists;
         let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<String>>();
         let mut mercy = song("c1", Some("Mercy"), Some("Armand Hammer & The Alchemist"), "Armand Hammer & The Alchemist", Some(2025), None, 1);

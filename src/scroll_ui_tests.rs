@@ -3,8 +3,8 @@
 use rune::{Env, Key, KeyEvent, Mods, Runtime};
 
 use crate::app::{App, Output, Page, row_key};
-use crate::base::property::Mode;
-use crate::base::store::Store;
+use crate::query::property::Mode;
+use crate::query::store::Store;
 use crate::library::Track;
 use crate::view::view;
 
@@ -33,7 +33,7 @@ fn runtime(mode: Mode) -> Runtime<App> {
     let mut app = App::new(Output::Silent, Store::memory());
     app.set_library(tracks(), false);
     if mode == Mode::Albums {
-        app.base.active_mut().set_mode(Mode::Albums);
+        app.views.active_mut().set_mode(Mode::Albums);
         app.views_changed();
     }
     let mut rt = Runtime::new(app, view, (980.0, 640.0), Env::new(true, 1.0));
@@ -121,7 +121,7 @@ fn home_still_opens_the_list_where_it_was_left() {
 fn the_album_grid_refits_its_columns_without_sliding_the_rows() {
     let mut app = App::new(Output::Silent, Store::memory());
     app.set_library(tracks(), false);
-    app.base.active_mut().set_mode(Mode::Albums);
+    app.views.active_mut().set_mode(Mode::Albums);
     app.views_changed();
     let mut rt = Runtime::new(app, view, (1280.0, 900.0), Env::new(true, 1.0));
     rt.poll = Some(crate::app::poll);

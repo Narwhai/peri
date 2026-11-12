@@ -106,7 +106,7 @@ macro_rules! line_icon {
     };
 }
 
-// Toolbar glyphs, after Lucide's (ISC), which Obsidian's Bases toolbar uses.
+// Toolbar glyphs, after Lucide's (ISC).
 line_icon!(VIEWS, "rm-views", "M3 5 H21 V19 H3 Z", "M3 10 H21", "M9 10 V19");
 line_icon!(SORT, "rm-sort", "M7 4 V20", "M3.5 16.5 L7 20 L10.5 16.5", "M17 20 V4", "M13.5 7.5 L17 4 L20.5 7.5");
 line_icon!(GROUP, "rm-group", "M4 5 H20 V10 H4 Z", "M4 14 H20 V19 H4 Z");

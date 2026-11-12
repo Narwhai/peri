@@ -5,7 +5,7 @@ use rune::{Cursor, El, ScrollPos, ScrollSpec, Tx, col, el, icon, row, text};
 use super::albums::{CARD_GAP, small_card};
 use super::table;
 use super::*;
-use crate::base::property::Property;
+use crate::query::property::Property;
 use crate::palette::Palette;
 
 /// The song table's columns after the title, which don't follow the views' or the pages'.
@@ -92,7 +92,7 @@ fn recent_songs(s: &App, p: &Palette) -> El {
     if list.is_empty() {
         return section_empty("recent-songs", "Recently Played", "Nothing played yet.", p);
     }
-    let columns = table::Columns { shown: &RECENT_COLUMNS, widths: &s.base.page_widths, pills: &[], covers: false };
+    let columns = table::Columns { shown: &RECENT_COLUMNS, widths: &s.views.page_widths, pills: &[], covers: false };
     let mut body = col().child(table::header("recent-songs-header", "", columns, 8.0, p));
     for (n, &i) in list.iter().enumerate() {
         body = body.child(song_line(s, i, &list, !n.is_multiple_of(2), columns, p));

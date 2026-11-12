@@ -7,7 +7,7 @@ use crate::queue::Repeat;
 use crate::view::view;
 
 fn runtime(dark: bool) -> Runtime<App> {
-    let mut app = App::new(Output::Silent, crate::base::store::Store::memory());
+    let mut app = App::new(Output::Silent, crate::query::store::Store::memory());
     crate::scene_library(&mut app);
     let mut rt = Runtime::new(app, view, (980.0, 640.0), Env::new(dark, 1.0));
     rt.on_key = Some(crate::app::on_key);
@@ -382,8 +382,8 @@ fn a_left_click_on_empty_space_still_leaves_the_search_field_and_stays() {
 #[test]
 #[ignore = "needs RUNE_MUSIC_DIR"]
 fn real_library_groups_by_every_property() {
-    use crate::base::property::Property;
-    use crate::base::view::{Direction, GroupBy, View, evaluate};
+    use crate::query::property::Property;
+    use crate::query::view::{Direction, GroupBy, View, evaluate};
     let dir = std::env::var("RUNE_MUSIC_DIR").expect("set RUNE_MUSIC_DIR to a music folder");
     let rx = crate::library::scan(vec![dir.into()], || {});
     let mut tracks = loop {
@@ -444,7 +444,7 @@ fn a_play_counts_at_half_the_song_and_shows_in_columns_and_details() {
     let album = rt.state.albums.iter().find(|a| a.tracks.contains(&eta)).expect("ETA's album");
     assert_eq!(album.plays, 1, "the album adds up its songs' plays");
 
-    rt.update(|s, _| s.base.active_mut().columns.push(crate::base::property::Property::Plays));
+    rt.update(|s, _| s.views.active_mut().columns.push(crate::query::property::Property::Plays));
     rt.update(|s, _| s.refilter());
     settle(&mut rt);
     rt.update(|s, tx| s.show_details(eta, tx));
@@ -455,7 +455,7 @@ fn a_play_counts_at_half_the_song_and_shows_in_columns_and_details() {
 
 #[test]
 fn plays_are_saved_beside_the_preferences_and_count_at_the_next_launch() {
-    use crate::base::store::Store;
+    use crate::query::store::Store;
     let dir = std::env::temp_dir().join(format!("rune-music-plays-ui-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let file = dir.join("prefs.json");
