@@ -114,3 +114,25 @@ fn home_still_opens_the_list_where_it_was_left() {
     assert_eq!(rt.state.page, Page::Library);
     assert!(scrolled(&rt) < 1.0, "Home opens the list at the top, at {}", scrolled(&rt));
 }
+
+/// The grid opens at four columns until its width is known, then refits to the window:
+/// the rows that rebuilds land in place rather than sliding up from below.
+#[test]
+fn the_album_grid_refits_its_columns_without_sliding_the_rows() {
+    let mut app = App::new(Output::Silent, Store::memory());
+    app.set_library(tracks(), false);
+    app.base.active_mut().set_mode(Mode::Albums);
+    app.views_changed();
+    let mut rt = Runtime::new(app, view, (1280.0, 900.0), Env::new(true, 1.0));
+    rt.poll = Some(crate::app::poll);
+    rt.frame(0.0);
+    rt.frame(1.0 / 60.0);
+    let columns = rt.state.columns;
+    assert!(columns > 4, "1280 points refit past the first four columns, got {columns}");
+    let second = crate::app::album_key(columns, None);
+    let y = |rt: &Runtime<App>| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(second.as_str())).map(|e| e.rect[1]);
+    let first = y(&rt).unwrap_or_else(|| panic!("no {second}"));
+    settle(&mut rt);
+    let rest = y(&rt).unwrap_or_else(|| panic!("no {second}"));
+    assert!((first - rest).abs() < 0.5, "the second row starts where it rests: {first} vs {rest}");
+}

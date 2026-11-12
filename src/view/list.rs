@@ -112,8 +112,11 @@ pub(super) fn list(s: &App, p: &Palette, cx: &mut Cx<App>) -> El {
                 at.set(pos.offset);
             }
         })
-        .on_layout(move |s: &mut App, r| {
+        .on_layout_tx(move |s: &mut App, r, tx: &mut Tx| {
             if s.mode() == Mode::Albums && s.base.active().layout == Layout::Grid {
+                // Refitting the columns rebuilds every grid row: land it at once, so the
+                // first layout (and a window resize) doesn't slide the rows into place.
+                tx.instant();
                 s.set_grid_width(r[2] - 2.0 * GRID_PX);
             }
         });
