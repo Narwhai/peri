@@ -57,7 +57,7 @@ fn switching_to_albums_shows_a_grid_of_every_album() {
     click(&mut rt, "mode/albums");
     assert_eq!(rt.state.base.active().mode, Mode::Albums);
     assert_eq!(rt.state.base.active().layout, Layout::Grid);
-    assert_eq!(text_of(&rt, "count"), "4 albums");
+    assert!(!rt.elements().iter().any(|e| e.path.contains("header") && e.text.as_deref() == Some("4 albums")), "the header has no album count");
     assert_eq!(shown_titles(&rt), ["Live Sessions", "Day of Radiance", "Get Up", "Spaces"]);
     for a in 0..4 {
         assert!(rt.find(&album_key(a, None)).is_some(), "card {a} shows");

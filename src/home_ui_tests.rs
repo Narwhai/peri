@@ -103,6 +103,76 @@ fn the_home_tab_sits_left_of_the_library_and_shows_home() {
     assert_eq!(rt.state.history, Vec::<Page>::new());
 }
 
+/// The search is centred in the window, without covering either group of header controls.
+fn assert_header_layout(rt: &Runtime<App>) {
+    let header = rect(rt, "header");
+    let tabs = rect(rt, "tabs");
+    let search = rect(rt, "search");
+    let zoom = rect(rt, "zoom-control");
+    let settings = rect(rt, "settings");
+    let centre = |r: [f32; 4]| r[0] + r[2] / 2.0;
+    assert!((centre(search) - centre(header)).abs() < 1.0, "search {search:?} is centred in {header:?}");
+    assert!(search[0] >= tabs[0] + tabs[2], "search {search:?} clears tabs {tabs:?}");
+    assert!(search[0] + search[2] <= zoom[0], "search {search:?} clears zoom {zoom:?}");
+    assert!(zoom[0] + zoom[2] <= settings[0] && settings[0] + settings[2] <= header[0] + header[2], "zoom and settings fit in the header");
+    assert!((tabs[1] + tabs[3] - header[1] - header[3]).abs() < 1.0, "tabs still meet the header's bottom edge");
+}
+
+#[test]
+fn search_is_centred_in_the_header_at_different_sizes_and_zoom_levels() {
+    for width in [720.0, 800.0, 980.0, 1200.0] {
+        let rt = runtime_sized((width, 900.0));
+        assert_header_layout(&rt);
+        assert!(rect(&rt, "search")[2] >= 80.0, "search remains usable at width {width}");
+    }
+    let mut rt = runtime_sized((980.0, 640.0));
+    rt.update(|s, _| s.set_zoom(2.0, false));
+    settle(&mut rt);
+    assert_header_layout(&rt);
+}
+
+#[test]
+fn the_centred_search_and_header_controls_work_at_minimum_width_while_scanning() {
+    let mut rt = runtime_sized((720.0, 900.0));
+    rt.poll = None;
+    rt.update(|s, _| {
+        s.set_waker(std::sync::Arc::new(|| {}));
+        s.start_scan(Vec::new(), true);
+        s.scan.as_mut().expect("scanning").found = 1234;
+    });
+    settle(&mut rt);
+    assert_eq!(text_of(&rt, "scan-status"), "Scanning… 1234 files");
+    assert_header_layout(&rt);
+    let status = rect(&rt, "scan-status");
+    let search = rect(&rt, "search");
+    assert!(status[2] > 20.0 && status[0] >= search[0] + search[2] && status[0] + status[2] <= rect(&rt, "zoom-control")[0], "scan progress stays visible beside zoom: {status:?}");
+
+    click(&mut rt, "search");
+    rt.key(KeyEvent { key: Key::Text("laraaji".into()), mods: Mods::default() });
+    settle(&mut rt);
+    assert_eq!(rt.state.search.text, "laraaji");
+    assert_eq!(rt.state.page, Page::Search);
+    assert_header_layout(&rt);
+    click(&mut rt, "search/action");
+    assert_eq!(rt.state.search.text, "");
+    assert_eq!(rt.state.page, Page::Home);
+    click(&mut rt, "graph-tab");
+    assert_eq!(rt.state.page, Page::Graph);
+    assert_header_layout(&rt);
+    click(&mut rt, "settings");
+    assert_eq!(rt.state.page, Page::Settings);
+}
+
+#[test]
+fn the_header_recentres_when_the_window_is_resized() {
+    let mut rt = runtime_sized((720.0, 900.0));
+    for width in [1200.0, 800.0, 720.0] {
+        rt.set_viewport((width, 900.0), 1.0);
+        settle(&mut rt);
+        assert_header_layout(&rt);
+    }
+}
+
 #[test]
 fn recently_added_cards_are_200_wide_and_the_strip_spans_the_page_body() {
     let rt = runtime();

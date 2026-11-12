@@ -59,9 +59,9 @@ fn text_of(rt: &Runtime<App>, key: &str) -> String {
 }
 
 #[test]
-fn the_library_lists_every_track_and_counts_them() {
+fn the_library_lists_every_track() {
     let rt = runtime(true);
-    assert_eq!(text_of(&rt, "count"), "13 tracks");
+    assert_eq!(rt.state.filtered.len(), 13);
     assert!(rt.find("t0").is_some());
     assert!(rt.find("t10").is_some());
 }
@@ -154,7 +154,7 @@ fn searching_opens_results_that_back_returns_to_and_clearing_leaves() {
     key(&mut rt, Key::Escape);
     assert_eq!(rt.state.search.text, "");
     assert_eq!(rt.state.page, Page::Library);
-    assert_eq!(text_of(&rt, "count"), "13 tracks", "the view isn't filtered by the search");
+    assert_eq!(rt.state.filtered.len(), 13, "the view isn't filtered by the search");
     assert!(rt.find("toolbar").is_some(), "the toolbar returns with the view");
 }
 
@@ -285,7 +285,8 @@ fn space_still_plays_and_pauses_after_clicking_a_transport_button() {
 }
 
 fn mouse(rt: &mut Runtime<App>, button: rune::PointerButton) {
-    let (x, y) = rt.find("count").expect("the header's count");
+    let [x, y, _, h] = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("header")).expect("the header").rect;
+    let (x, y) = (x + 6.0, y + h / 2.0);
     rt.button_down(x, y, button);
     rt.button_up(x, y, button);
     settle(rt);
@@ -371,7 +372,7 @@ fn a_left_click_on_empty_space_still_leaves_the_search_field_and_stays() {
     settle(&mut rt);
     click(&mut rt, "search");
     assert!(rt.state.search.focused);
-    click(&mut rt, "count");
+    mouse(&mut rt, rune::PointerButton::Primary);
     assert!(!rt.state.search.focused, "the field lets go of the keyboard");
     assert_eq!(rt.state.page, Page::Artist("Laraaji".into()), "a primary click doesn't navigate");
 }

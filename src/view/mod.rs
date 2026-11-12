@@ -60,7 +60,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         .w_full()
         .h_full()
         .fill(p.bg)
-        .child(header(s, zoom, &p, &kit))
+        .child(header(s, zoom, &p, &kit, cx))
         .children(toolbar)
         .child(match (s.open_album(), s.open_artist(), s.open_label()) {
             (Some(a), _, _) => albums::album_page(s, a, &p),
@@ -189,18 +189,11 @@ fn zoom_control(s: &App, zoom: f32, p: &Palette) -> El {
         )
 }
 
-fn header(s: &App, zoom: f32, p: &Palette, kit: &Kit) -> El {
-    let count = match (&s.scan, s.tracks.len()) {
-        (Some(scan), _) if scan.found > 0 => format!("Scanning… {} files", scan.found),
-        (Some(_), _) => "Scanning…".to_string(),
-        (None, 0) => String::new(),
-        (None, _) if s.mode() == crate::base::property::Mode::Albums => match (s.shown_albums.len(), s.albums.len()) {
-            (shown, all) if shown == all => plural(all, "album"),
-            (shown, all) => format!("{shown} of {}", plural(all, "album")),
-        },
-        (None, n) if s.filtered.len() == n => plural(n, "track"),
-        (None, n) => format!("{} of {}", s.filtered.len(), plural(n, "track")),
-    };
+fn header(s: &App, zoom: f32, p: &Palette, kit: &Kit, cx: &mut Cx<App>) -> El {
+    let scan = s.scan.as_ref().map(|scan| {
+        let status = if scan.found > 0 { format!("Scanning… {} files", scan.found) } else { "Scanning…".to_string() };
+        text(status).key("scan-status").font(SMALL).color(p.tx3).shrink().truncate()
+    });
     let search = TextInput::new(&s.search)
         .placeholder("Search")
         .label("Search")
@@ -224,9 +217,22 @@ fn header(s: &App, zoom: f32, p: &Palette, kit: &Kit) -> El {
         })
         .build(kit)
         .key("search")
-        // Gives way to the buttons after it in a narrow (or zoomed-in) window.
+        // Gives way to the side controls in a narrow (or zoomed-in) window.
         .shrink()
-        .min_w(140.0);
+        .min_w(80.0);
+    // Equal side widths keep search centred. Reserve at least the wider group's measured
+    // width on both sides, allowing search to shrink rather than overlap the tabs.
+    let side_min = cx.layout_size("tabs").zip(cx.layout_size("zoom-control")).zip(cx.layout_size("settings"))
+        .map(|((tabs, zoom), settings)| tabs[0].max(zoom[0] + 12.0 + settings[0]));
+    let mut left = row().h_full().grow(1.0).child(tabs(s, p));
+    let mut right = row().grow(1.0).gap(12.0).center_y().justify_end()
+        .children(scan)
+        .child(zoom_control(s, zoom, p))
+        .child(icon_button("settings", &icons::SETTINGS, "Settings", p).role("button").on_press(|s: &mut App| s.show_settings()));
+    if let Some(side_min) = side_min {
+        left = left.min_w(side_min);
+        right = right.min_w(side_min);
+    }
     row()
         .key("header")
         .w_full()
@@ -236,11 +242,9 @@ fn header(s: &App, zoom: f32, p: &Palette, kit: &Kit) -> El {
         .center_y()
         .fill(p.bg2)
         .border_bottom(p)
-        .child(tabs(s, p))
-        .child(text(count).key("count").font(SMALL).color(p.tx3).grow(1.0).shrink().truncate())
+        .child(left)
         .child(search)
-        .child(zoom_control(s, zoom, p))
-        .child(icon_button("settings", &icons::SETTINGS, "Settings", p).role("button").on_press(|s: &mut App| s.show_settings()))
+        .child(right)
 }
 
 /// The header's tabs: Home, Library (the views, and the pages opened from them) and Graph.
