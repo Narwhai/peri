@@ -100,7 +100,8 @@ fn an_opened_folder_is_remembered_and_scanned_at_the_next_launch() {
 
     // Next launch: setup scans what was saved.
     let mut app = App::new(Output::Silent, Store::at(f.prefs()));
-    app.setup(Arc::new(|| {}));
+    // No command-line folders: the test harness's own arguments aren't the app's.
+    app.setup_with(Arc::new(|| {}), Vec::new());
     assert_eq!(app.library, [music]);
     assert_eq!(app.tracks.len(), 2, "headless setup waits for the saved library's scan");
 }

@@ -330,7 +330,14 @@ impl App {
 
     /// `AppSpec::setup`: keep the waker for the scan thread and cover decoding, then scan the
     /// folders or files named on the command line (for this run only), else the saved library.
+    /// Sets up with the folders and files given on the command line, if any.
     pub fn setup(&mut self, waker: Waker) {
+        let args: Vec<PathBuf> = rune::extra_args().iter().map(PathBuf::from).collect();
+        self.setup_with(waker, args);
+    }
+
+    /// Sets up and scans `roots`, or the saved library when there are none.
+    pub fn setup_with(&mut self, waker: Waker, roots: Vec<PathBuf>) {
         self.images = Some(ImageCache::new(waker.clone()));
         self.covers = Some(if matches!(self.output, Output::Silent) { Covers::synchronous(waker.clone()) } else { Covers::new(waker.clone()) });
         // Headless runs and tests never reach the network.
@@ -339,7 +346,7 @@ impl App {
             self.lastfm.set_client(lastfm::Client::spawn(move || wake()));
         }
         self.waker = Some(waker);
-        let mut roots: Vec<PathBuf> = rune::extra_args().iter().map(PathBuf::from).collect();
+        let mut roots = roots;
         if roots.is_empty() {
             roots = self.library.clone();
         }

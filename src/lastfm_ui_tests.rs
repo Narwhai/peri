@@ -186,7 +186,7 @@ fn headless_runs_have_no_client_and_play_quietly() {
     let prefs = Prefs::new("headless");
     Store::at(prefs.path()).save_lastfm(&saved(Some(session("key")))).unwrap();
     let mut app = App::with_lastfm(Output::Silent, Store::at(prefs.path()), None);
-    app.setup(Arc::new(|| {}));
+    app.setup_with(Arc::new(|| {}), Vec::new());
     let mut rt = Runtime::new(app, view, (980.0, 640.0), Env::new(true, 1.0));
     rt.poll = Some(crate::app::poll);
     rt.update(|s, _| crate::scene_library(s));
