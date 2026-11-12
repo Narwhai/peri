@@ -195,7 +195,7 @@ fn track_row(t: &Track, i: usize, section: Option<usize>, number: usize, selecte
     } else {
         text(format!("{number}")).font(NUM).color(p.tx3).align(Align::End).w(28.0)
     };
-    let look = table::RowLook { lead, cover, selected, current, height: ROW_H, px: 10.0, pills: Vec::new() };
+    let look = table::RowLook { lead, cover, selected, current, stripe: number.is_multiple_of(2), height: ROW_H, px: 10.0, pills: Vec::new() };
     table::song_row(t, i, columns, look, p)
         .key(row_key(i, section))
         .press(p.ui.alpha(0.5))

@@ -198,7 +198,7 @@ fn track_table(s: &App, a: usize, columns: table::Columns, p: &Palette) -> El {
         .child(table::header("tracks-header", "#", columns, 8.0, p))
         .child(el().w_full().h(1.0).fill(p.ui.alpha(0.7)))
         .child(rows);
-    table::scrolling("tracks".into(), columns, 8.0, body)
+    table::scrolling("tracks".into(), columns, 8.0, body, p)
 }
 
 fn track_line(s: &App, t: &Track, i: usize, n: usize, a: usize, columns: table::Columns, p: &Palette) -> El {
@@ -208,7 +208,7 @@ fn track_line(s: &App, t: &Track, i: usize, n: usize, a: usize, columns: table::
     } else {
         text(t.number.map_or_else(|| format!("{}", n + 1), |x| x.to_string())).font(NUM).color(p.tx3).w(28.0).align(Align::End)
     };
-    let look = table::RowLook { lead, cover: None, selected: s.selected == Some(i), current, height: TRACK_ROW_H, px: 8.0, pills: Vec::new() };
+    let look = table::RowLook { lead, cover: None, selected: s.selected == Some(i), current, stripe: !n.is_multiple_of(2), height: TRACK_ROW_H, px: 8.0, pills: Vec::new() };
     table::song_row(t, i, columns, look, p)
         .key(format!("t{i}"))
         .label(format!("{} by {}", t.title, t.artist().as_deref().unwrap_or(s.albums[a].artist_name())))

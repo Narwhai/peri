@@ -94,10 +94,10 @@ fn recent_songs(s: &App, p: &Palette) -> El {
     }
     let columns = table::Columns { shown: &RECENT_COLUMNS, widths: &s.base.page_widths, pills: &[], covers: false };
     let mut body = col().child(table::header("recent-songs-header", "", columns, 8.0, p));
-    for &i in &list {
-        body = body.child(song_line(s, i, &list, columns, p));
+    for (n, &i) in list.iter().enumerate() {
+        body = body.child(song_line(s, i, &list, !n.is_multiple_of(2), columns, p));
     }
-    let table = table::scrolling("recent-songs-table".into(), columns, 8.0, body);
+    let table = table::scrolling("recent-songs-table".into(), columns, 8.0, body, p);
     col().key("recent-songs").w_full().gap(8.0).child(text("Recently Played").font(HEADING).color(p.tx)).child(table)
 }
 
@@ -112,7 +112,7 @@ fn section_empty(key: &str, title: &str, line: &str, p: &Palette) -> El {
 }
 
 /// A song row: a click selects it, a double-click plays the list from it.
-fn song_line(s: &App, i: usize, list: &[usize], columns: table::Columns, p: &Palette) -> El {
+fn song_line(s: &App, i: usize, list: &[usize], stripe: bool, columns: table::Columns, p: &Palette) -> El {
     let t = &s.tracks[i];
     let current = s.current == Some(i);
     let lead = if current {
@@ -120,7 +120,7 @@ fn song_line(s: &App, i: usize, list: &[usize], columns: table::Columns, p: &Pal
     } else {
         el()
     };
-    let look = table::RowLook { lead, cover: None, selected: s.selected == Some(i), current, height: SONG_ROW_H, px: 8.0, pills: Vec::new() };
+    let look = table::RowLook { lead, cover: None, selected: s.selected == Some(i), current, stripe, height: SONG_ROW_H, px: 8.0, pills: Vec::new() };
     let list = list.to_vec();
     table::song_row(t, i, columns, look, p)
         .key(format!("recent-songs-t{i}"))

@@ -25,6 +25,8 @@ pub const GAP: f32 = 12.0;
 const MIN_W: f32 = 40.0;
 /// The grab area at a header's right edge, centred in the gap after it.
 const HANDLE_W: f32 = 8.0;
+/// The column names: semi-bold, so the header stands apart from the rows.
+const HEADER: TextStyle = TextStyle::new(11.5, 600.0);
 
 /// A table's columns after the title, and the widths the user dragged some of them to.
 #[derive(Clone, Copy)]
@@ -104,25 +106,27 @@ fn numeric(p: Property) -> bool {
 /// A song table that scrolls sideways when its columns need more than the width it has. The
 /// scroll content fills the viewport on its own; a set minimum width on it would override
 /// that, so the minimum sits on an inner column.
-pub fn scrolling(key: String, columns: Columns, px: f32, body: El) -> El {
-    let inner = body.w_full().min_w(min_width(columns, px));
+pub fn scrolling(key: String, columns: Columns, px: f32, body: El, p: &Palette) -> El {
+    // The frame draws over the rows, so their fills don't cover its sides.
+    let frame = el().pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0)).border(1.0, line(p));
+    let inner = body.w_full().min_w(min_width(columns, px)).child(frame);
     el().key(key).w_full().scroll_x().child(col().w_full().child(inner))
 }
 
 /// The header row: "#", "Title" and each column's name, with a resize handle at each
 /// column's right edge. `lead` heads the lead column: "#" over numbers, "" over covers.
 pub fn header(key: &str, lead: &str, columns: Columns, px: f32, p: &Palette) -> El {
-    let mut r = row().key(key.to_string()).w_full().h(28.0).px(px).gap(GAP).center_y();
-    r = r.child(text(lead.to_string()).font(SMALL).color(p.tx3).w(LEAD_W).align(Align::End));
+    let mut r = row().key(key.to_string()).w_full().h(32.0).px(px).gap(GAP).center_y().fill(p.ui.alpha(0.4));
+    r = r.child(text(lead.to_string()).font(HEADER).color(p.tx2).w(LEAD_W).align(Align::End));
     if columns.covers {
         r = r.child(el().w(COVER_W));
     }
-    r = r.child(text("Title").font(SMALL).color(p.tx3).grow(1.0).min_w(TITLE_MIN).shrink());
+    r = r.child(text("Title").font(HEADER).color(p.tx2).grow(1.0).min_w(TITLE_MIN).shrink());
     if !columns.pills.is_empty() {
-        r = r.child(text("Roles").key(format!("{key}-col-roles")).font(SMALL).color(p.tx3).w(pills_width(columns.pills)));
+        r = r.child(text("Roles").key(format!("{key}-col-roles")).font(HEADER).color(p.tx2).w(pills_width(columns.pills)));
     }
     for &c in columns.shown {
-        let label = text(c.label()).font(SMALL).color(p.tx3).truncate().w_full();
+        let label = text(c.label()).font(HEADER).color(p.tx2).truncate().w_full();
         let cell = el()
             .key(format!("{key}-{}", column_key(c)))
             .h_full()
@@ -178,6 +182,11 @@ fn resize_handle(key: String, c: Property, p: &Palette) -> El {
         })
 }
 
+/// The lines between rows and around the table.
+fn line(p: &Palette) -> Color {
+    p.ui.alpha(0.5)
+}
+
 /// What a row shows besides its columns.
 pub struct RowLook {
     /// "3", or the playing icon.
@@ -186,6 +195,8 @@ pub struct RowLook {
     pub cover: Option<El>,
     pub selected: bool,
     pub current: bool,
+    /// Every other row gets a faint fill, so the eye can follow a row across the columns.
+    pub stripe: bool,
     pub height: f32,
     pub px: f32,
     /// What fills each slot of the Roles column, if the table has one.
@@ -202,11 +213,17 @@ pub fn song_row(t: &Track, i: usize, columns: Columns, look: RowLook, p: &Palett
         .px(look.px)
         .gap(GAP)
         .center_y()
-        .radius(3.0)
-        .fill(if look.selected { p.ui.alpha(if p.dark { 0.7 } else { 0.55 }) } else { p.bg.alpha(0.0) })
+        .fill(if look.selected {
+            p.ui.alpha(if p.dark { 0.7 } else { 0.55 })
+        } else if look.stripe {
+            p.ui.alpha(0.18)
+        } else {
+            p.bg.alpha(0.0)
+        })
         .hover(p.ui.alpha(0.35))
         .hover_group()
         .role("row")
+        .child(el().pin(Some(0.0), None, Some(0.0), Some(0.0)).h(1.0).fill(line(p)))
         .child(el().w(LEAD_W).center().child(look.lead));
     if let Some(cover) = look.cover {
         r = r.child(cover);
