@@ -17,7 +17,7 @@ mod toolbar;
 
 use std::ops::Range;
 
-use rune::{Color, Cursor, Cx, El, Icon, Link, LinkPaint, PointerButton, Spring, TextStyle, col, el, icon, row, text};
+use rune::{Color, Cursor, Cx, El, Icon, LineCap, Link, LinkPaint, Path, PointerButton, Shape, Spring, TextStyle, col, el, icon, row, text};
 use rune_kit::{Kit, PaletteSeed, TextInput};
 
 use crate::app::App;
@@ -31,10 +31,12 @@ pub use albums::columns_for;
 const ROW_H: f32 = 44.0;
 /// The header's tabs: as tall as the header's bottom edge they stand on, so their bottoms line up with it.
 const TAB_H: f32 = 38.0;
-/// The gap between the header's tabs.
-const TAB_GAP: f32 = 2.0;
+/// The gap between the header's tabs: room for the active tab's flare into it. Wider ones crowd search out of the header at [`MIN_SIZE`].
+const TAB_GAP: f32 = TAB_FLARE + 2.0;
 /// The top corners' radius of a header tab.
 const TAB_RADIUS: f32 = 3.0;
+/// How far an active header tab's bottom corners flare out onto the header's edge, Chrome-style.
+const TAB_FLARE: f32 = 5.0;
 const BAR_H: f32 = 88.0;
 const COVER: f32 = 56.0;
 const SNAPPY: Spring = Spring::new(0.25, 0.0);
@@ -250,11 +252,30 @@ fn header(s: &App, zoom: f32, p: &Palette, kit: &Kit, cx: &mut Cx<App>) -> El {
         .child(right)
 }
 
+/// A header tab's flare: a concave quarter circle from its side border's centre, curving out
+/// onto the header's bottom line's centre, with the tab's colour in the corner above the line.
+/// The box sits flush with the tab's bottom, its last column the side border, and the
+/// right flare mirrors the left.
+fn tab_flare(key: String, left: bool, edge: Color, fill: Color) -> El {
+    const KAPPA: f32 = 0.552_284_8;
+    let r = TAB_FLARE;
+    let x = |v: f32| if left { v } else { r + 1.0 - v };
+    let (start, end) = ([x(r + 0.5), 0.5], [x(0.5), r + 0.5]);
+    let (c1, c2) = ([x(r + 0.5), 0.5 + KAPPA * r], [x(0.5 + KAPPA * r), r + 0.5]);
+    let body = Path::new().move_to(start).cubic_to(c1, c2, end).line_to([x(0.5), r + 1.0]).line_to([x(r + 1.0), r + 1.0]).line_to([x(r + 1.0), 0.5]).close();
+    let curve = Path::new().move_to(start).cubic_to(c1, c2, end);
+    let shape = Shape::new().fill_path(&body, fill).stroke_path(&curve, 1.0, LineCap::Butt, edge);
+    // Overlaps the tab's 1-point side border, so the curve starts on its centre.
+    let outside = Some(-r);
+    let (pin_left, pin_right) = if left { (outside, None) } else { (None, outside) };
+    el().key(key).size(r + 1.0, r + 1.0).pin(pin_left, None, pin_right, Some(0.0)).shape(shape)
+}
+
 /// The header's tabs: Home, Library (the views, and the pages opened from them) and Graph.
 fn tabs(s: &App, p: &Palette) -> El {
     let (home, graph) = (s.in_home(), s.in_graph());
     let tab = |key: &'static str, glyph: &'static Icon, label: &'static str, help: &'static str, on: bool| {
-        // Like the artist page's folder tabs: the active one fills with the page below and its seam covers the header's bottom line.
+        // Like the artist page's folder tabs: the active one fills down to the header's line, which runs under it.
         let edge = if on { p.ui.alpha(0.7) } else { p.ui.alpha(0.35) };
         let mut folder = row()
             .key(key)
@@ -263,7 +284,8 @@ fn tabs(s: &App, p: &Palette) -> El {
             .pr(12.0)
             .gap(8.0)
             .corners([TAB_RADIUS, TAB_RADIUS, 0.0, 0.0])
-            .border(1.0, edge)
+            // No bottom side, so the active tab's fill runs down over the header's line.
+            .border_sides([1.0, 1.0, 0.0, 1.0], edge)
             .center_y()
             .fill(if on { p.bg } else { p.bg2.alpha(0.0) })
             .cursor(Cursor::Pointer)
@@ -274,8 +296,7 @@ fn tabs(s: &App, p: &Palette) -> El {
             .child(icon(glyph, 18.0).color(if on { p.ui3 } else { p.tx3 }))
             .child(text(label).font(HEADING).color(if on { p.tx } else { p.tx2 }));
         if on {
-            // Inside the tab's side borders and over the header's bottom line beneath it.
-            folder = folder.child(el().key(format!("{key}-seam")).pin(Some(1.0), None, Some(1.0), Some(0.0)).h(1.0).fill(p.bg));
+            folder = folder.child(tab_flare(format!("{key}-flare-left"), true, edge, p.bg)).child(tab_flare(format!("{key}-flare-right"), false, edge, p.bg));
         } else {
             folder = folder.hover(p.ui.alpha(0.3));
         }

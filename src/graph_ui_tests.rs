@@ -615,7 +615,7 @@ fn has(rt: &Runtime<App>, key: &str) -> bool {
 }
 
 #[test]
-fn the_active_header_tab_stands_on_the_header_edge_with_a_seam_over_its_line() {
+fn the_active_header_tab_stands_on_the_header_edge_and_flares_into_its_gaps() {
     let mut rt = runtime(Store::memory());
     let bottom = |r: [f32; 4]| r[1] + r[3];
     let header = bottom(rect(&rt, "header"));
@@ -623,11 +623,20 @@ fn the_active_header_tab_stands_on_the_header_edge_with_a_seam_over_its_line() {
         let tab = rect(rt, on);
         assert_eq!(bottom(tab), header, "{on} stands on the header's bottom edge");
         assert_eq!(bottom(rect(rt, off)), header, "{off} stands on the header's bottom edge");
-        let seam = rect(rt, &format!("{on}-seam"));
-        assert_eq!(seam[1], header - 1.0, "the seam covers the header's bottom line");
-        assert_eq!(seam[3], 1.0, "the seam is one point tall");
-        assert!(seam[0] > tab[0] && seam[0] + seam[2] < tab[0] + tab[2], "the seam sits between {on}'s side borders");
-        assert!(!has(rt, &format!("{off}-seam")), "only the active tab has a seam");
+        let (left, right) = (rect(rt, &format!("{on}-flare-left")), rect(rt, &format!("{on}-flare-right")));
+        let next = rect(rt, off);
+        for flare in [left, right] {
+            assert_eq!(bottom(flare), header, "{on}'s flares stand on the header's bottom edge");
+            assert!(flare[3] > 1.0, "a flare is taller than the header's line");
+        }
+        // Each flare overlaps only the tab's 1-point side border and reaches out into the gap.
+        assert!(left[0] < tab[0] && left[0] + left[2] <= tab[0] + 1.0, "the left flare is outside {on}");
+        assert!(right[0] >= tab[0] + tab[2] - 1.0 && right[0] + right[2] > tab[0] + tab[2], "the right flare is outside {on}");
+        let clear = |f: [f32; 4]| f[0] + f[2] <= next[0] || f[0] >= next[0] + next[2];
+        assert!(clear(left) && clear(right), "{on}'s flares stay clear of {off}");
+        for k in ["left", "right"] {
+            assert!(!has(rt, &format!("{off}-flare-{k}")), "only the active tab flares");
+        }
     };
     check(&rt, "library-tab", "graph-tab");
     click(&mut rt, "graph-tab");
