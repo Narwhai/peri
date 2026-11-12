@@ -52,7 +52,7 @@ fn meta(a: &Album, with_length: bool) -> String {
 /// The album's artist line ("Armand Hammer & The Alchemist"), each act's name opening its page.
 fn album_artist(a: &Album, color: rune::Color) -> El {
     let line = a.artist_name().to_string();
-    let links = if a.artist.is_some() { name_links(&line, &a.album_artists) } else { Vec::new() };
+    let links = if a.artist.is_some() { artist_links(&line, &a.album_artists) } else { Vec::new() };
     linked(line, links, color)
 }
 
@@ -350,6 +350,7 @@ pub(super) fn album_page(s: &App, a: usize, p: &Palette) -> El {
 pub(super) fn back_label(s: &App) -> String {
     match s.history.last() {
         Some(crate::app::Page::Artist(name) | crate::app::Page::Label(name)) => name.clone(),
+        Some(crate::app::Page::Collab(names)) => crate::collab::title(names),
         Some(crate::app::Page::Album(id)) => s.albums.iter().find(|a| &a.id() == id).map_or_else(|| "Back".to_string(), |a| a.title.clone()),
         Some(crate::app::Page::Search) => format!("Results for “{}”", s.search.text.trim()),
         Some(crate::app::Page::Settings) => "Settings".to_string(),

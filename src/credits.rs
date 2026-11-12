@@ -212,6 +212,24 @@ fn find_word(text: &str, name: &str, taken: &[(Range<usize>, &str)]) -> Option<R
     })
 }
 
+/// The joiners ("&", ",", "x"…) standing alone between consecutive `found` names (as
+/// [`find_names`] gives them) in `text`, as byte ranges without their spaces.
+pub fn joiners(text: &str, found: &[(Range<usize>, &str)]) -> Vec<Range<usize>> {
+    found
+        .windows(2)
+        .filter_map(|pair| {
+            let between = pair[0].0.end..pair[1].0.start;
+            let gap = text.get(between.clone())?;
+            let word = gap.trim();
+            let joins = !word.is_empty() && JOINS.iter().any(|j| j.trim() == word);
+            joins.then(|| {
+                let start = between.start + (gap.len() - gap.trim_start().len());
+                start..start + word.len()
+            })
+        })
+        .collect()
+}
+
 /// Pieces of `text` between the [`JOINS`], trimmed, empty ones dropped.
 fn split_joined(text: &str) -> Vec<&str> {
     let mut out = Vec::new();

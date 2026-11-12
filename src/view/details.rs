@@ -47,7 +47,7 @@ fn body(s: &App, i: usize, open: &DetailsDialog, p: &Palette) -> El {
     let mut release = section("Release", p);
     release = release.children(t.album.clone().map(|a| fact("Album", plain(a, p), p)));
     if let Some(line) = &t.album_artist {
-        release = release.child(fact("Album artist", linked(line.clone(), name_links(line, &t.album_artists), p.tx), p));
+        release = release.child(fact("Album artist", linked(line.clone(), artist_links(line, &t.album_artists), p.tx), p));
     }
     let numbering = match (t.number, t.disc) {
         (Some(n), Some(d)) => Some(format!("Track {n}, disc {d}")),

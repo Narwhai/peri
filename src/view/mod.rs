@@ -2,6 +2,7 @@
 
 mod albums;
 mod artists;
+mod collab;
 mod details;
 mod filters;
 mod graph;
@@ -62,15 +63,16 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         .fill(p.bg)
         .child(header(s, zoom, &p, &kit, cx))
         .children(toolbar)
-        .child(match (s.open_album(), s.open_artist(), s.open_label()) {
-            (Some(a), _, _) => albums::album_page(s, a, &p),
-            (None, Some(name), _) => artists::artist_page(s, name, &p, &kit, &mut layer),
-            (None, None, Some(name)) => labels::label_page(s, name, &p),
-            (None, None, None) if s.page == crate::app::Page::Search => search::search_page(s, &p),
-            (None, None, None) if s.page == crate::app::Page::Settings => settings::settings_page(s, &p, &kit),
-            (None, None, None) if s.page == crate::app::Page::Graph => graph::graph_page(s, &p, &kit, &mut layer),
-            (None, None, None) if s.page == crate::app::Page::Home => home::home_page(s, &p),
-            (None, None, None) => list::list(s, &p, cx),
+        .child(match (s.open_album(), s.open_artist(), s.open_label(), s.open_collab()) {
+            (Some(a), _, _, _) => albums::album_page(s, a, &p),
+            (None, Some(name), _, _) => artists::artist_page(s, name, &p, &kit, &mut layer),
+            (None, None, Some(name), _) => labels::label_page(s, name, &p),
+            (None, None, None, Some(names)) => collab::collab_page(s, names, &p),
+            (None, None, None, None) if s.page == crate::app::Page::Search => search::search_page(s, &p),
+            (None, None, None, None) if s.page == crate::app::Page::Settings => settings::settings_page(s, &p, &kit),
+            (None, None, None, None) if s.page == crate::app::Page::Graph => graph::graph_page(s, &p, &kit, &mut layer),
+            (None, None, None, None) if s.page == crate::app::Page::Home => home::home_page(s, &p),
+            (None, None, None, None) => list::list(s, &p, cx),
         })
         .child(player::now_playing(s, &p))
         // The mouse's back and forward buttons, anywhere a control doesn't take them.
@@ -349,7 +351,24 @@ fn linked(content: String, links: Vec<(Range<usize>, String)>, color: Color) -> 
     for (range, name) in links {
         t = t.link(Link::new(range, name).hover(LinkPaint::new().underline(color)));
     }
-    t.on_link(|s: &mut App, name, tx| s.show_artist(name, tx))
+    t.on_link(|s: &mut App, id, tx| match collab_names(id) {
+        Some(names) => s.show_collab(&names, tx),
+        None => s.show_artist(id, tx),
+    })
+}
+
+/// Starts a link id naming a collaboration rather than one artist; the names follow, each
+/// after one.
+const COLLAB: char = '\u{1f}';
+
+/// The link id opening the collaboration page of `names`.
+pub fn collab_id(names: &[&str]) -> String {
+    names.iter().map(|n| format!("{COLLAB}{n}")).collect()
+}
+
+/// The artists a [`collab_id`] names; `None` for an artist's own link.
+fn collab_names(id: &str) -> Option<Vec<String>> {
+    id.starts_with(COLLAB).then(|| id.split(COLLAB).skip(1).map(str::to_string).collect())
 }
 
 /// A record label's name, opening its page. Hovering it underlines it.
@@ -373,6 +392,19 @@ fn name_links(content: &str, names: &[String]) -> Vec<(Range<usize>, String)> {
     credits::find_names(content, names).into_iter().map(|(r, n)| (r, n.to_string())).collect()
 }
 
+/// An artist line ("A & B"): each of `names` opens its page, and with two or more found the
+/// joiners between them ("&", ",", "x"…) open the page of what they made together.
+fn artist_links(content: &str, names: &[String]) -> Vec<(Range<usize>, String)> {
+    let found = credits::find_names(content, names);
+    let mut links: Vec<(Range<usize>, String)> = found.iter().map(|(r, n)| (r.clone(), n.to_string())).collect();
+    if found.len() > 1 {
+        let id = collab_id(&found.iter().map(|&(_, n)| n).collect::<Vec<_>>());
+        links.extend(credits::joiners(content, &found).into_iter().map(|r| (r, id.clone())));
+        links.sort_by_key(|(r, _)| r.start);
+    }
+    links
+}
+
 /// A song's title, the names in its "(feat. C)" opening their pages.
 fn song_title(t: &Track, color: Color) -> El {
     let links = credits::feat(&t.title).map_or_else(Vec::new, |(_, names)| {
@@ -381,11 +413,13 @@ fn song_title(t: &Track, color: Color) -> El {
     linked(t.title.clone(), links, color)
 }
 
-/// A song's artist line as tagged ("A & B feat. C"), each name opening its page; `None` when
-/// the song names no artist.
+/// A song's artist line as tagged ("A & B feat. C"), each name opening its page and the main
+/// artists' joiners their collaboration's; `None` when the song names no artist.
 fn song_artist(t: &Track, color: Color) -> Option<El> {
     let line = t.artist()?;
-    let links = name_links(&line, &t.artists);
+    let main = credits::feat(&line).map_or(line.len(), |(part, _)| part.start);
+    let mut links = artist_links(&line[..main], &t.artists);
+    links.extend(name_links(&line[main..], &t.artists).into_iter().map(|(r, n)| (r.start + main..r.end + main, n)));
     Some(linked(line, links, color))
 }
 

@@ -9,6 +9,7 @@ mod artist;
 mod audio;
 mod base;
 mod covers;
+mod collab;
 mod credits;
 mod details;
 mod graph;
@@ -285,6 +286,12 @@ fn scene_credits(s: &mut App) {
     s.page = app::Page::Artist("Erika de Casier".into());
 }
 
+/// The Mercy demo on Armand Hammer and The Alchemist's collaboration page.
+fn scene_collab(s: &mut App) {
+    scene_artist(s);
+    s.page = app::Page::Collab(vec!["Armand Hammer".into(), "The Alchemist".into()]);
+}
+
 fn scene_album_page(s: &mut App) {
     album_view(s, Layout::Grid);
     let a = s.albums.iter().position(|a| a.title == "Day of Radiance").expect("demo has Day of Radiance");
@@ -350,6 +357,7 @@ fn main() {
             ("related", scene_related),
             ("link", scene_link),
             ("label", scene_label),
+            ("collab", scene_collab),
             ("settings", scene_settings),
             ("graph", scene_graph),
             ("home", scene_home),

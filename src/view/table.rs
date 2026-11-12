@@ -281,7 +281,7 @@ fn cell(t: &Track, i: usize, c: Property, p: &Palette) -> El {
         Property::Artist => return song_artist(t, color).unwrap_or_else(|| text("")).font(BODY).truncate(),
         Property::AlbumArtist if t.album_artist.is_some() => {
             let line = t.album_artist.clone().unwrap_or_default();
-            let links = name_links(&line, &t.album_artists);
+            let links = artist_links(&line, &t.album_artists);
             return linked(line, links, color).font(BODY).truncate();
         }
         Property::Label => return t.label.as_deref().map_or_else(|| text(""), |l| label_link(l, color)).font(BODY).truncate(),

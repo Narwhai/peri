@@ -74,6 +74,8 @@ pub enum Page {
     Artist(String),
     /// One record label's page: the albums released under it. By name, matched ignoring case.
     Label(String),
+    /// What two or more artists released or recorded together. By name, matched ignoring case.
+    Collab(Vec<String>),
     /// Artists, albums and songs matching the search field, which holds the query.
     Search,
     /// The app's settings: the library's folders.
@@ -580,7 +582,7 @@ impl App {
     pub fn open_album(&self) -> Option<usize> {
         match &self.page {
             Page::Album(id) => self.albums.iter().position(|a| &a.id() == id),
-            Page::Library | Page::Artist(_) | Page::Label(_) | Page::Search | Page::Settings | Page::Graph | Page::Home => None,
+            Page::Library | Page::Artist(_) | Page::Label(_) | Page::Collab(_) | Page::Search | Page::Settings | Page::Graph | Page::Home => None,
         }
     }
 
@@ -595,7 +597,7 @@ impl App {
     pub fn shown_columns(&self) -> &[Property] {
         match self.page {
             Page::Library => &self.base.active().columns,
-            Page::Album(_) | Page::Artist(_) | Page::Label(_) | Page::Search | Page::Settings | Page::Graph | Page::Home => &self.base.page_columns,
+            Page::Album(_) | Page::Artist(_) | Page::Label(_) | Page::Collab(_) | Page::Search | Page::Settings | Page::Graph | Page::Home => &self.base.page_columns,
         }
     }
 
@@ -603,7 +605,7 @@ impl App {
     pub fn shown_columns_mut(&mut self) -> &mut Vec<Property> {
         match self.page {
             Page::Library => &mut self.base.active_mut().columns,
-            Page::Album(_) | Page::Artist(_) | Page::Label(_) | Page::Search | Page::Settings | Page::Graph | Page::Home => &mut self.base.page_columns,
+            Page::Album(_) | Page::Artist(_) | Page::Label(_) | Page::Collab(_) | Page::Search | Page::Settings | Page::Graph | Page::Home => &mut self.base.page_columns,
         }
     }
 
@@ -611,14 +613,14 @@ impl App {
     pub fn shown_widths(&self) -> &Widths {
         match self.page {
             Page::Library => &self.base.active().widths,
-            Page::Album(_) | Page::Artist(_) | Page::Label(_) | Page::Search | Page::Settings | Page::Graph | Page::Home => &self.base.page_widths,
+            Page::Album(_) | Page::Artist(_) | Page::Label(_) | Page::Collab(_) | Page::Search | Page::Settings | Page::Graph | Page::Home => &self.base.page_widths,
         }
     }
 
     pub fn shown_widths_mut(&mut self) -> &mut Widths {
         match self.page {
             Page::Library => &mut self.base.active_mut().widths,
-            Page::Album(_) | Page::Artist(_) | Page::Label(_) | Page::Search | Page::Settings | Page::Graph | Page::Home => &mut self.base.page_widths,
+            Page::Album(_) | Page::Artist(_) | Page::Label(_) | Page::Collab(_) | Page::Search | Page::Settings | Page::Graph | Page::Home => &mut self.base.page_widths,
         }
     }
 
@@ -626,7 +628,7 @@ impl App {
     pub fn open_artist(&self) -> Option<&str> {
         match &self.page {
             Page::Artist(name) => Some(name),
-            Page::Library | Page::Album(_) | Page::Label(_) | Page::Search | Page::Settings | Page::Graph | Page::Home => None,
+            Page::Library | Page::Album(_) | Page::Label(_) | Page::Collab(_) | Page::Search | Page::Settings | Page::Graph | Page::Home => None,
         }
     }
 
@@ -707,13 +709,26 @@ impl App {
     pub fn open_label(&self) -> Option<&str> {
         match &self.page {
             Page::Label(name) => Some(name),
-            Page::Library | Page::Album(_) | Page::Artist(_) | Page::Search | Page::Settings | Page::Graph | Page::Home => None,
+            Page::Library | Page::Album(_) | Page::Artist(_) | Page::Collab(_) | Page::Search | Page::Settings | Page::Graph | Page::Home => None,
         }
     }
 
     pub fn show_label(&mut self, name: &str, tx: &mut Tx) {
         self.go_to(Page::Label(name.to_string()));
         tx.scroll_to_instant("label-page", 0.0, 0.0);
+    }
+
+    /// The artists shown on the collaboration page.
+    pub fn open_collab(&self) -> Option<&[String]> {
+        match &self.page {
+            Page::Collab(names) => Some(names),
+            Page::Library | Page::Album(_) | Page::Artist(_) | Page::Label(_) | Page::Search | Page::Settings | Page::Graph | Page::Home => None,
+        }
+    }
+
+    pub fn show_collab(&mut self, names: &[String], tx: &mut Tx) {
+        self.go_to(Page::Collab(names.to_vec()));
+        tx.scroll_to_instant("collab-page", 0.0, 0.0);
     }
 
     /// Opens `page`, remembering the one it leaves for Back.

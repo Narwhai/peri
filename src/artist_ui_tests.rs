@@ -145,6 +145,48 @@ fn each_artist_of_a_collaborative_album_opens_from_the_album_page_and_back_retra
 }
 
 #[test]
+fn the_ampersand_between_album_artists_opens_what_they_made_together() {
+    let mut rt = runtime();
+    rt.update(|s, _| {
+        s.set_library(with_older_album(), false);
+        s.base.active_mut().set_mode(Mode::Albums);
+        s.views_changed();
+    });
+    settle(&mut rt);
+    let mercy = rt.state.albums.iter().position(|a| a.title == "Mercy").expect("Mercy");
+    click(&mut rt, &album_key(mercy, None));
+    let both = crate::view::collab_id(&["Armand Hammer", "The Alchemist"]);
+    click(&mut rt, &both);
+    assert_eq!(rt.state.page, Page::Collab(strings(&["Armand Hammer", "The Alchemist"])));
+    assert_eq!(text_of(&rt, "collab-name"), "Armand Hammer & The Alchemist");
+    assert!(rt.find(&format!("collab-albums{mercy}")).is_some(), "Mercy is theirs together");
+    let ruins = rt.state.albums.iter().position(|a| a.title == "Ruins").expect("Ruins");
+    assert!(rt.find(&format!("collab-albums{ruins}")).is_none(), "Armand Hammer's solo album isn't");
+    // Each name in the title opens that artist's page, and Back returns here.
+    click(&mut rt, "The Alchemist");
+    assert_eq!(rt.state.page, Page::Artist("The Alchemist".into()));
+    click(&mut rt, "back");
+    assert!(matches!(rt.state.page, Page::Collab(_)));
+    click(&mut rt, "collab-play");
+    assert!(rt.state.playing);
+    rt.key(KeyEvent { key: Key::Escape, mods: Mods::default() });
+    settle(&mut rt);
+    assert!(rt.state.open_album().is_some(), "Esc goes back to the album page");
+}
+
+#[test]
+fn a_song_rows_ampersand_links_its_main_artists_not_the_featured_ones() {
+    let mut rt = runtime();
+    let calypso = rt.state.tracks.iter().position(|t| t.title == "Calypso Gene").expect("Calypso Gene");
+    rt.update(|s, tx| s.play_index(calypso, tx));
+    settle(&mut rt);
+    let main = crate::view::collab_id(&["Armand Hammer", "The Alchemist"]);
+    assert!(rt.find(&crate::view::collab_id(&["Silka", "Cleo Reed"])).is_none(), "the & between featured guests is plain text");
+    click(&mut rt, &main);
+    assert_eq!(rt.state.page, Page::Collab(strings(&["Armand Hammer", "The Alchemist"])));
+}
+
+#[test]
 fn the_now_playing_bar_links_the_playing_songs_artists() {
     let mut rt = runtime();
     let calypso = rt.state.tracks.iter().position(|t| t.title == "Calypso Gene").expect("Calypso Gene");
