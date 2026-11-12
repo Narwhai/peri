@@ -1,6 +1,6 @@
 //! Album views: list cards with track tables, a grid of covers, and the album page.
 
-use rune::{Align, Cursor, El, Image, ScrollSpec, SurfaceFit, Tx, col, el, icon, row, text};
+use rune::{Align, Cursor, El, Image, ScrollSpec, Shadow, SurfaceFit, Tx, col, el, icon, row, text};
 
 use super::table;
 use super::*;
@@ -17,9 +17,17 @@ const CARD_TEXT_H: f32 = 70.0;
 const LIST_COVER: f32 = 132.0;
 const TRACK_ROW_H: f32 = 34.0;
 const PAGE_COVER: f32 = 232.0;
+/// The corners of the album page's Play and Shuffle.
+const PAGE_BUTTON_RADIUS: f32 = 4.0;
+/// The album page's genre pills.
+const PILL_H: f32 = 20.0;
+const PILL_PX: f32 = 8.0;
+const PILL_GAP: f32 = 6.0;
 
 const ALBUM_TITLE: TextStyle = TextStyle::new(17.0, 650.0);
 const PAGE_TITLE: TextStyle = TextStyle::new(28.0, 700.0);
+/// A small button's label.
+const SMALL_TITLE: TextStyle = TextStyle::new(11.5, 500.0);
 
 /// How many cards `size` wide fit across `width` (the list's inner width).
 pub fn columns_for(width: f32, size: f32) -> usize {
@@ -251,6 +259,61 @@ pub(super) fn tinted_button(key: &'static str, glyph: &'static rune::Icon, label
         .child(text(label).font(TITLE).color(p.blue))
 }
 
+/// The album page's Play: raised while album `a` isn't playing, pressed in and darker as
+/// Pause while it is. Pressing it pauses or resumes the album when it's the one loaded,
+/// else plays it from the start.
+fn play_toggle(s: &App, a: usize, p: &Palette) -> El {
+    let loaded = s.current.is_some_and(|i| s.album_of(i) == Some(a));
+    let down = loaded && s.playing;
+    let (glyph, label) = if down { (&icons::PAUSE, "Pause") } else { (&icons::PLAY, "Play") };
+    let shadow = if down {
+        Shadow { y: 2.0, blur: 5.0, color: rune::Color::BLACK.alpha(0.45), inset: true, ..Shadow::default() }
+    } else {
+        Shadow { y: 1.0, blur: 2.0, color: rune::Color::BLACK.alpha(0.25), ..Shadow::default() }
+    };
+    // Wide enough for either label, so turning into Pause doesn't resize it: the icon and
+    // label recentre in the same box.
+    let widest = ["Play", "Pause"].into_iter().map(|l| rune::text::measure(l, &[], TITLE, None).0).fold(0.0, f32::max);
+    row()
+        .key("page-play")
+        .h(32.0)
+        .min_w(widest + 14.0 + 8.0 + 2.0 * 14.0)
+        .px(14.0)
+        .gap(8.0)
+        .radius(PAGE_BUTTON_RADIUS)
+        .center_y()
+        .justify_center()
+        .fill(if down { p.blue.mix(rune::Color::BLACK, 0.35) } else { p.blue })
+        .box_shadow(shadow)
+        .hover(rune::Color::WHITE.alpha(0.12))
+        .press(rune::Color::BLACK.alpha(0.12))
+        .press_scale(0.97)
+        .cursor(Cursor::Pointer)
+        .role("button")
+        .label(label)
+        .on_press_tx(move |s: &mut App, tx| if loaded { s.toggle(tx) } else { s.play_album(a, None, tx) })
+        .child(icon(glyph, 14.0).color(rune::Color::WHITE))
+        .child(text(label).font(TITLE).color(rune::Color::WHITE))
+}
+
+/// [`tinted_button`] smaller, for a lesser action under a full-size one.
+fn small_tinted_button(key: &'static str, glyph: &'static rune::Icon, label: &'static str, p: &Palette) -> El {
+    row()
+        .key(key)
+        .h(24.0)
+        .px(10.0)
+        .gap(6.0)
+        .radius(PAGE_BUTTON_RADIUS)
+        .center_y()
+        .fill(p.ui.alpha(0.6))
+        .hover(p.ui.alpha(0.4))
+        .press_scale(0.97)
+        .cursor(Cursor::Pointer)
+        .label(label)
+        .child(icon(glyph, 12.0).color(p.blue))
+        .child(text(label).font(SMALL_TITLE).color(p.blue))
+}
+
 pub(super) fn secondary_button(key: &'static str, glyph: &'static rune::Icon, label: &'static str, p: &Palette) -> El {
     row()
         .key(key)
@@ -287,42 +350,42 @@ pub(super) fn album_page(s: &App, a: usize, p: &Palette) -> El {
         .on_press_tx(|s: &mut App, tx| s.go_back(tx))
         .child(icon(&icons::BACK, 16.0).color(p.tx2))
         .child(text(back_label(s)).font(TITLE).color(p.tx2));
-    let mut facts = col().gap(4.0);
-    if !album.genres.is_empty() {
-        facts = facts.child(fact("Genre", text(album.genres.join(", ")), p));
-    }
-    if let Some(label) = &album.label {
-        facts = facts.child(fact("Label", label_link(label, p.tx2).key("fact-label"), p));
-    }
-    if !album.formats.is_empty() {
-        facts = facts.child(fact("Format", text(album.formats.iter().map(|f| f.to_uppercase()).collect::<Vec<_>>().join(", ")), p));
-    }
+    let mut facts = col().key("facts").gap(4.0).grow(1.0).shrink();
     let featured: Vec<(String, Vec<String>)> = album.featured.iter().map(|f| (f.clone(), Vec::new())).collect();
+    let mut has_credits = !featured.is_empty();
     if !featured.is_empty() {
         facts = facts.child(fact("Featuring", name_list(&featured, p.tx2).key("fact-featuring"), p));
     }
     for role in Role::ALL {
         let people = credits::people(&album.credits, role);
         if !people.is_empty() {
+            has_credits = true;
             facts = facts.child(fact(role.label(), name_list(&people, p.tx2).key(format!("fact-{}", role.label().to_lowercase())), p));
         }
     }
+    let buttons = col()
+        .key("page-buttons")
+        .gap(8.0)
+        .self_start()
+        .items_stretch()
+        .child(play_toggle(s, a, p))
+        .child(small_tinted_button("page-shuffle", &icons::SHUFFLE, "Shuffle", p).justify_center().on_press_tx(move |s: &mut App, tx| s.shuffle_album(a, tx)));
+    // The buttons, then a rule as tall as the credits beside it, then the credits.
+    let mut actions = row().key("page-actions").gap(20.0).items_stretch().child(buttons);
+    if has_credits {
+        actions = actions.child(el().key("page-divider").w(1.0).fill(p.ui.alpha(0.9))).child(facts);
+    }
     let head = col()
+        .key("page-head")
         .gap(6.0)
         .grow(1.0)
         .shrink()
         .child(text(album.title.clone()).key("page-title").font(PAGE_TITLE).color(p.tx).wrap())
         .child(album_artist(album, p.tx2).key("page-artist").font(HEADING))
         .child(text(meta(album, true)).key("page-meta").font(BODY).color(p.tx3))
+        .children((!album.genres.is_empty()).then(|| genre_pills(&album.genres, p)))
         .child(el().h(6.0))
-        .child(facts)
-        .child(el().h(12.0))
-        .child(
-            row()
-                .gap(8.0)
-                .child(play_button("page-play", "Play", p).on_press_tx(move |s: &mut App, tx| s.play_album(a, None, tx)))
-                .child(tinted_button("page-shuffle", &icons::SHUFFLE, "Shuffle", p).on_press_tx(move |s: &mut App, tx| s.shuffle_album(a, tx))),
-        );
+        .child(actions);
     let top = row().gap(28.0).items_start().child(cover("page-cover".into(), cover_image(s, album), Some(PAGE_COVER), p)).child(head);
     let mut page = col()
         .key("album-page-body")
@@ -332,7 +395,8 @@ pub(super) fn album_page(s: &App, a: usize, p: &Palette) -> El {
         .gap(22.0)
         .child(back)
         .child(top)
-        .child(track_table(s, a, table::Columns { shown: &s.views.page_columns, widths: &s.views.page_widths, pills: &[], covers: false }, p));
+        .child(track_table(s, a, table::Columns { shown: &s.views.page_columns, widths: &s.views.page_widths, pills: &[], covers: false }, p))
+        .children(album.label.as_deref().map(|label| release_line(album.year, label, p)));
     let more = more_by(s, a, p);
     if let Some(more) = more {
         page = page.child(more);
@@ -358,6 +422,28 @@ pub(super) fn back_label(s: &App) -> String {
         Some(crate::app::Page::Home) => "Home".to_string(),
         Some(crate::app::Page::Library) | None => s.views.active().name.clone(),
     }
+}
+
+/// The album's genres as pills under its meta line.
+// TODO: open a page of the genre's songs on press.
+fn genre_pills(genres: &[String], p: &Palette) -> El {
+    let pill = |(n, genre): (usize, &String)| {
+        row().key(format!("page-genre{n}")).h(PILL_H).px(PILL_PX).radius(PILL_H / 2.0).center_y().fill(p.ui.alpha(0.6)).child(text(genre.clone()).font(SMALL).color(p.tx2))
+    };
+    row().key("page-genres").w_full().gap(PILL_GAP).flex_wrap().children(genres.iter().enumerate().map(pill))
+}
+
+/// "℗ 2023 ADOR" under the track list, the label opening its page.
+fn release_line(year: Option<u32>, label: &str, p: &Palette) -> El {
+    let lead = year.map_or_else(|| "℗ ".to_string(), |y| format!("℗ {y} "));
+    let content = format!("{lead}{label}");
+    let color = p.tx3;
+    text(content)
+        .key("page-release")
+        .font(SMALL)
+        .color(color)
+        .link(Link::new(lead.len()..lead.len() + label.len(), label.to_string()).hover(LinkPaint::new().underline(color)))
+        .on_link(|s: &mut App, name, tx| s.show_label(name, tx))
 }
 
 fn fact(label: &str, value: El, p: &Palette) -> El {

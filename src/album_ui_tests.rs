@@ -245,3 +245,117 @@ fn hovering_a_grid_cards_play_button_keeps_it_shown_and_pressing_it_plays_withou
     assert_eq!(rt.state.page, Page::Library, "pressing play doesn't open the album");
     assert_eq!(rt.state.tracks[rt.state.current.expect("playing")].title, "New Jeans");
 }
+
+fn rect(rt: &Runtime<App>, key: &str) -> [f32; 4] {
+    rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).unwrap_or_else(|| panic!("no element {key}")).rect
+}
+
+fn album_page_runtime(a: &str) -> Runtime<App> {
+    let mut app = App::new(Output::Silent, Store::memory());
+    long_credits(&mut app);
+    let mut rt = Runtime::new(app, view, (1100.0, 800.0), Env::new(true, 1.0));
+    rt.frame(0.0);
+    settle(&mut rt);
+    let a = album(&rt, a);
+    rt.update(|s, tx| s.show_album(a, tx));
+    settle(&mut rt);
+    rt
+}
+
+#[test]
+fn an_album_pages_buttons_stack_under_its_genres_with_the_credits_past_a_divider_to_their_right() {
+    let rt = album_page_runtime("Get Up");
+    let (genres, play, shuffle) = (rect(&rt, "page-genres"), rect(&rt, "page-play"), rect(&rt, "page-shuffle"));
+    let (divider, facts) = (rect(&rt, "page-divider"), rect(&rt, "facts"));
+    assert!(play[1] > genres[1] + genres[3], "the buttons sit under the genres");
+    assert!(shuffle[1] > play[1] + play[3] && (shuffle[0] - play[0]).abs() < 0.5, "Shuffle stacks under Play, left edges level");
+    assert!(shuffle[3] < play[3], "Shuffle is shorter than Play: {shuffle:?} {play:?}");
+    assert!((shuffle[2] - play[2]).abs() < 0.5, "the two share a width: {shuffle:?} {play:?}");
+    assert!(divider[0] > play[0] + play[2].max(shuffle[2]), "the divider follows the buttons");
+    assert!(facts[0] > divider[0] + divider[2], "the credits follow the divider");
+    assert!(facts[0] - (play[0] + play[2].max(shuffle[2])) < 48.0, "the credits start just past the buttons");
+    assert!((divider[1] - facts[1]).abs() < 0.5 && (divider[3] - facts[3]).abs() < 0.5, "the divider spans the credits: {divider:?} {facts:?}");
+    assert!((play[1] - facts[1]).abs() < 0.5, "the buttons top-align with the credits");
+    let (composer, mixer) = (rect(&rt, "fact-composer"), rect(&rt, "fact-mixer"));
+    assert!((composer[0] - mixer[0]).abs() < 0.5 && mixer[1] > composer[1], "the credits stack in one column");
+}
+
+#[test]
+fn an_album_page_without_credits_shows_its_buttons_without_a_divider() {
+    let rt = album_page_runtime("Spaces");
+    assert!(rt.find("page-play").is_some());
+    assert!(rt.find("page-divider").is_none(), "no divider with nothing past it");
+}
+
+/// Get Up credited like the real EP: two long name lists and four more roles.
+fn long_credits(s: &mut App) {
+    use crate::credits::{Credit, Role};
+    crate::scene_library(s);
+    let mut tracks = s.tracks.clone();
+    let composers = "Erika de Casier, Jinsu Park, Fine Glindvad Jensen, Frankie Scoca, Kristine Bogan, 250, Ylva Dimberg, Donghyun Kim, freekind., Henriette Motzfeldt, Catharina Stoltenberg";
+    let lyricists = "Erika de Casier, Gigi, Haerin, Fine Glindvad Jensen, Kristine Bogan, Danielle, Donghyun Kim, Beenzino, Ylva Dimberg, freekind., Henriette Motzfeldt, Catharina Stoltenberg";
+    let roles = [(Role::Composer, composers), (Role::Lyricist, lyricists), (Role::Producer, "250, Erika de Casier"), (Role::Performer, "NewJeans (background vocals), Emily Kim (background vocals)"), (Role::Engineer, "Bill Zimmerman"), (Role::Mixer, "Phil Tan, Nathan Boddy, Tony Maserati, Jonny Breakwell, David K. Younghyun")];
+    for t in tracks.iter_mut().filter(|t| t.album.as_deref() == Some("Get Up")) {
+        for (role, names) in roles {
+            t.credits.extend(names.split(", ").map(|n| Credit::parse(role, n)));
+        }
+    }
+    s.set_library(tracks, false);
+}
+
+#[test]
+fn an_album_page_shows_its_genres_as_pills_and_its_label_under_the_tracks() {
+    let mut app = App::new(Output::Silent, Store::memory());
+    crate::scene_label(&mut app);
+    let mut rt = Runtime::new(app, view, (1100.0, 800.0), Env::new(true, 1.0));
+    rt.frame(0.0);
+    settle(&mut rt);
+    let a = album(&rt, "Spaces");
+    rt.update(|s, tx| s.show_album(a, tx));
+    settle(&mut rt);
+    let genres = rt.state.albums[a].genres.clone();
+    assert!(!genres.is_empty(), "the demo album has genres");
+    for n in 0..genres.len() {
+        assert!(rt.find(&format!("page-genre{n}")).is_some(), "genre {n} shows as a pill");
+    }
+    assert!(rt.find("fact-label").is_none(), "the label left the facts");
+    let year = rt.state.albums[a].year.expect("a year");
+    assert_eq!(text_of(&rt, "page-release"), format!("℗ {year} Erased Tapes"));
+    assert!(rect(&rt, "page-release")[1] > rect(&rt, "tracks")[1], "it sits under the track list");
+}
+
+#[test]
+fn the_album_pages_play_button_toggles_to_pause_while_the_album_plays() {
+    let mut rt = album_page_runtime("Get Up");
+    assert_eq!(play_label(&rt).as_deref(), Some("Play"));
+    let (play, shuffle) = (rect(&rt, "page-play"), rect(&rt, "page-shuffle"));
+    click(&mut rt, "page-play");
+    assert!(rt.state.playing, "Play starts the album");
+    assert_eq!(rect(&rt, "page-play"), play, "turning into Pause keeps the button's size and place");
+    assert_eq!(rect(&rt, "page-shuffle"), shuffle, "and Shuffle's");
+    let get_up = album(&rt, "Get Up");
+    assert_eq!(rt.state.current.and_then(|i| rt.state.album_of(i)), Some(get_up));
+    assert_eq!(play_label(&rt).as_deref(), Some("Pause"), "it turns into Pause");
+    click(&mut rt, "page-play");
+    assert!(!rt.state.playing, "Pause pauses");
+    assert_eq!(rt.state.current.and_then(|i| rt.state.album_of(i)), Some(get_up), "and keeps the album loaded");
+    assert_eq!(play_label(&rt).as_deref(), Some("Play"), "and turns back into Play");
+    click(&mut rt, "page-play");
+    assert!(rt.state.playing, "Play again resumes");
+}
+
+fn play_label(rt: &Runtime<App>) -> Option<String> {
+    rt.elements().into_iter().find(|e| e.key.as_deref() == Some("page-play")).and_then(|e| e.label)
+}
+
+#[test]
+fn the_album_pages_play_button_plays_this_album_when_another_is_playing() {
+    let mut rt = album_page_runtime("Get Up");
+    let spaces = album(&rt, "Spaces");
+    rt.update(|s, tx| s.play_album(spaces, None, tx));
+    settle(&mut rt);
+    assert_eq!(play_label(&rt).as_deref(), Some("Play"), "another album playing leaves this one's button at Play");
+    click(&mut rt, "page-play");
+    assert_eq!(rt.state.current.and_then(|i| rt.state.album_of(i)), Some(album(&rt, "Get Up")), "Play switches to this album");
+    assert_eq!(play_label(&rt).as_deref(), Some("Pause"));
+}
