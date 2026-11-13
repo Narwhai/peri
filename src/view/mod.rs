@@ -31,12 +31,16 @@ pub use albums::columns_for;
 const ROW_H: f32 = 44.0;
 /// The header's tabs: as tall as the header's bottom edge they stand on, so their bottoms line up with it.
 const TAB_H: f32 = 38.0;
-/// The gap between the header's tabs: room for the active tab's flare into it. Wider ones crowd search out of the header at [`MIN_SIZE`].
-const TAB_GAP: f32 = TAB_FLARE + 2.0;
+/// The gap between the header's tabs. The active tab's flares reach past it into its neighbours' padding.
+const TAB_GAP: f32 = 2.0;
+/// A header tab's side padding: room for a neighbouring active tab's flare beside its icon and label.
+const TAB_PAD: f32 = 11.0;
+/// How far an inactive header tab's hover fill stays inside its top and bottom edges.
+const TAB_HOVER_INSET: f32 = 5.0;
 /// The top corners' radius of a header tab.
-const TAB_RADIUS: f32 = 3.0;
+const TAB_RADIUS: f32 = 6.0;
 /// How far an active header tab's bottom corners flare out onto the header's edge, Chrome-style.
-const TAB_FLARE: f32 = 5.0;
+const TAB_FLARE: f32 = 10.0;
 const BAR_H: f32 = 88.0;
 const COVER: f32 = 56.0;
 const SNAPPY: Spring = Spring::new(0.25, 0.0);
@@ -274,33 +278,45 @@ fn tab_flare(key: String, left: bool, edge: Color, fill: Color) -> El {
 /// The header's tabs: Home, Library (the views, and the pages opened from them) and Graph.
 fn tabs(s: &App, p: &Palette) -> El {
     let (home, graph) = (s.in_home(), s.in_graph());
-    let tab = |key: &'static str, glyph: &'static Icon, label: &'static str, help: &'static str, on: bool| {
-        // Like the artist page's folder tabs: the active one fills down to the header's line, which runs under it.
-        let edge = if on { p.ui.alpha(0.7) } else { p.ui.alpha(0.35) };
+    let ons = [home, !home && !graph, graph];
+    // Like Chrome's tabs: the active one is a folder tab joined to the page, the others bare labels on the header.
+    let tab = |i: usize, key: &'static str, glyph: &'static Icon, label: &'static str, help: &'static str| {
+        let on = ons[i];
         let mut folder = row()
             .key(key)
             .h(TAB_H)
-            .pl(8.0)
-            .pr(12.0)
+            .px(TAB_PAD)
             .gap(8.0)
-            .corners([TAB_RADIUS, TAB_RADIUS, 0.0, 0.0])
-            // No bottom side, so the active tab's fill runs down over the header's line.
-            .border_sides([1.0, 1.0, 0.0, 1.0], edge)
             .center_y()
-            .fill(if on { p.bg } else { p.bg2.alpha(0.0) })
             .cursor(Cursor::Pointer)
             .role("tab")
             .checked(on)
             .label(label)
-            .help(help)
-            .child(icon(glyph, 18.0).color(if on { p.ui3 } else { p.tx3 }))
-            .child(text(label).font(HEADING).color(if on { p.tx } else { p.tx2 }));
+            .help(help);
         if on {
-            folder = folder.child(tab_flare(format!("{key}-flare-left"), true, edge, p.bg)).child(tab_flare(format!("{key}-flare-right"), false, edge, p.bg));
+            let edge = p.ui.alpha(0.7);
+            folder = folder
+                .corners([TAB_RADIUS, TAB_RADIUS, 0.0, 0.0])
+                // No bottom side, so its fill runs down over the header's line.
+                .border_sides([1.0, 1.0, 0.0, 1.0], edge)
+                .fill(p.bg)
+                .child(tab_flare(format!("{key}-flare-left"), true, edge, p.bg))
+                .child(tab_flare(format!("{key}-flare-right"), false, edge, p.bg));
         } else {
-            folder = folder.hover(p.ui.alpha(0.3));
+            // Inside as far as a neighbouring active tab's flare reaches, so it never covers one.
+            let (side, ends) = (Some(TAB_FLARE - TAB_GAP), Some(TAB_HOVER_INSET));
+            folder = folder
+                .hover_group()
+                .child(el().key(format!("{key}-hover")).pin(side, ends, side, ends).radius(TAB_RADIUS).fill(p.ui.alpha(0.3)).group_opacity(0.0, 1.0));
+        }
+        // Between two inactive tabs, as Chrome divides them.
+        if !on && ons.get(i + 1) == Some(&false) {
+            let middle = Some(-(1.0 + TAB_GAP) / 2.0);
+            folder = folder.child(el().key(format!("{key}-divider")).pin(None, Some(11.0), middle, Some(11.0)).w(1.0).fill(p.ui.alpha(0.5)));
         }
         folder
+            .child(icon(glyph, 18.0).color(if on { p.ui3 } else { p.tx3 }))
+            .child(text(label).font(HEADING).color(if on { p.tx } else { p.tx2 }))
     };
     row()
         .key("tabs")
@@ -308,9 +324,9 @@ fn tabs(s: &App, p: &Palette) -> El {
         .self_end()
         .role("tablist")
         .label("Sections")
-        .child(tab("home-tab", &icons::HOUSE, "Home", "Recently added and played", home).on_press(|s: &mut App| s.show_home()))
-        .child(tab("library-tab", &icons::NOTE, "Library", "Back to the library's views", !home && !graph).on_press(|s: &mut App| s.go_home()))
-        .child(tab("graph-tab", &icons::GRAPH, "Graph", "Artists and who they've worked with", graph).on_press(|s: &mut App| s.show_graph()))
+        .child(tab(0, "home-tab", &icons::HOUSE, "Home", "Recently added and played").on_press(|s: &mut App| s.show_home()))
+        .child(tab(1, "library-tab", &icons::NOTE, "Library", "Back to the library's views").on_press(|s: &mut App| s.go_home()))
+        .child(tab(2, "graph-tab", &icons::GRAPH, "Graph", "Artists and who they've worked with").on_press(|s: &mut App| s.show_graph()))
 }
 
 fn icon_button(key: &'static str, glyph: &'static Icon, help: &str, p: &Palette) -> El {

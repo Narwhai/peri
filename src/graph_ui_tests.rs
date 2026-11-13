@@ -615,30 +615,43 @@ fn has(rt: &Runtime<App>, key: &str) -> bool {
 }
 
 #[test]
-fn the_active_header_tab_stands_on_the_header_edge_and_flares_into_its_gaps() {
+fn the_active_header_tab_stands_on_the_header_edge_and_flares_beside_its_neighbours() {
     let mut rt = runtime(Store::memory());
     let bottom = |r: [f32; 4]| r[1] + r[3];
+    let right_edge = |r: [f32; 4]| r[0] + r[2];
     let header = bottom(rect(&rt, "header"));
-    let check = |rt: &Runtime<App>, on: &str, off: &str| {
+    let tabs = ["home-tab", "library-tab", "graph-tab"];
+    let check = |rt: &Runtime<App>, on: &str| {
+        for t in tabs {
+            assert_eq!(bottom(rect(rt, t)), header, "{t} stands on the header's bottom edge");
+        }
         let tab = rect(rt, on);
-        assert_eq!(bottom(tab), header, "{on} stands on the header's bottom edge");
-        assert_eq!(bottom(rect(rt, off)), header, "{off} stands on the header's bottom edge");
         let (left, right) = (rect(rt, &format!("{on}-flare-left")), rect(rt, &format!("{on}-flare-right")));
-        let next = rect(rt, off);
         for flare in [left, right] {
             assert_eq!(bottom(flare), header, "{on}'s flares stand on the header's bottom edge");
             assert!(flare[3] > 1.0, "a flare is taller than the header's line");
         }
-        // Each flare overlaps only the tab's 1-point side border and reaches out into the gap.
-        assert!(left[0] < tab[0] && left[0] + left[2] <= tab[0] + 1.0, "the left flare is outside {on}");
-        assert!(right[0] >= tab[0] + tab[2] - 1.0 && right[0] + right[2] > tab[0] + tab[2], "the right flare is outside {on}");
-        let clear = |f: [f32; 4]| f[0] + f[2] <= next[0] || f[0] >= next[0] + next[2];
-        assert!(clear(left) && clear(right), "{on}'s flares stay clear of {off}");
-        for k in ["left", "right"] {
-            assert!(!has(rt, &format!("{off}-flare-{k}")), "only the active tab flares");
+        // Each flare overlaps only the tab's 1-point side border and reaches out beside it.
+        assert!(left[0] < tab[0] && right_edge(left) <= tab[0] + 1.0, "the left flare is outside {on}");
+        assert!(right[0] >= right_edge(tab) - 1.0 && right_edge(right) > right_edge(tab), "the right flare is outside {on}");
+        let apart = |a: [f32; 4], b: [f32; 4]| right_edge(a) <= b[0] || a[0] >= right_edge(b);
+        for off in tabs.into_iter().filter(|&t| t != on) {
+            assert!(!has(rt, &format!("{off}-flare-left")) && !has(rt, &format!("{off}-flare-right")), "only the active tab flares");
+            assert!(!has(rt, &format!("{off}-seam")), "no seam on {off}");
+            // Inactive tabs are bare labels whose hover fill stays inside them, clear of the flares.
+            let hover = rect(rt, &format!("{off}-hover"));
+            assert!(apart(hover, left) && apart(hover, right), "{off}'s hover fill stays clear of {on}'s flares");
         }
+        assert!(!has(rt, &format!("{on}-hover")), "the active tab has no hover fill");
     };
-    check(&rt, "library-tab", "graph-tab");
+    // Library is active: no two inactive tabs are neighbours, so no dividers.
+    check(&rt, "library-tab");
+    assert!(!has(&rt, "home-tab-divider") && !has(&rt, "library-tab-divider"), "no divider beside the active tab");
     click(&mut rt, "graph-tab");
-    check(&rt, "graph-tab", "library-tab");
+    check(&rt, "graph-tab");
+    // Home and Library are inactive neighbours: one divider in the gap between them.
+    let divider = rect(&rt, "home-tab-divider");
+    let (home, library) = (rect(&rt, "home-tab"), rect(&rt, "library-tab"));
+    assert!(divider[0] >= right_edge(home) - 1.0 && right_edge(divider) <= library[0] + 1.0, "the divider sits between Home and Library");
+    assert!(!has(&rt, "library-tab-divider"), "no divider beside the active Graph tab");
 }
