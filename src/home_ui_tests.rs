@@ -367,7 +367,7 @@ fn an_empty_library_says_so_on_both_sections() {
 
 #[test]
 fn the_chosen_tab_is_remembered_across_launches() {
-    let dir = std::env::temp_dir().join(format!("rune-music-home-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("peri-home-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let file = dir.join("prefs.json");
     let mut rt = {
@@ -393,7 +393,7 @@ fn the_chosen_tab_is_remembered_across_launches() {
 
 #[test]
 fn an_unreadable_saved_tab_opens_the_library_and_says_so() {
-    let dir = std::env::temp_dir().join(format!("rune-music-home-bad-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("peri-home-bad-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("{e}"));
     let file = dir.join("prefs.json");

@@ -366,6 +366,6 @@ fn main() {
         setup: Some(setup),
         poll: Some(app::poll),
         on_key: Some(app::on_key),
-        ..AppSpec::new("Rune Music", (980.0, 640.0), init, view::view)
+        ..AppSpec::new("Peri", (980.0, 640.0), init, view::view)
     });
 }

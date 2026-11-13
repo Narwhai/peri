@@ -279,11 +279,11 @@ mod tests {
         assert!(e.starts_with("Couldn't read /nonexistent/song.flac"), "{e}");
     }
 
-    /// `RUNE_MUSIC_FILE=song.flac cargo test real_details -- --ignored --nocapture`
+    /// `PERI_MUSIC_FILE=song.flac cargo test real_details -- --ignored --nocapture`
     #[test]
-    #[ignore = "needs RUNE_MUSIC_FILE"]
+    #[ignore = "needs PERI_MUSIC_FILE"]
     fn real_details() {
-        let path = std::env::var("RUNE_MUSIC_FILE").expect("set RUNE_MUSIC_FILE to an audio file");
+        let path = std::env::var("PERI_MUSIC_FILE").expect("set PERI_MUSIC_FILE to an audio file");
         let d = read(Path::new(&path)).expect("readable");
         println!("{:?} kbps, {:?} Hz, {:?} bit, {:?} ch, {:?} bytes", d.bitrate, d.sample_rate, d.bit_depth, d.channels, d.size);
         for (k, v) in &d.ids {

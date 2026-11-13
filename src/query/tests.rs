@@ -182,9 +182,9 @@ fn views_save_and_load_as_json() {
     assert!(json.contains("\"genre\"") && json.contains("\"has\"") && json.contains("\"desc\""), "{json}");
     assert_eq!(serde_json::from_str::<Views>(&json).unwrap(), views);
 
-    let dir = std::env::temp_dir().join(format!("rune-music-store-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("peri-store-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    let file = dir.join("rune-music/prefs.json");
+    let file = dir.join("peri/prefs.json");
     let mut store = Store::at(&file);
     assert_eq!(store.load(), Views::default(), "nothing saved yet");
     store.save(&views).unwrap();

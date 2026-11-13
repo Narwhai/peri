@@ -1,6 +1,6 @@
 //! The saved views and library folders: JSON in the app's config folder through `rune::prefs`
-//! (`~/.config/rune-music/prefs.json` on Linux, `%APPDATA%\rune-music` on Windows,
-//! `~/Library/Application Support/rune-music` on macOS).
+//! (`~/.config/peri/prefs.json` on Linux, `%APPDATA%\peri` on Windows,
+//! `~/Library/Application Support/peri` on macOS).
 
 use rune::prefs::Prefs;
 use serde::{Deserialize, Serialize};
@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use super::property::Property;
 use super::view::View;
 
-const APP_ID: &str = "rune-music";
+const APP_ID: &str = "peri";
 const KEY: &str = "views";
 const LIBRARY_KEY: &str = "library";
 const ARTISTS_KEY: &str = "artists";

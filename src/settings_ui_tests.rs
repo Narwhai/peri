@@ -16,7 +16,7 @@ struct Fixture {
 
 impl Fixture {
     fn new(name: &str) -> Fixture {
-        let dir = std::env::temp_dir().join(format!("rune-music-settings-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("peri-settings-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         Fixture { dir }

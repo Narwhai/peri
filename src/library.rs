@@ -353,7 +353,7 @@ mod tests {
 
     #[test]
     fn scanning_finds_audio_recursively_skipping_hidden_and_other_files() {
-        let root = std::env::temp_dir().join(format!("rune-music-scan-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("peri-scan-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("album")).unwrap();
         std::fs::create_dir_all(root.join(".hidden")).unwrap();

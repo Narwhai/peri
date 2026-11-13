@@ -205,12 +205,12 @@ fn an_error_shows_and_dismisses() {
 }
 
 /// Scans a real folder and decodes a file of each format, without sound:
-/// `RUNE_MUSIC_DIR=~/Music cargo test --release real_library -- --ignored --nocapture`.
+/// `PERI_MUSIC_DIR=~/Music cargo test --release real_library -- --ignored --nocapture`.
 #[test]
-#[ignore = "needs RUNE_MUSIC_DIR"]
+#[ignore = "needs PERI_MUSIC_DIR"]
 fn real_library_scans_and_every_format_decodes() {
     use rodio::Source;
-    let dir = std::env::var("RUNE_MUSIC_DIR").expect("set RUNE_MUSIC_DIR to a music folder");
+    let dir = std::env::var("PERI_MUSIC_DIR").expect("set PERI_MUSIC_DIR to a music folder");
     let started = std::time::Instant::now();
     let rx = crate::library::scan(vec![dir.into()], || {});
     let (tracks, errors) = loop {
@@ -237,13 +237,13 @@ fn real_library_scans_and_every_format_decodes() {
 }
 
 /// Plays a real file through the default output, muted, and checks time moves, pause holds it
-/// and seeking lands: `RUNE_MUSIC_FILE=song.flac cargo test --release real_output -- --ignored`.
+/// and seeking lands: `PERI_MUSIC_FILE=song.flac cargo test --release real_output -- --ignored`.
 #[test]
-#[ignore = "needs RUNE_MUSIC_FILE and an audio device"]
+#[ignore = "needs PERI_MUSIC_FILE and an audio device"]
 fn real_output_plays_pauses_and_seeks() {
     use std::thread::sleep;
     use std::time::Duration;
-    let file = std::env::var("RUNE_MUSIC_FILE").expect("set RUNE_MUSIC_FILE to an audio file");
+    let file = std::env::var("PERI_MUSIC_FILE").expect("set PERI_MUSIC_FILE to an audio file");
     let mut engine = crate::audio::Engine::open().expect("open the default output");
     engine.load(std::path::Path::new(&file), 0.0).expect("load");
     sleep(Duration::from_millis(600));
@@ -378,13 +378,13 @@ fn a_left_click_on_empty_space_still_leaves_the_search_field_and_stays() {
 }
 
 /// Reads the real library's new attributes and times grouping it:
-/// `RUNE_MUSIC_DIR=~/Music cargo test --release real_library_groups -- --ignored --nocapture`.
+/// `PERI_MUSIC_DIR=~/Music cargo test --release real_library_groups -- --ignored --nocapture`.
 #[test]
-#[ignore = "needs RUNE_MUSIC_DIR"]
+#[ignore = "needs PERI_MUSIC_DIR"]
 fn real_library_groups_by_every_property() {
     use crate::query::property::Property;
     use crate::query::view::{Direction, GroupBy, View, evaluate};
-    let dir = std::env::var("RUNE_MUSIC_DIR").expect("set RUNE_MUSIC_DIR to a music folder");
+    let dir = std::env::var("PERI_MUSIC_DIR").expect("set PERI_MUSIC_DIR to a music folder");
     let rx = crate::library::scan(vec![dir.into()], || {});
     let mut tracks = loop {
         if let crate::library::ScanMsg::Done { tracks, .. } = rx.recv().expect("the scan finishes") {
@@ -456,7 +456,7 @@ fn a_play_counts_at_half_the_song_and_shows_in_columns_and_details() {
 #[test]
 fn plays_are_saved_beside_the_preferences_and_count_at_the_next_launch() {
     use crate::query::store::Store;
-    let dir = std::env::temp_dir().join(format!("rune-music-plays-ui-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("peri-plays-ui-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let file = dir.join("prefs.json");
     let mut app = App::new(Output::Silent, Store::at(&file));

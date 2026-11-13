@@ -161,7 +161,7 @@ fn finding_an_artist_picks_and_centres_them() {
 
 #[test]
 fn hiding_a_kind_of_link_and_the_camera_save_and_come_back() {
-    let dir = std::env::temp_dir().join(format!("rune-music-graph-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("peri-graph-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("temp dir");
     let prefs = dir.join("prefs.json");
     {
@@ -188,7 +188,7 @@ fn hiding_a_kind_of_link_and_the_camera_save_and_come_back() {
 
 #[test]
 fn a_cached_layout_is_reused_until_the_graph_changes() {
-    let dir = std::env::temp_dir().join(format!("rune-music-graph-cache-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("peri-graph-cache-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("temp dir");
     let prefs = dir.join("prefs.json");
     let first = {
@@ -301,12 +301,12 @@ fn graph_frames_at_scale() {
     println!("drag frames ({moving} moving, {settle_frames} to settle): p50 {:.2?}, p95 {:.2?}, max {:.2?}", times[n / 2], times[n * 95 / 100], times[n - 1]);
 }
 
-/// `RUNE_MUSIC_DIR=~/Music cargo test --release real_library_graph -- --ignored --nocapture`:
-/// the real library's graph, snapped to `$RUNE_MUSIC_SNAP` if set.
+/// `PERI_MUSIC_DIR=~/Music cargo test --release real_library_graph -- --ignored --nocapture`:
+/// the real library's graph, snapped to `$PERI_MUSIC_SNAP` if set.
 #[test]
 #[ignore]
 fn real_library_graph() {
-    let dir = std::env::var("RUNE_MUSIC_DIR").expect("set RUNE_MUSIC_DIR to a music folder");
+    let dir = std::env::var("PERI_MUSIC_DIR").expect("set PERI_MUSIC_DIR to a music folder");
     let rx = crate::library::scan(vec![dir.into()], || {});
     let tracks = loop {
         if let crate::library::ScanMsg::Done { tracks, .. } = rx.recv().expect("the scan finishes") {
@@ -332,11 +332,11 @@ fn real_library_graph() {
 }
 
 /// Prints where, in window points, the link between two artists of the real library shows,
-/// for snapshot scripts: `RUNE_MUSIC_DIR=… RUNE_GRAPH_LINK="A|B" cargo test --release real_link_midpoint -- --ignored --nocapture`.
+/// for snapshot scripts: `PERI_MUSIC_DIR=… RUNE_GRAPH_LINK="A|B" cargo test --release real_link_midpoint -- --ignored --nocapture`.
 #[test]
 #[ignore]
 fn real_link_midpoint() {
-    let dir = std::env::var("RUNE_MUSIC_DIR").expect("set RUNE_MUSIC_DIR to a music folder");
+    let dir = std::env::var("PERI_MUSIC_DIR").expect("set PERI_MUSIC_DIR to a music folder");
     let pair = std::env::var("RUNE_GRAPH_LINK").expect("set RUNE_GRAPH_LINK to \"A|B\"");
     let (a, b) = pair.split_once('|').expect("A|B");
     let rx = crate::library::scan(vec![dir.into()], || {});
@@ -440,7 +440,7 @@ fn a_cancelled_drag_puts_everything_back() {
 
 #[test]
 fn pins_survive_a_restart_and_a_new_layout_and_reset_layout_clears_them() {
-    let dir = std::env::temp_dir().join(format!("rune-music-graph-pins-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("peri-graph-pins-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("temp dir");
     let prefs = dir.join("prefs.json");
     let dropped = {

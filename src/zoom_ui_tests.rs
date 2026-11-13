@@ -11,7 +11,7 @@ struct Prefs(std::path::PathBuf);
 
 impl Prefs {
     fn new(name: &str) -> Prefs {
-        let dir = std::env::temp_dir().join(format!("rune-music-zoom-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("peri-zoom-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         Prefs(dir)

@@ -209,7 +209,7 @@ fn views_are_created_renamed_switched_duplicated_and_deleted() {
 
 #[test]
 fn views_save_as_they_change_and_load_on_the_next_launch() {
-    let dir = std::env::temp_dir().join(format!("rune-music-ui-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("peri-ui-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let file = dir.join("prefs.json");
     let mut app = App::new(Output::Silent, Store::at(&file));

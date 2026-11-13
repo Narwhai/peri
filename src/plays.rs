@@ -164,7 +164,7 @@ mod tests {
 
     impl Dir {
         fn new(name: &str) -> Dir {
-            let dir = std::env::temp_dir().join(format!("rune-music-plays-{name}-{}", std::process::id()));
+            let dir = std::env::temp_dir().join(format!("peri-plays-{name}-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
             Dir(dir)
         }

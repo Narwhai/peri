@@ -449,7 +449,7 @@ struct Prefs(std::path::PathBuf);
 
 impl Prefs {
     fn new(name: &str, json: &str) -> Prefs {
-        let dir = std::env::temp_dir().join(format!("rune-music-relations-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("peri-relations-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("prefs.json"), format!(r#"{{ "artists": {json} }}"#)).unwrap();

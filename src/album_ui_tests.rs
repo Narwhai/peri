@@ -195,7 +195,7 @@ fn album_filters_use_album_properties_and_switching_modes_drops_song_only_ones()
 
 #[test]
 fn an_album_view_saves_its_mode_and_layout() {
-    let dir = std::env::temp_dir().join(format!("rune-music-albums-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("peri-albums-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let file = dir.join("prefs.json");
     let mut app = App::new(Output::Silent, Store::at(&file));

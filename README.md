@@ -1,4 +1,4 @@
-# Rune Music
+# Peri
 
 A desktop music player built with [Rune](https://github.com/anomalyco/rune). Rune draws the UI on the GPU, and [rodio](https://github.com/RustAudio/rodio) (cpal + symphonia) plays the audio. Tags and cover art come from [lofty](https://github.com/Serial-ATA/lofty-rs). It uses the Tone palette (`../gray-color-scheme/color-palette.json`) and follows the system light/dark setting.
 
@@ -29,7 +29,7 @@ On Linux, building needs `libxkbcommon`, `wayland` and `alsa-lib` (PipeWire work
 - **The app's API account:** Last.fm signs every request with an API key and shared secret. They're read at build time and never committed:
 
   ```sh
-  RUNE_LASTFM_API_KEY=… RUNE_LASTFM_SECRET=… cargo build --release
+  PERI_LASTFM_API_KEY=… PERI_LASTFM_SECRET=… cargo build --release
   ```
 
   Set both or neither; one alone fails the build. Anything shipped in a binary can be extracted, so the worst a leak allows is someone sending requests as this app (and Last.fm suspending the key). It can't reach anyone's account, which needs their own session key.
@@ -75,9 +75,9 @@ Properties: title, artist, featured artist, album artist, album, genre, year, th
 Search narrows the current view further, and Next/Previous follow the view's order. In a grouped view, a song that appears in several groups plays once, in its first group.
 
 Views save on every change to `prefs.json` in the app's config folder:
-- Linux: `~/.config/rune-music/`
-- macOS: `~/Library/Application Support/rune-music/`
-- Windows: `%APPDATA%\rune-music\`
+- Linux: `~/.config/peri/`
+- macOS: `~/Library/Application Support/peri/`
+- Windows: `%APPDATA%\peri\`
 
 Collapsed groups are not saved.
 
@@ -171,9 +171,9 @@ Double-click a row to play it. Ctrl is Cmd on macOS.
 
 ```sh
 cargo test                                                   # unit + headless UI tests
-RUNE_MUSIC_DIR=~/Music cargo test --release real_library -- --ignored --nocapture
-RUNE_MUSIC_FILE=song.flac cargo test --release real_output -- --ignored   # plays muted
-RUNE_MUSIC_DIR=~/Music cargo test --release real_library_groups -- --ignored --nocapture
+PERI_MUSIC_DIR=~/Music cargo test --release real_library -- --ignored --nocapture
+PERI_MUSIC_FILE=song.flac cargo test --release real_output -- --ignored   # plays muted
+PERI_MUSIC_DIR=~/Music cargo test --release real_library_groups -- --ignored --nocapture
 cargo run -- --snap out.png --scene playing --theme light    # scenes: library playing search error grouped filter views sort albums album-list album artist related link label collab graph home
 ```
 

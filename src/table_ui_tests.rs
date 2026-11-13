@@ -194,11 +194,11 @@ fn a_name_in_the_dialog_opens_the_artist_and_closes_the_dialog() {
 }
 
 /// The dialog on a real file: its audio properties, IDs and every raw tag.
-/// `RUNE_MUSIC_FILE=song.flac cargo test real_details_dialog -- --ignored`
+/// `PERI_MUSIC_FILE=song.flac cargo test real_details_dialog -- --ignored`
 #[test]
-#[ignore = "needs RUNE_MUSIC_FILE"]
+#[ignore = "needs PERI_MUSIC_FILE"]
 fn real_details_dialog() {
-    let path = std::env::var("RUNE_MUSIC_FILE").expect("set RUNE_MUSIC_FILE to an audio file");
+    let path = std::env::var("PERI_MUSIC_FILE").expect("set PERI_MUSIC_FILE to an audio file");
     let mut app = App::new(Output::Silent, Store::memory());
     app.set_library(vec![Track { path: path.into(), title: "Real".into(), ..Track::default() }], false);
     let mut rt = Runtime::new(app, view, (1200.0, 1400.0), Env::new(true, 1.0));

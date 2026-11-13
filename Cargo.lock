@@ -2440,6 +2440,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
+name = "peri"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "lofty",
+ "rodio",
+ "rune",
+ "rune-kit",
+ "serde",
+ "serde_json",
+ "ureq",
+]
+
+[[package]]
 name = "petgraph"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2994,20 +3008,6 @@ dependencies = [
 name = "rune-motion"
 version = "0.1.0"
 source = "git+https://github.com/anomalyco/rune?rev=d76c8a9f6cbc6e59ab49b1c08d6f58ff48c74c50#d76c8a9f6cbc6e59ab49b1c08d6f58ff48c74c50"
-
-[[package]]
-name = "rune-music"
-version = "0.1.0"
-dependencies = [
- "image",
- "lofty",
- "rodio",
- "rune",
- "rune-kit",
- "serde",
- "serde_json",
- "ureq",
-]
 
 [[package]]
 name = "rune-staging"

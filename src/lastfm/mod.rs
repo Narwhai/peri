@@ -28,14 +28,14 @@ pub struct Credentials {
 
 // A key without its secret (or the reverse) can't sign anything: refuse to build with half.
 const _: () = assert!(
-    option_env!("RUNE_LASTFM_API_KEY").is_some() == option_env!("RUNE_LASTFM_SECRET").is_some(),
-    "set both RUNE_LASTFM_API_KEY and RUNE_LASTFM_SECRET, or neither"
+    option_env!("PERI_LASTFM_API_KEY").is_some() == option_env!("PERI_LASTFM_SECRET").is_some(),
+    "set both PERI_LASTFM_API_KEY and PERI_LASTFM_SECRET, or neither"
 );
 
-/// The app's own API account, read from `RUNE_LASTFM_API_KEY` and `RUNE_LASTFM_SECRET` at
+/// The app's own API account, read from `PERI_LASTFM_API_KEY` and `PERI_LASTFM_SECRET` at
 /// build time so it's never in the repository. Builds without them ask users for their own.
 pub fn built_in() -> Option<Credentials> {
-    match (option_env!("RUNE_LASTFM_API_KEY"), option_env!("RUNE_LASTFM_SECRET")) {
+    match (option_env!("PERI_LASTFM_API_KEY"), option_env!("PERI_LASTFM_SECRET")) {
         (Some(api_key), Some(secret)) if !api_key.trim().is_empty() && !secret.trim().is_empty() => {
             Some(Credentials { api_key: api_key.trim().to_string(), secret: secret.trim().to_string() })
         }
@@ -258,7 +258,7 @@ impl Client {
                     .https_only(true)
                     .http_status_as_error(false)
                     .timeout_global(Some(TIMEOUT))
-                    .user_agent(concat!("rune-music/", env!("CARGO_PKG_VERSION")))
+                    .user_agent(concat!("peri/", env!("CARGO_PKG_VERSION")))
                     .build()
                     .into();
                 for job in inbox {
