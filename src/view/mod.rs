@@ -314,9 +314,11 @@ fn tabs(s: &App, p: &Palette) -> El {
             let middle = Some(-(1.0 + TAB_GAP) / 2.0);
             folder = folder.child(el().key(format!("{key}-divider")).pin(None, Some(11.0), middle, Some(11.0)).w(1.0).fill(p.ui.alpha(0.5)));
         }
+        // Keyed, so they keep their identity (and stay put) when the flares, hover fill and
+        // divider before them come and go with the active tab.
         folder
-            .child(icon(glyph, 18.0).color(if on { p.ui3 } else { p.tx3 }))
-            .child(text(label).font(HEADING).color(if on { p.tx } else { p.tx2 }))
+            .child(icon(glyph, 18.0).key(format!("{key}-icon")).color(if on { p.ui3 } else { p.tx3 }))
+            .child(text(label).key(format!("{key}-label")).font(HEADING).color(if on { p.tx } else { p.tx2 }))
     };
     row()
         .key("tabs")

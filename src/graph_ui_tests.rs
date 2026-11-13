@@ -655,3 +655,31 @@ fn the_active_header_tab_stands_on_the_header_edge_and_flares_beside_its_neighbo
     assert!(divider[0] >= right_edge(home) - 1.0 && right_edge(divider) <= library[0] + 1.0, "the divider sits between Home and Library");
     assert!(!has(&rt, "library-tab-divider"), "no divider beside the active Graph tab");
 }
+
+#[test]
+fn switching_header_tabs_leaves_their_icons_and_labels_in_place() {
+    let mut rt = runtime(Store::memory());
+    // Every icon and label in the tabs, visible or fading out, by path and rect.
+    let glyphs = |rt: &Runtime<App>| -> Vec<(String, [f32; 4], bool)> {
+        rt.elements().into_iter()
+            .filter(|e| e.path.contains("/tabs/") && matches!(e.role, "icon" | "text"))
+            .map(|e| (e.path, e.rect, e.exiting))
+            .collect()
+    };
+    let rest = glyphs(&rt);
+    assert_eq!(rest.len(), 6, "an icon and a label in each of three tabs: {rest:?}");
+    for target in ["graph-tab", "home-tab", "library-tab"] {
+        let (x, y) = rt.find(target).unwrap_or_else(|| panic!("no element {target}"));
+        rt.pointer_down(x, y);
+        rt.pointer_up(x, y);
+        // Each frame of the switch, not only once it settles.
+        for frame in 0..30 {
+            rt.frame(1.0 / 60.0);
+            for (path, rect, exiting) in glyphs(&rt) {
+                assert!(!exiting, "switching to {target}, frame {frame}: {path} fades out instead of staying");
+                let home = rest.iter().find(|g| g.0 == path).unwrap_or_else(|| panic!("switching to {target}, frame {frame}: {path} is new"));
+                assert_eq!(rect, home.1, "switching to {target}, frame {frame}: {path} stays put");
+            }
+        }
+    }
+}
