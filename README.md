@@ -1,6 +1,6 @@
 # Peri
 
-A desktop music player built with [Rune](https://github.com/anomalyco/rune). Rune draws the UI on the GPU, and [rodio](https://github.com/RustAudio/rodio) (cpal + symphonia) plays the audio. Tags and cover art come from [lofty](https://github.com/Serial-ATA/lofty-rs). It uses the Tone palette (`../gray-color-scheme/color-palette.json`) and follows the system light/dark setting.
+A desktop music player built with [Rune](https://github.com/anomalyco/rune). Rune draws the UI on the GPU, and [rodio](https://github.com/RustAudio/rodio) (cpal + symphonia) plays the audio. Tags and cover art come from [lofty](https://github.com/Serial-ATA/lofty-rs). It draws the Bolis theme (built from the Tone palette, `../gray-color-scheme/color-palette.json`) in light or dark, following the system setting unless changed.
 
 ## Run
 
@@ -18,6 +18,7 @@ On Linux, building needs `libxkbcommon`, `wayland` and `alsa-lib` (PipeWire work
 - **Settings** (the sliders button, top right): see the library folders, add or remove one, rescan, or **Forget library**. A folder that can't be found (an unplugged drive) stays saved, is marked *Not found*, and is scanned again once it's back.
 - **Home** tab (left of Library): the 10 newest albums in one row of cards, and the 10 songs played last. Double-click a song to play from there.
 - The open tab (Home, Library or Graph) is remembered across launches.
+- **Settings → Appearance** picks the theme (Bolis) and the mode: Light, Dark or System (the default). They're saved under `theme` and `appearance` in `prefs.json`.
 - Search across title, artist and album.
 - A virtualised track list, so large libraries scroll smoothly.
 - A now-playing bar with cover art (embedded, else `cover.jpg`/`folder.jpg` next to the file).

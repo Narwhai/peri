@@ -16,6 +16,7 @@ use crate::query::view::{Evaluated, Layout, Section, Widths, evaluate};
 use crate::lastfm::{self, scrobbling::{Effect, Scrobbling}};
 use crate::library::{self, ScanMsg, Track};
 use crate::listen::{Listen, unix_now};
+use crate::palette::{Appearance, Theme};
 use crate::plays::Plays;
 use crate::queue::{Queue, Repeat, Rng};
 
@@ -156,6 +157,10 @@ pub struct App {
     pub columns: usize,
     /// The album grid's inner width as last laid out, which the column count follows.
     grid_width: Option<f32>,
+    /// The colour theme, saved.
+    pub theme: Theme,
+    /// Light, dark or system appearance, saved.
+    pub appearance: Appearance,
     /// The window's zoom: 1.0 is 100%, saved.
     pub zoom: f32,
     /// While the zoom slider is dragged: the zoom it would set. The zoom lands on release, so
@@ -253,6 +258,15 @@ impl App {
             Ok(tab) => (tab, None),
             Err(e) => (None, Some(e)),
         };
+        // An unreadable theme or appearance falls back to the default, and shows as an error.
+        let (theme, theme_error) = match store.load_theme() {
+            Ok(theme) => (theme, None),
+            Err(e) => (Theme::default(), Some(e)),
+        };
+        let (appearance, appearance_error) = match store.load_appearance() {
+            Ok(appearance) => (appearance, None),
+            Err(e) => (Appearance::default(), Some(e)),
+        };
         let page = match tab {
             Some(Tab::Home) => Page::Home,
             Some(Tab::Graph) => Page::Graph,
@@ -280,6 +294,8 @@ impl App {
             rows: Vec::new(),
             columns: 4,
             grid_width: None,
+            theme,
+            appearance,
             zoom: store.load_zoom(),
             zoom_preview: None,
             zoom_toast: None,
@@ -310,7 +326,7 @@ impl App {
             shuffle: false,
             repeat: Repeat::Off,
             cover: None,
-            error: relations_error.clone().or(lastfm_error).or(plays_error).or(graph_error).or(tab_error),
+            error: relations_error.clone().or(lastfm_error).or(plays_error).or(graph_error).or(tab_error).or(theme_error).or(appearance_error),
             scan: None,
             drop_hover: false,
             details: None,
@@ -805,6 +821,22 @@ impl App {
         self.history.clear();
         self.forward.clear();
         self.page = page;
+    }
+
+    /// Chooses the colour theme and saves it. A failed save shows as an error.
+    pub fn set_theme(&mut self, theme: Theme) {
+        self.theme = theme;
+        if let Err(e) = self.store.save_theme(theme) {
+            self.error = Some(e);
+        }
+    }
+
+    /// Chooses light, dark or system appearance and saves it. A failed save shows as an error.
+    pub fn set_appearance(&mut self, appearance: Appearance) {
+        self.appearance = appearance;
+        if let Err(e) = self.store.save_appearance(appearance) {
+            self.error = Some(e);
+        }
     }
 
     /// Saves the open tab, so the next launch opens it. A failed save shows as an error.

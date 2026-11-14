@@ -6,6 +6,7 @@ use std::sync::Arc;
 use rune::{Env, Runtime};
 
 use crate::app::{App, Output, Page};
+use crate::palette::{Appearance, Theme};
 use crate::query::store::Store;
 use crate::view::view;
 
@@ -178,4 +179,75 @@ fn a_missing_folder_stays_saved_and_shows_as_not_found() {
     assert_eq!(Store::at(f.prefs()).load_library(), [gone]);
     click(&mut rt, "settings");
     assert!(rt.find("library-root0-missing").is_some());
+}
+
+/// A runtime on the settings page, with the system's dark setting `system_dark`.
+fn appearance_runtime(prefs: &Path, system_dark: bool) -> Runtime<App> {
+    let mut app = App::new(Output::Silent, Store::at(prefs));
+    app.set_waker(Arc::new(|| {}));
+    let mut rt = Runtime::new(app, view, (980.0, 640.0), Env::new(system_dark, 1.0));
+    rt.on_key = Some(crate::app::on_key);
+    rt.poll = Some(crate::app::poll);
+    rt.frame(0.0);
+    click(&mut rt, "settings");
+    rt
+}
+
+/// The text colour of the settings page's title, which follows the palette's text colour.
+fn title_colour(rt: &Runtime<App>) -> String {
+    rt.elements().into_iter().find(|e| e.key.as_deref() == Some("settings-title")).and_then(|e| e.text_color).map(|c| c.hex()).expect("the settings title's colour")
+}
+
+fn palette_text(theme: Theme, dark: bool) -> String {
+    theme.palette(dark).tx.hex()
+}
+
+#[test]
+fn appearance_defaults_to_system_and_follows_it() {
+    let f = Fixture::new("appearance-default");
+    let rt = appearance_runtime(&f.prefs(), true);
+    assert_eq!(rt.state.appearance, Appearance::System);
+    assert_eq!(rt.state.theme, Theme::Bolis);
+    assert_eq!(title_colour(&rt), palette_text(Theme::Bolis, true));
+    let rt = appearance_runtime(&f.prefs(), false);
+    assert_eq!(title_colour(&rt), palette_text(Theme::Bolis, false));
+}
+
+#[test]
+fn dark_draws_dark_while_the_system_is_light() {
+    let f = Fixture::new("appearance-dark");
+    let mut rt = appearance_runtime(&f.prefs(), false);
+    click(&mut rt, "dark");
+    assert_eq!(rt.state.appearance, Appearance::Dark);
+    assert_eq!(title_colour(&rt), palette_text(Theme::Bolis, true));
+}
+
+#[test]
+fn light_draws_light_while_the_system_is_dark() {
+    let f = Fixture::new("appearance-light");
+    let mut rt = appearance_runtime(&f.prefs(), true);
+    click(&mut rt, "light");
+    assert_eq!(rt.state.appearance, Appearance::Light);
+    assert_eq!(title_colour(&rt), palette_text(Theme::Bolis, false));
+}
+
+#[test]
+fn the_appearance_is_saved_and_reloaded() {
+    let f = Fixture::new("appearance-saved");
+    let mut rt = appearance_runtime(&f.prefs(), false);
+    click(&mut rt, "dark");
+    assert_eq!(Store::at(f.prefs()).load_appearance(), Ok(Appearance::Dark));
+    let app = App::new(Output::Silent, Store::at(f.prefs()));
+    assert_eq!(app.appearance, Appearance::Dark);
+    assert_eq!(app.theme, Theme::Bolis);
+    assert!(app.error.is_none(), "{:?}", app.error);
+}
+
+#[test]
+fn an_unreadable_appearance_shows_an_error_and_falls_back_to_system() {
+    let f = Fixture::new("appearance-bad");
+    std::fs::write(f.prefs(), r#"{"appearance": "sepia"}"#).unwrap();
+    let app = App::new(Output::Silent, Store::at(f.prefs()));
+    assert_eq!(app.appearance, Appearance::System);
+    assert!(app.error.as_deref().is_some_and(|e| e.contains("\"appearance\"")), "{:?}", app.error);
 }

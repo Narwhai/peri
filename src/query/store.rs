@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use super::property::Property;
 use super::view::View;
+use crate::palette::{Appearance, Theme};
 
 const APP_ID: &str = "peri";
 const KEY: &str = "views";
@@ -16,6 +17,8 @@ const LASTFM_KEY: &str = "lastfm";
 const ZOOM_KEY: &str = "zoom";
 const GRAPH_KEY: &str = "graph";
 const TAB_KEY: &str = "tab";
+const APPEARANCE_KEY: &str = "appearance";
+const THEME_KEY: &str = "theme";
 /// Bumped when the saved shape changes incompatibly.
 const VERSION: u32 = 1;
 
@@ -162,6 +165,30 @@ impl Store {
 
     pub fn save_tab(&mut self, tab: &crate::app::Tab) -> Result<(), String> {
         self.prefs.set(TAB_KEY, tab).map_err(|e| format!("Couldn't save the open tab: {e}"))
+    }
+
+    /// The light, dark or system appearance; System when unset, an error when unreadable.
+    pub fn load_appearance(&self) -> Result<Appearance, String> {
+        if !self.prefs.contains(APPEARANCE_KEY) {
+            return Ok(Appearance::default());
+        }
+        self.prefs.get(APPEARANCE_KEY).ok_or_else(|| format!("Couldn't read \"{APPEARANCE_KEY}\" in the preferences"))
+    }
+
+    pub fn save_appearance(&mut self, appearance: Appearance) -> Result<(), String> {
+        self.prefs.set(APPEARANCE_KEY, &appearance).map_err(|e| format!("Couldn't save the appearance: {e}"))
+    }
+
+    /// The theme; Bolis when unset, an error when unreadable.
+    pub fn load_theme(&self) -> Result<Theme, String> {
+        if !self.prefs.contains(THEME_KEY) {
+            return Ok(Theme::default());
+        }
+        self.prefs.get(THEME_KEY).ok_or_else(|| format!("Couldn't read \"{THEME_KEY}\" in the preferences"))
+    }
+
+    pub fn save_theme(&mut self, theme: Theme) -> Result<(), String> {
+        self.prefs.set(THEME_KEY, &theme).map_err(|e| format!("Couldn't save the theme: {e}"))
     }
 
     /// The window's zoom, 1.0 when unset or unreadable.

@@ -56,7 +56,7 @@ const GROUP: TextStyle = TextStyle::new(12.5, 600.0);
 pub const MIN_SIZE: (f32, f32) = (720.0, 420.0);
 
 pub fn view(s: &App, cx: &mut Cx<App>) -> El {
-    let p = Palette::new(cx.system_dark());
+    let p = s.theme.palette(s.appearance.dark(cx.system_dark()));
     let window = cx.layout_size("zoom-frame");
     let zoom = window.map_or(1.0, |size| applied_zoom(s.zoom, size));
     let kit = Kit::from_palette(PaletteSeed { bg: p.bg2, fg: p.tx, accent: p.blue });

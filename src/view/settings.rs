@@ -6,7 +6,8 @@ use rune_kit::{Kit, TextInput};
 
 use super::albums::{back_label, secondary_button};
 use super::*;
-use crate::palette::Palette;
+use super::toolbar::segmented;
+use crate::palette::{Appearance, Palette, Theme};
 
 const PAGE_TITLE: TextStyle = TextStyle::new(28.0, 700.0);
 
@@ -72,9 +73,33 @@ pub(super) fn settings_page(s: &App, p: &Palette, kit: &Kit) -> El {
         .gap(22.0)
         .child(back)
         .child(text("Settings").key("settings-title").font(PAGE_TITLE).color(p.tx))
+        .child(appearance_section(s, p))
         .child(section)
         .child(lastfm_section(s, p, kit));
     col().key("settings-page").w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: false }).child(body)
+}
+
+/// The theme, and whether the app is light, dark or follows the system.
+fn appearance_section(s: &App, p: &Palette) -> El {
+    let theme = segmented("theme", &Theme::ALL.map(|t| (t.id(), t.name())), s.theme.id(), p, |s: &mut App, id: &str| {
+        if let Some(theme) = Theme::ALL.into_iter().find(|t| t.id() == id) {
+            s.set_theme(theme);
+        }
+    });
+    let mode = segmented("appearance", &Appearance::ALL.map(|a| (a.id(), a.label())), s.appearance.id(), p, |s: &mut App, id: &str| {
+        if let Some(appearance) = Appearance::ALL.into_iter().find(|a| a.id() == id) {
+            s.set_appearance(appearance);
+        }
+    });
+    let field = |label: &str, control: El| row().w_full().gap(12.0).center_y().child(text(label.to_string()).font(BODY).color(p.tx2).w(110.0)).child(control);
+    col()
+        .key("settings-appearance")
+        .w_full()
+        .gap(10.0)
+        .child(text("Appearance").font(HEADING).color(p.tx))
+        .child(text("Mode follows the system unless set to Light or Dark.").font(BODY).color(p.tx3).wrap())
+        .child(field("Theme", theme))
+        .child(field("Mode", mode))
 }
 
 /// A round icon button with a runtime key.

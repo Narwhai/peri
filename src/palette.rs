@@ -1,7 +1,8 @@
-//! The Tone palette from `gray-color-scheme/color-palette.json`, as sRGB hex per mode.
+//! Themes: named colour palettes with a light and a dark mode, and the appearance that picks one.
 
 use rune::Color;
 use rune::color::srgb_decode;
+use serde::{Deserialize, Serialize};
 
 use crate::credits::Role;
 
@@ -61,7 +62,8 @@ impl Palette {
         (rgb(base).alpha(if self.dark { 0.22 } else { 0.18 }), rgb(if self.dark { dark } else { light }))
     }
 
-    pub fn new(dark: bool) -> Palette {
+    /// The Bolis theme's palette in one mode: the Tone palette from `gray-color-scheme/color-palette.json`.
+    fn bolis(dark: bool) -> Palette {
         if dark {
             Palette {
                 dark,
@@ -106,6 +108,77 @@ impl Palette {
     }
 }
 
+/// A named colour theme, with a light and a dark palette.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    #[default]
+    Bolis,
+}
+
+impl Theme {
+    pub const ALL: [Theme; 1] = [Theme::Bolis];
+
+    /// The value saved in the preferences.
+    pub fn id(self) -> &'static str {
+        match self {
+            Theme::Bolis => "bolis",
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Theme::Bolis => "Bolis",
+        }
+    }
+
+    pub fn palette(self, dark: bool) -> Palette {
+        match self {
+            Theme::Bolis => Palette::bolis(dark),
+        }
+    }
+}
+
+/// Whether the app is light, dark, or follows the system.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Appearance {
+    Light,
+    Dark,
+    #[default]
+    System,
+}
+
+impl Appearance {
+    pub const ALL: [Appearance; 3] = [Appearance::Light, Appearance::Dark, Appearance::System];
+
+    /// The value saved in the preferences.
+    pub fn id(self) -> &'static str {
+        match self {
+            Appearance::Light => "light",
+            Appearance::Dark => "dark",
+            Appearance::System => "system",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Appearance::Light => "Light",
+            Appearance::Dark => "Dark",
+            Appearance::System => "System",
+        }
+    }
+
+    /// Whether to draw dark, given the system's setting.
+    pub fn dark(self, system_dark: bool) -> bool {
+        match self {
+            Appearance::Light => false,
+            Appearance::Dark => true,
+            Appearance::System => system_dark,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -113,7 +186,27 @@ mod tests {
     #[test]
     fn hex_round_trips_through_linear_colour() {
         assert_eq!(rgb(0x3d85f3).hex(), "#3d85f3ff");
-        assert_eq!(Palette::new(false).bg.hex(), "#edeeefff");
-        assert_eq!(Palette::new(true).bg.hex(), "#0b0b0cff");
+        assert_eq!(Theme::Bolis.palette(false).bg.hex(), "#edeeefff");
+        assert_eq!(Theme::Bolis.palette(true).bg.hex(), "#0b0b0cff");
+    }
+
+    #[test]
+    fn appearance_picks_the_mode() {
+        assert!(!Appearance::Light.dark(true));
+        assert!(Appearance::Dark.dark(false));
+        assert!(Appearance::System.dark(true));
+        assert!(!Appearance::System.dark(false));
+        assert_eq!(Appearance::default(), Appearance::System);
+    }
+
+    #[test]
+    fn saved_values_round_trip() {
+        for (value, json) in [(Appearance::Light, "light"), (Appearance::Dark, "dark"), (Appearance::System, "system")] {
+            assert_eq!(serde_json::to_string(&value).unwrap(), format!("\"{json}\""));
+            assert_eq!(serde_json::from_str::<Appearance>(&format!("\"{json}\"")).unwrap(), value);
+        }
+        assert_eq!(serde_json::to_string(&Theme::Bolis).unwrap(), "\"bolis\"");
+        assert_eq!(serde_json::from_str::<Theme>("\"bolis\"").unwrap(), Theme::Bolis);
+        assert!(serde_json::from_str::<Appearance>("\"sepia\"").is_err());
     }
 }
