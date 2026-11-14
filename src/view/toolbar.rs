@@ -11,9 +11,16 @@ use crate::icons;
 use crate::palette::Palette;
 
 const BAR_H: f32 = 40.0;
+/// Below this laid-out width, Columns, Sort, Group and Filter show only their icons.
+const COMPACT_W: f32 = 900.0;
+/// The album grid's toolbar also holds Grid/List and the card size slider, so it needs more.
+const COMPACT_GRID_W: f32 = 940.0;
 
-pub(super) fn toolbar(s: &App, p: &Palette, kit: &Kit, layer: &mut Vec<El>) -> El {
+/// The toolbar for a window `width` points wide as laid out (unknown before the first layout).
+pub(super) fn toolbar(s: &App, width: Option<f32>, p: &Palette, kit: &Kit, layer: &mut Vec<El>) -> El {
     let view = s.views.active();
+    let grid = view.mode == Mode::Albums && view.layout == Layout::Grid && s.page == crate::app::Page::Library;
+    let compact = width.is_some_and(|w| w < if grid { COMPACT_GRID_W } else { COMPACT_W });
     let views = views_menu(s, p, kit, layer);
     let sort_label = match view.sorts.len() {
         0 => "Sort".to_string(),
@@ -26,19 +33,19 @@ pub(super) fn toolbar(s: &App, p: &Palette, kit: &Kit, layer: &mut Vec<El>) -> E
         1 => "1 filter".to_string(),
         n => format!("{n} filters"),
     };
-    let sort = panel(s, kit, layer, Panel::Sort, tool_button("sort", &icons::SORT, sort_label, !view.sorts.is_empty(), s.panel == Some(Panel::Sort), p), sort_body(s, p, kit));
-    let group = panel(s, kit, layer, Panel::Group, tool_button("group", &icons::GROUP, group_label, view.group_by.is_some(), s.panel == Some(Panel::Group), p), group_body(s, p, kit));
+    let sort = panel(s, kit, layer, Panel::Sort, tool_button("sort", compact, &icons::SORT, sort_label, !view.sorts.is_empty(), s.panel == Some(Panel::Sort), p), sort_body(s, p, kit));
+    let group = panel(s, kit, layer, Panel::Group, tool_button("group", compact, &icons::GROUP, group_label, view.group_by.is_some(), s.panel == Some(Panel::Group), p), group_body(s, p, kit));
     let filter_open = s.panel == Some(Panel::Filter);
     let filter = panel(
         s,
         kit,
         layer,
         Panel::Filter,
-        tool_button("filter", &icons::FILTER, filter_label, view.filter.condition_count() > 0, filter_open, p).help(if view.filter.children.is_empty() { "Filter songs".to_string() } else { view.filter.summary() }),
+        tool_button("filter", compact, &icons::FILTER, filter_label, view.filter.condition_count() > 0, filter_open, p).help(if view.filter.children.is_empty() { "Filter songs".to_string() } else { view.filter.summary() }),
         |layer| super::filters::filter_body(s, p, kit, layer),
     );
     let columns_label = format!("Columns: {}", s.shown_columns().len());
-    let columns = panel(s, kit, layer, Panel::Columns, tool_button("columns", &icons::COLUMNS, columns_label, false, s.panel == Some(Panel::Columns), p), columns_body(s, p));
+    let columns = panel(s, kit, layer, Panel::Columns, tool_button("columns", compact, &icons::COLUMNS, columns_label, false, s.panel == Some(Panel::Columns), p), columns_body(s, p));
     let albums = view.mode == Mode::Albums;
     let mut bar = row()
         .key("toolbar")
@@ -72,24 +79,48 @@ pub(super) fn toolbar(s: &App, p: &Palette, kit: &Kit, layer: &mut Vec<El>) -> E
             }
         }));
         if view.layout == Layout::Grid && s.page == crate::app::Page::Library {
-            bar = bar.child(el().w(12.0)).child(card_size_slider(s, p));
+            bar = bar.child(el().w(12.0)).child(card_size_slider(s, compact, p));
         }
     }
     // Album grids show no song tables, unless an album page is open.
     let tables = !(albums && view.layout == Layout::Grid) || s.page != crate::app::Page::Library;
     bar.child(el().grow(1.0))
-        .children((s.page == crate::app::Page::Library).then(|| result_count(s, albums, p)))
+        .children((s.page == crate::app::Page::Library).then(|| play_view_button(s, albums, p)))
         .children(tables.then_some(columns))
         .child(sort)
         .child(group)
         .child(filter)
 }
 
-/// A toolbar popover: `trigger` toggles `panel`, and the body shows while it's open. Selects
-/// How many songs, or albums in an album view, the active view shows.
-fn result_count(s: &App, albums: bool, p: &Palette) -> El {
-    let label = if albums { plural(s.shown_albums.len(), "album") } else { plural(s.filtered.len(), "song") };
-    text(label.clone()).key("result-count").label(label).font(SMALL).color(p.tx3).px(8.0)
+/// How many songs, or albums in an album view, the active view shows, as a button that
+/// plays them from the first, in the view's order. Dimmed while the view shows none.
+fn play_view_button(s: &App, albums: bool, p: &Palette) -> El {
+    let count = if albums { plural(s.shown_albums.len(), "album") } else { plural(s.filtered.len(), "song") };
+    let empty = s.filtered.is_empty();
+    let ink = if empty { p.tx3 } else { p.accent };
+    let button = row()
+        .key("play-view")
+        .h(28.0)
+        .px(10.0)
+        .gap(6.0)
+        .center_y()
+        .radius(3.0)
+        .role("button")
+        .label(format!("Play {count}"))
+        .disabled(empty)
+        .child(icon(&icons::PLAY, 13.0).color(ink))
+        .child(text(count.clone()).key("result-count").label(count).font(TITLE).color(ink));
+    if empty {
+        return button.opacity(0.6);
+    }
+    let active = s.views.active;
+    button
+        .fill(p.bg.alpha(0.0))
+        .hover(p.ui.alpha(0.45))
+        .press(p.ui.alpha(0.7))
+        .cursor(Cursor::Pointer)
+        .help("Play the songs in this view")
+        .on_press_tx(move |s: &mut App, tx| s.play_view(active, tx))
 }
 
 /// A toolbar popover: `trigger` toggles `panel`, and the body shows while it's open. Selects
@@ -126,9 +157,11 @@ fn trigger_key(panel: Panel) -> &'static str {
     }
 }
 
-fn tool_button(key: &'static str, glyph: &'static rune::Icon, label: String, active: bool, open: bool, p: &Palette) -> El {
+/// A toolbar button: its icon and `label`, or the icon alone when `compact`, with `label`
+/// as its tooltip.
+fn tool_button(key: &'static str, compact: bool, glyph: &'static rune::Icon, label: String, active: bool, open: bool, p: &Palette) -> El {
     let ink = if active { p.accent } else { p.tx2 };
-    row()
+    let button = row()
         .key(key)
         .h(28.0)
         .px(10.0)
@@ -140,8 +173,11 @@ fn tool_button(key: &'static str, glyph: &'static rune::Icon, label: String, act
         .press(p.ui.alpha(0.7))
         .cursor(Cursor::Pointer)
         .label(label.clone())
-        .child(icon(glyph, 15.0).color(ink))
-        .child(text(label).key("label").font(TITLE).color(ink))
+        .child(icon(glyph, 15.0).color(ink));
+    match compact {
+        true => button.px(7.0).help(label),
+        false => button.child(text(label).key("label").font(TITLE).color(ink)),
+    }
 }
 
 /// A segmented control: one pill per option, the current one tinted with the mode accent.
@@ -174,14 +210,14 @@ pub(super) fn segmented(key: &'static str, options: &[(&'static str, &'static st
 
 /// The album grid's card size: small and large grid glyphs either side of a slider. The
 /// view keeps its own once dragged; double-click the slider to follow the default again, and
-/// the dot after it makes this size the default.
-fn card_size_slider(s: &App, p: &Palette) -> El {
+/// the dot after it makes this size the default. Narrower when `compact`.
+fn card_size_slider(s: &App, compact: bool, p: &Palette) -> El {
     use crate::query::view::{CARD_SIZE_MAX, CARD_SIZE_MIN};
     let size = s.card_size();
     let fraction = (size - CARD_SIZE_MIN) / (CARD_SIZE_MAX - CARD_SIZE_MIN);
     let own = s.views.active().card_size.is_some();
     let track = super::player::slider_track("card-size", fraction, true, p)
-        .w(96.0)
+        .w(if compact { 60.0 } else { 96.0 })
         .label("Card size")
         .help("Card size (double-click to use the default)")
         .a11y_value(format!("{}", size.round()))
@@ -287,6 +323,10 @@ fn views_body(s: &App, p: &Palette, kit: &Kit) -> El {
                     s.close_panel();
                 })
                 .on_double_press(move |s: &mut App| start_rename(s, i))
+                .child(small_icon_button(format!("play-view{i}"), &icons::PLAY, "Play view", p).on_press_tx(move |s: &mut App, tx| {
+                    s.play_view(i, tx);
+                    s.close_panel();
+                }))
                 .child(small_icon_button(format!("rename{i}"), &icons::EDIT, "Rename view", p).on_press(move |s: &mut App| start_rename(s, i)))
                 .child(small_icon_button(format!("duplicate{i}"), &icons::COPY, "Duplicate view", p).on_press(move |s: &mut App| duplicate_view(s, i)));
             if s.views.list.len() > 1 {

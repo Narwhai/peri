@@ -53,7 +53,9 @@ On Linux, building needs `libxkbcommon`, `wayland` and `alsa-lib` (PipeWire work
 
 A view is a saved query over the library: a filter, sorts and an optional grouping (the design follows Obsidian's [Bases](https://help.obsidian.md/bases/views)). By default a view lists every song in a flat list. Change it from the toolbar under the header:
 
-- **Views** (top left): create, rename (double-click or ✎), duplicate, delete and switch views. Each view keeps its own filter, sorts and grouping.
+- **Views** (top left): create, rename (double-click or ✎), duplicate, delete and switch views. Each view keeps its own filter, sorts and grouping. ▶ plays a view without opening it.
+- **Play** (▶ and the song or album count): plays the view's songs in its order, collapsed groups included; an album view plays its albums' songs album by album. It's dimmed while the view is empty.
+- In a narrow window, Columns, Sort, Group and Filter show only their icons, with the full label as a tooltip.
 - **Sort:** add several sorts and reorder them with ↑. Each sorts A→Z / 0→9 / old→new or the reverse. Songs missing a value always go last.
 - **Group:** group by one property into sticky headers with counts. Click a header to collapse it. Songs with several artists, album artists, genres or composers show under each, so a collaborative album shows under each of its artists.
 - **Filter:** add conditions (property, operator, value) to a group whose rule is *all*, *any* or *none* of the following are true. Groups nest up to three levels. The operators offered depend on the property type:

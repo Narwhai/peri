@@ -580,6 +580,15 @@ impl App {
         self.views.active().mode
     }
 
+    /// The songs view `v` lists, in its order: an album view's albums' songs, album by album.
+    pub fn view_songs(&self, v: usize) -> Vec<usize> {
+        let Some(view) = self.views.list.get(v) else { return Vec::new() };
+        match view.mode {
+            Mode::Songs => evaluate(view, &self.tracks, "").order,
+            Mode::Albums => evaluate(view, &self.albums, "").order.iter().flat_map(|&a| self.albums[a].tracks.iter().copied()).collect(),
+        }
+    }
+
     /// The albums on the home page: the newest added, newest first; albums with no date are left out.
     pub fn recently_added(&self) -> Vec<usize> {
         let mut added: Vec<(i64, usize)> = self.albums.iter().enumerate().filter_map(|(a, album)| album.added.map(|at| (at, a))).collect();
@@ -1032,6 +1041,16 @@ impl App {
         if self.shuffle {
             self.shuffle = false;
         }
+        self.load(first, tx);
+    }
+
+    /// Plays view `v`'s songs from the first, in order, as the album page's Play does.
+    pub fn play_view(&mut self, v: usize, tx: &mut Tx) {
+        let list = if v == self.views.active { self.filtered.clone() } else { self.view_songs(v) };
+        let Some(&first) = list.first() else { return };
+        self.selected = Some(first);
+        self.queue = Some(Queue::new(list, first, false, &mut self.rng));
+        self.shuffle = false;
         self.load(first, tx);
     }
 

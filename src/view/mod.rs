@@ -62,7 +62,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     let kit = Kit::from_palette(PaletteSeed { bg: p.bg2, fg: p.tx, accent: p.accent });
     let mut layer = Vec::new();
     // The view's toolbar does nothing to search results or settings, so they go without it.
-    let toolbar = (!matches!(s.page, crate::app::Page::Search | crate::app::Page::Settings | crate::app::Page::Graph | crate::app::Page::Home)).then(|| toolbar::toolbar(s, &p, &kit, &mut layer));
+    let toolbar = (!matches!(s.page, crate::app::Page::Search | crate::app::Page::Settings | crate::app::Page::Graph | crate::app::Page::Home)).then(|| toolbar::toolbar(s, window.map(|[w, _]| w / zoom), &p, &kit, &mut layer));
     let body = col()
         .w_full()
         .h_full()

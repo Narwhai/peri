@@ -108,6 +108,88 @@ fn the_toolbar_counts_the_views_songs_or_albums() {
 }
 
 #[test]
+fn play_queues_the_views_songs_in_order_including_collapsed_groups() {
+    let mut rt = runtime();
+    click(&mut rt, "group");
+    click(&mut rt, "add-group");
+    rt.key(KeyEvent { key: Key::Escape, mods: Mods::default() });
+    settle(&mut rt);
+    click(&mut rt, &header_key(0));
+    let order = rt.state.filtered.clone();
+    rt.state.shuffle = true;
+    click(&mut rt, "play-view");
+    assert_eq!(rt.state.current, Some(order[0]), "the view's first song, even though its group is collapsed");
+    assert!(!rt.state.shuffle, "Play plays in order");
+    let mut played = vec![order[0]];
+    for _ in 1..order.len() {
+        click(&mut rt, "next");
+        played.push(rt.state.current.expect("playing"));
+    }
+    assert_eq!(played, order, "every song of the view, once, in its order");
+}
+
+#[test]
+fn play_in_an_album_view_queues_its_albums_songs() {
+    let mut rt = runtime();
+    click(&mut rt, "albums");
+    click(&mut rt, "play-view");
+    let first_album = rt.state.shown_albums[0];
+    assert_eq!(rt.state.current, rt.state.albums[first_album].tracks.first().copied());
+}
+
+#[test]
+fn play_is_disabled_while_the_view_is_empty() {
+    let mut rt = runtime();
+    click(&mut rt, "filter");
+    click(&mut rt, "add-filter");
+    choose(&mut rt, "cond-0-prop", "Year");
+    click(&mut rt, "cond-0-value");
+    type_text(&mut rt, "1000");
+    choose(&mut rt, "cond-0-op", "<");
+    rt.key(KeyEvent { key: Key::Escape, mods: Mods::default() });
+    settle(&mut rt);
+    assert!(rt.state.filtered.is_empty());
+    assert_eq!(result_count(&rt), "0 songs");
+    assert!(rt.find("play-view").is_some(), "shown, though disabled");
+    click(&mut rt, "play-view");
+    assert_eq!(rt.state.current, None);
+}
+
+#[test]
+fn the_views_menu_plays_a_view_without_opening_it() {
+    let mut rt = runtime();
+    rt.update(|s, _| {
+        let mut short = crate::query::view::View::new("Reversed".to_string());
+        short.sorts.push(crate::query::view::Sort { property: Property::Title, direction: Direction::Desc });
+        s.views.list.push(short);
+    });
+    let expected = rt.state.view_songs(1);
+    click(&mut rt, "views");
+    click(&mut rt, "play-view1");
+    assert_eq!(rt.state.views.active, 0, "the open view stays open");
+    assert_eq!(rt.state.panel, None, "the menu closes");
+    assert_eq!(rt.state.current, Some(expected[0]));
+    click(&mut rt, "next");
+    assert_eq!(rt.state.current, Some(expected[1]), "Next follows the played view, not the open one");
+}
+
+#[test]
+fn a_narrow_window_shows_the_toolbar_buttons_as_icons_with_their_labels_as_tooltips() {
+    let mut rt = runtime();
+    let shows_label = |rt: &Runtime<App>| rt.elements().into_iter().any(|e| e.path.contains("sort") && e.key.as_deref() == Some("label"));
+    assert!(shows_label(&rt), "980 wide: Sort shows its label");
+    rt.set_viewport((720.0, 640.0), 1.0);
+    settle(&mut rt);
+    assert!(!shows_label(&rt), "720 wide: Sort is an icon");
+    let sort = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("sort")).expect("Sort");
+    assert_eq!((sort.label.as_deref(), sort.help.as_deref()), (Some("Sort"), Some("Sort")));
+    for key in ["play-view", "columns", "sort", "group", "filter"] {
+        let [x, _, w, _] = rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).expect(key).rect;
+        assert!(x + w <= 720.5, "{key} stays in the window");
+    }
+}
+
+#[test]
 fn nested_groups_are_added_switched_and_removed() {
     let mut rt = runtime();
     click(&mut rt, "filter");
