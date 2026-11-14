@@ -206,7 +206,7 @@ pub struct RowLook {
 /// A song row: lead, title with "feat." links, the columns, and the details button. The caller
 /// adds its key, presses and label.
 pub fn song_row(t: &Track, i: usize, columns: Columns, look: RowLook, p: &Palette) -> El {
-    let title = song_title(t, if look.current { p.blue } else { p.tx }).key("title").font(BODY).truncate();
+    let title = song_title(t, if look.current { p.accent } else { p.tx }).key("title").font(BODY).truncate();
     let mut r = row()
         .w_full()
         .h(look.height)

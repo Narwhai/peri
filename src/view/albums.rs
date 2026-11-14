@@ -123,7 +123,7 @@ fn grid_card(s: &App, a: usize, section: Option<usize>, w: f32, p: &Palette) -> 
         .key("play")
         .size(44.0, 44.0)
         .radius(22.0)
-        .fill(p.blue)
+        .fill(p.accent)
         .center()
         .pin(None, None, Some(10.0), Some(10.0))
         .group_opacity(if playing { 1.0 } else { 0.0 }, 1.0)
@@ -134,9 +134,9 @@ fn grid_card(s: &App, a: usize, section: Option<usize>, w: f32, p: &Palette) -> 
         .cursor(Cursor::Pointer)
         .label(format!("Play {}", album.title))
         .on_press_tx(move |s: &mut App, tx| s.play_album(a, None, tx))
-        .child(icon(if playing && s.playing { &icons::BARS } else { &icons::PLAY }, 18.0).color(rune::Color::WHITE));
+        .child(icon(if playing && s.playing { &icons::BARS } else { &icons::PLAY }, 18.0).color(p.on_accent));
     let art = cover(format!("cover{a}"), cover_image(s, album), None, p).child(play);
-    let title_color = if playing { p.blue } else { p.tx };
+    let title_color = if playing { p.accent } else { p.tx };
     col()
         .key(album_key(a, section))
         .w(w)
@@ -212,7 +212,7 @@ fn track_table(s: &App, a: usize, columns: table::Columns, p: &Palette) -> El {
 fn track_line(s: &App, t: &Track, i: usize, n: usize, a: usize, columns: table::Columns, p: &Palette) -> El {
     let current = s.current == Some(i);
     let lead: El = if current {
-        icon(if s.playing { &icons::BARS } else { &icons::PAUSE }, 13.0).color(p.blue)
+        icon(if s.playing { &icons::BARS } else { &icons::PAUSE }, 13.0).color(p.accent)
     } else {
         text(t.number.map_or_else(|| format!("{}", n + 1), |x| x.to_string())).font(NUM).color(p.tx3).w(28.0).align(Align::End)
     };
@@ -232,13 +232,13 @@ pub(super) fn play_button(key: &'static str, label: &'static str, p: &Palette) -
         .gap(8.0)
         .radius(16.0)
         .center_y()
-        .fill(p.blue)
+        .fill(p.accent)
         .hover(rune::Color::WHITE.alpha(0.12))
         .press_scale(0.97)
         .cursor(Cursor::Pointer)
         .label(label)
-        .child(icon(&icons::PLAY, 14.0).color(rune::Color::WHITE))
-        .child(text(label).font(TITLE).color(rune::Color::WHITE))
+        .child(icon(&icons::PLAY, 14.0).color(p.on_accent))
+        .child(text(label).font(TITLE).color(p.on_accent))
 }
 
 /// A playback button beside Play: the neutral secondary fill with Play's blue for its ink.
@@ -255,8 +255,8 @@ pub(super) fn tinted_button(key: &'static str, glyph: &'static rune::Icon, label
         .press_scale(0.97)
         .cursor(Cursor::Pointer)
         .label(label)
-        .child(icon(glyph, 15.0).color(p.blue))
-        .child(text(label).font(TITLE).color(p.blue))
+        .child(icon(glyph, 15.0).color(p.accent))
+        .child(text(label).font(TITLE).color(p.accent))
 }
 
 /// The album page's Play: raised while album `a` isn't playing, pressed in and darker as
@@ -283,7 +283,7 @@ fn play_toggle(s: &App, a: usize, p: &Palette) -> El {
         .radius(PAGE_BUTTON_RADIUS)
         .center_y()
         .justify_center()
-        .fill(if down { p.blue.mix(rune::Color::BLACK, 0.35) } else { p.blue })
+        .fill(if down { p.accent.mix(rune::Color::BLACK, 0.35) } else { p.accent })
         .box_shadow(shadow)
         .hover(rune::Color::WHITE.alpha(0.12))
         .press(rune::Color::BLACK.alpha(0.12))
@@ -292,8 +292,8 @@ fn play_toggle(s: &App, a: usize, p: &Palette) -> El {
         .role("button")
         .label(label)
         .on_press_tx(move |s: &mut App, tx| if loaded { s.toggle(tx) } else { s.play_album(a, None, tx) })
-        .child(icon(glyph, 14.0).color(rune::Color::WHITE))
-        .child(text(label).font(TITLE).color(rune::Color::WHITE))
+        .child(icon(glyph, 14.0).color(p.on_accent))
+        .child(text(label).font(TITLE).color(p.on_accent))
 }
 
 /// [`tinted_button`] smaller, for a lesser action under a full-size one.
@@ -310,8 +310,8 @@ fn small_tinted_button(key: &'static str, glyph: &'static rune::Icon, label: &'s
         .press_scale(0.97)
         .cursor(Cursor::Pointer)
         .label(label)
-        .child(icon(glyph, 12.0).color(p.blue))
-        .child(text(label).font(SMALL_TITLE).color(p.blue))
+        .child(icon(glyph, 12.0).color(p.accent))
+        .child(text(label).font(SMALL_TITLE).color(p.accent))
 }
 
 pub(super) fn secondary_button(key: &'static str, glyph: &'static rune::Icon, label: &'static str, p: &Palette) -> El {

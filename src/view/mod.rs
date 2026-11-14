@@ -59,7 +59,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     let p = s.theme.palette(s.appearance.dark(cx.system_dark()));
     let window = cx.layout_size("zoom-frame");
     let zoom = window.map_or(1.0, |size| applied_zoom(s.zoom, size));
-    let kit = Kit::from_palette(PaletteSeed { bg: p.bg2, fg: p.tx, accent: p.blue });
+    let kit = Kit::from_palette(PaletteSeed { bg: p.bg2, fg: p.tx, accent: p.accent });
     let mut layer = Vec::new();
     // The view's toolbar does nothing to search results or settings, so they go without it.
     let toolbar = (!matches!(s.page, crate::app::Page::Search | crate::app::Page::Settings | crate::app::Page::Graph | crate::app::Page::Home)).then(|| toolbar::toolbar(s, &p, &kit, &mut layer));
@@ -98,8 +98,8 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         el().key("drop-veil")
             .pin(Some(8.0), Some(8.0), Some(8.0), Some(8.0))
             .radius(6.0)
-            .border(2.0, p.blue)
-            .fill(p.blue.alpha(0.08))
+            .border(2.0, p.accent)
+            .fill(p.accent.alpha(0.08))
             .center()
             .child(text("Drop to add to the library").font(HEADING).color(p.tx))
             .inert()
@@ -326,9 +326,9 @@ fn tabs(s: &App, p: &Palette) -> El {
         .self_end()
         .role("tablist")
         .label("Sections")
-        .child(tab(0, "home-tab", &icons::HOUSE, p.orange, "Home", "Recently added and played").on_press(|s: &mut App| s.show_home()))
-        .child(tab(1, "library-tab", &icons::NOTE, p.blue, "Library", "Back to the library's views").on_press(|s: &mut App| s.go_home()))
-        .child(tab(2, "graph-tab", &icons::GRAPH, p.purple, "Graph", "Artists and who they've worked with").on_press(|s: &mut App| s.show_graph()))
+        .child(tab(0, "home-tab", &icons::HOUSE, p.tabs[0], "Home", "Recently added and played").on_press(|s: &mut App| s.show_home()))
+        .child(tab(1, "library-tab", &icons::NOTE, p.tabs[1], "Library", "Back to the library's views").on_press(|s: &mut App| s.go_home()))
+        .child(tab(2, "graph-tab", &icons::GRAPH, p.tabs[2], "Graph", "Artists and who they've worked with").on_press(|s: &mut App| s.show_graph()))
 }
 
 fn icon_button(key: &'static str, glyph: &'static Icon, help: &str, p: &Palette) -> El {
@@ -358,9 +358,9 @@ fn toggle_icon(key: &'static str, glyph: &'static Icon, on: bool, help: &str, p:
         .checked(on)
         .label(help.split([':', '(']).next().unwrap_or(help).trim().to_string())
         .help(help.to_string())
-        .child(icon(glyph, 17.0).color(if on { p.blue } else { p.tx3 }));
+        .child(icon(glyph, 17.0).color(if on { p.accent } else { p.tx3 }));
     if on {
-        b = b.child(el().size(4.0, 4.0).radius(2.0).fill(p.blue).pin(Some(14.0), None, None, Some(1.0)));
+        b = b.child(el().size(4.0, 4.0).radius(2.0).fill(p.accent).pin(Some(14.0), None, None, Some(1.0)));
     }
     b
 }

@@ -191,7 +191,7 @@ fn group_header(section: &Section, g: usize, open: bool, p: &Palette) -> El {
 /// A song row; with a `cover`, the cover shows the playing icon and the lead keeps the number.
 fn track_row(t: &Track, i: usize, section: Option<usize>, number: usize, selected: bool, current: bool, playing: bool, cover: Option<El>, columns: table::Columns, p: &Palette) -> El {
     let lead: El = if current && cover.is_none() {
-        icon(if playing { &icons::BARS } else { &icons::PAUSE }, 14.0).color(p.blue)
+        icon(if playing { &icons::BARS } else { &icons::PAUSE }, 14.0).color(p.accent)
     } else {
         text(format!("{number}")).font(NUM).color(p.tx3).align(Align::End).w(28.0)
     };

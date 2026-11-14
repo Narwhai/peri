@@ -441,7 +441,7 @@ fn link_option(key: String, label: &str, note: Option<&str>, p: &Palette) -> El 
 /// The switch that adds their aliases' releases and credits to the page.
 fn aliases_toggle(on: bool, p: &Palette) -> El {
     let mark = el().w(16.0).h(16.0).radius(2.0).center();
-    let mark = if on { mark.fill(p.blue).child(icon(&rune_kit::glyphs::CHECK_SMALL, 14.0).color(rune::Color::WHITE)) } else { mark.border(1.5, p.tx3) };
+    let mark = if on { mark.fill(p.accent).child(icon(&rune_kit::glyphs::CHECK_SMALL, 14.0).color(p.on_accent)) } else { mark.border(1.5, p.tx3) };
     row()
         .key("artist-aliases")
         .h(32.0)

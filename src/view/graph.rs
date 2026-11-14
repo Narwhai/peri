@@ -523,11 +523,11 @@ fn dot(tiles: &mut Tiles, g: &Graph, i: usize, zoom: f32, dim: bool, p: &Palette
     let r = radius(g.model.nodes[i].degree).max(1.0 / zoom);
     let c = g.world[i];
     let focus = g.selected;
-    let color = if dim { p.ui2.alpha(0.25) } else if focus == Some(i) { p.blue } else { p.tx2 };
+    let color = if dim { p.ui2.alpha(0.25) } else if focus == Some(i) { p.accent } else { p.tx2 };
     tiles.dot(c, r, color);
     if focus == Some(i) {
         // A 2-point ring 3 points clear of the dot, on screen at any zoom.
-        tiles.ring(c, r + 4.0 / zoom, 2.0 / zoom, p.blue);
+        tiles.ring(c, r + 4.0 / zoom, 2.0 / zoom, p.accent);
     }
     if g.pinned.get(i).copied().unwrap_or(false) {
         // A pin's head just off the dot's top right, 2 points across on screen, outlined in the
@@ -536,7 +536,7 @@ fn dot(tiles: &mut Tiles, g: &Graph, i: usize, zoom: f32, dim: bool, p: &Palette
         let k = std::f32::consts::FRAC_1_SQRT_2 * (r + head);
         let at = [c[0] + k, c[1] - k];
         tiles.dot(at, head + 1.0 / zoom, if dim { p.bg.alpha(0.4) } else { p.bg });
-        tiles.dot(at, head, if dim { p.blue.alpha(0.3) } else { p.blue });
+        tiles.dot(at, head, if dim { p.accent.alpha(0.3) } else { p.accent });
     }
 }
 

@@ -127,7 +127,7 @@ fn trigger_key(panel: Panel) -> &'static str {
 }
 
 fn tool_button(key: &'static str, glyph: &'static rune::Icon, label: String, active: bool, open: bool, p: &Palette) -> El {
-    let ink = if active { p.blue } else { p.tx2 };
+    let ink = if active { p.accent } else { p.tx2 };
     row()
         .key(key)
         .h(28.0)
@@ -157,7 +157,7 @@ pub(super) fn segmented(key: &'static str, options: &[(&'static str, &'static st
                 .px(10.0)
                 .radius(3.0)
                 .center()
-                .fill(if on { p.cyan.alpha(if p.dark { 0.24 } else { 0.18 }) } else { p.bg.alpha(0.0) })
+                .fill(if on { p.selected.alpha(if p.dark { 0.24 } else { 0.18 }) } else { p.bg.alpha(0.0) })
                 .hover(p.ui.alpha(0.3))
                 .cursor(Cursor::Pointer)
                 .role("radio")
@@ -166,7 +166,7 @@ pub(super) fn segmented(key: &'static str, options: &[(&'static str, &'static st
                 .label(label)
                 .motion(SNAPPY)
                 .on_press(move |s: &mut App| choose(s, value))
-                .child(text(label).font(TITLE).color(if on { p.cyan } else { p.tx2 })),
+                .child(text(label).font(TITLE).color(if on { p.selected } else { p.tx2 })),
         );
     }
     seg
@@ -276,7 +276,7 @@ fn views_body(s: &App, p: &Palette, kit: &Kit) -> El {
             .role("option")
             .checked(active)
             .label(view.name.clone())
-            .child(el().w(14.0).center().child(icon(&rune_kit::glyphs::CHECK_SMALL, 14.0).color(p.blue).opacity(if active { 1.0 } else { 0.0 })))
+            .child(el().w(14.0).center().child(icon(&rune_kit::glyphs::CHECK_SMALL, 14.0).color(p.accent).opacity(if active { 1.0 } else { 0.0 })))
             .child(name);
         if !renaming {
             item = item
@@ -523,7 +523,7 @@ fn columns_body<'a>(s: &'a App, p: &'a Palette) -> impl FnOnce(&mut Vec<El>) -> 
                     }
                     s.views_changed();
                 })
-                .child(el().w(14.0).center().child(icon(&rune_kit::glyphs::CHECK_SMALL, 14.0).color(p.blue).opacity(if at.is_some() { 1.0 } else { 0.0 })))
+                .child(el().w(14.0).center().child(icon(&rune_kit::glyphs::CHECK_SMALL, 14.0).color(p.accent).opacity(if at.is_some() { 1.0 } else { 0.0 })))
                 .child(text(c.label()).font(BODY).color(if at.is_some() { p.tx } else { p.tx2 }).grow(1.0).shrink().truncate());
             if let Some(n) = at.filter(|&n| n > 0) {
                 r = r.child(small_icon_button(format!("{key}-up"), &icons::ARROW_UP, "Move left", p).hover_alone().on_press(move |s: &mut App| {
@@ -549,7 +549,7 @@ fn columns_body<'a>(s: &'a App, p: &'a Palette) -> impl FnOnce(&mut Vec<El>) -> 
 /// Whether the song view's rows show their album's cover before the title.
 fn covers_switch(on: bool, p: &Palette) -> El {
     let knob = el().size(12.0, 12.0).radius(6.0).fill(rune::Color::WHITE).motion(SNAPPY);
-    let track = row().size(26.0, 16.0).radius(8.0).padding(2.0).center_y().fill(if on { p.blue } else { p.ui2 });
+    let track = row().size(26.0, 16.0).radius(8.0).padding(2.0).center_y().fill(if on { p.accent } else { p.ui2 });
     let track = if on { track.justify_end() } else { track.justify_start() }.child(knob);
     row()
         .key("columns-covers")

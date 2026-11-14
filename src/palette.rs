@@ -23,13 +23,14 @@ pub struct Palette {
     pub tx2: Color,
     pub tx3: Color,
     pub red: Color,
-    pub orange: Color,
-    pub yellow: Color,
-    pub green: Color,
-    pub cyan: Color,
-    pub blue: Color,
-    pub purple: Color,
-    pub magenta: Color,
+    /// The app's accent: buttons, toggles, playing icons, focus.
+    pub accent: Color,
+    /// Text and icons drawn on an `accent` fill.
+    pub on_accent: Color,
+    /// The selected option of a segmented control.
+    pub selected: Color,
+    /// The Home, Library and Graph tab icons, when active.
+    pub tabs: [Color; 3],
 }
 
 /// `0xRRGGBB` in sRGB to Rune's linear colour.
@@ -76,13 +77,10 @@ impl Palette {
                 tx2: rgb(0x98a0a5),
                 tx3: rgb(0x6b6f74),
                 red: rgb(0xe9434b),
-                orange: rgb(0xc7693c),
-                yellow: rgb(0xad8f4e),
-                green: rgb(0x829750),
-                cyan: rgb(0x599b94),
-                blue: rgb(0x3d85f3),
-                purple: rgb(0x9560fd),
-                magenta: rgb(0xe34284),
+                accent: rgb(0x3d85f3),
+                on_accent: rgb(0x0b0b0c),
+                selected: rgb(0x599b94),
+                tabs: [rgb(0xc7693c), rgb(0x3d85f3), rgb(0x9560fd)],
             }
         } else {
             Palette {
@@ -96,13 +94,49 @@ impl Palette {
                 tx2: rgb(0x4b5257),
                 tx3: rgb(0x7c8085),
                 red: rgb(0xc4182d),
-                orange: rgb(0xa34918),
-                yellow: rgb(0x73570c),
-                green: rgb(0x576a23),
-                cyan: rgb(0x2a6e67),
-                blue: rgb(0x155fca),
-                purple: rgb(0x8000fa),
-                magenta: rgb(0xbf1567),
+                accent: rgb(0x155fca),
+                on_accent: Color::WHITE,
+                selected: rgb(0x2a6e67),
+                tabs: [rgb(0xa34918), rgb(0x155fca), rgb(0x8000fa)],
+            }
+        }
+    }
+
+    /// The Peridot theme's palette in one mode: greens after the gemstone, from olive-gold to deep teal-green.
+    fn peridot(dark: bool) -> Palette {
+        if dark {
+            Palette {
+                dark,
+                bg: rgb(0x0c130a),
+                bg2: rgb(0x151f12),
+                ui: rgb(0x27331f),
+                ui2: rgb(0x5b6b4a),
+                ui3: rgb(0x3d5a2a),
+                tx: rgb(0xe9f0d6),
+                tx2: rgb(0xa3b08a),
+                tx3: rgb(0x75845f),
+                red: rgb(0xf0695d),
+                accent: rgb(0xa8cc3c),
+                on_accent: rgb(0x0c130a),
+                selected: rgb(0xb4d650),
+                tabs: [rgb(0xc9b44a), rgb(0xa8cc3c), rgb(0x5fb89a)],
+            }
+        } else {
+            Palette {
+                dark,
+                bg: rgb(0xf3f7e8),
+                bg2: rgb(0xe6edd3),
+                ui: rgb(0xb5c09a),
+                ui2: rgb(0x6f7f55),
+                ui3: rgb(0x9cb86a),
+                tx: rgb(0x1c2a0c),
+                tx2: rgb(0x4d5e35),
+                tx3: rgb(0x6f7f55),
+                red: rgb(0xb3261e),
+                accent: rgb(0x4f7a0f),
+                on_accent: rgb(0xf7fbec),
+                selected: rgb(0x3f6b0a),
+                tabs: [rgb(0x8a7412), rgb(0x5e8a0c), rgb(0x1f6b4f)],
             }
         }
     }
@@ -114,27 +148,31 @@ impl Palette {
 pub enum Theme {
     #[default]
     Bolis,
+    Peridot,
 }
 
 impl Theme {
-    pub const ALL: [Theme; 1] = [Theme::Bolis];
+    pub const ALL: [Theme; 2] = [Theme::Bolis, Theme::Peridot];
 
     /// The value saved in the preferences.
     pub fn id(self) -> &'static str {
         match self {
             Theme::Bolis => "bolis",
+            Theme::Peridot => "peridot",
         }
     }
 
     pub fn name(self) -> &'static str {
         match self {
             Theme::Bolis => "Bolis",
+            Theme::Peridot => "Peridot",
         }
     }
 
     pub fn palette(self, dark: bool) -> Palette {
         match self {
             Theme::Bolis => Palette::bolis(dark),
+            Theme::Peridot => Palette::peridot(dark),
         }
     }
 }
@@ -183,11 +221,39 @@ impl Appearance {
 mod tests {
     use super::*;
 
+    /// WCAG 2.x relative luminance of a colour (Rune's colour is linear sRGB already).
+    fn luminance(c: Color) -> f32 {
+        0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
+    }
+
+    /// WCAG contrast ratio between two colours, from 1 to 21.
+    fn contrast(a: Color, b: Color) -> f32 {
+        let (hi, lo) = if luminance(a) >= luminance(b) { (luminance(a), luminance(b)) } else { (luminance(b), luminance(a)) };
+        (hi + 0.05) / (lo + 0.05)
+    }
+
     #[test]
     fn hex_round_trips_through_linear_colour() {
         assert_eq!(rgb(0x3d85f3).hex(), "#3d85f3ff");
         assert_eq!(Theme::Bolis.palette(false).bg.hex(), "#edeeefff");
         assert_eq!(Theme::Bolis.palette(true).bg.hex(), "#0b0b0cff");
+        assert_eq!(Theme::Peridot.palette(false).bg.hex(), "#f3f7e8ff");
+        assert_eq!(Theme::Peridot.palette(true).bg.hex(), "#0c130aff");
+    }
+
+    #[test]
+    fn every_theme_keeps_its_text_and_accent_readable() {
+        for theme in Theme::ALL {
+            for dark in [false, true] {
+                let p = theme.palette(dark);
+                let label = format!("{} {}", theme.name(), if dark { "dark" } else { "light" });
+                assert!(contrast(p.tx, p.bg) >= 7.0, "{label}: tx on bg");
+                assert!(contrast(p.tx2, p.bg) >= 4.5, "{label}: tx2 on bg");
+                assert!(contrast(p.tx3, p.bg) >= 3.0, "{label}: tx3 on bg");
+                assert!(contrast(p.on_accent, p.accent) >= 4.5, "{label}: on_accent on accent");
+                assert!(contrast(p.red, p.bg) >= 4.5, "{label}: red on bg");
+            }
+        }
     }
 
     #[test]
@@ -207,6 +273,8 @@ mod tests {
         }
         assert_eq!(serde_json::to_string(&Theme::Bolis).unwrap(), "\"bolis\"");
         assert_eq!(serde_json::from_str::<Theme>("\"bolis\"").unwrap(), Theme::Bolis);
+        assert_eq!(serde_json::to_string(&Theme::Peridot).unwrap(), "\"peridot\"");
+        assert_eq!(serde_json::from_str::<Theme>("\"peridot\"").unwrap(), Theme::Peridot);
         assert!(serde_json::from_str::<Appearance>("\"sepia\"").is_err());
     }
 }

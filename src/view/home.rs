@@ -116,7 +116,7 @@ fn song_line(s: &App, i: usize, list: &[usize], stripe: bool, columns: table::Co
     let t = &s.tracks[i];
     let current = s.current == Some(i);
     let lead = if current {
-        icon(if s.playing { &icons::BARS } else { &icons::PAUSE }, 13.0).color(p.blue)
+        icon(if s.playing { &icons::BARS } else { &icons::PAUSE }, 13.0).color(p.accent)
     } else {
         el()
     };

@@ -244,6 +244,19 @@ fn the_appearance_is_saved_and_reloaded() {
 }
 
 #[test]
+fn the_peridot_theme_is_chosen_drawn_and_saved() {
+    let f = Fixture::new("theme-peridot");
+    let mut rt = appearance_runtime(&f.prefs(), false);
+    click(&mut rt, "peridot");
+    assert_eq!(rt.state.theme, Theme::Peridot);
+    assert_eq!(title_colour(&rt), palette_text(Theme::Peridot, false));
+    assert_eq!(Store::at(f.prefs()).load_theme(), Ok(Theme::Peridot));
+    let app = App::new(Output::Silent, Store::at(f.prefs()));
+    assert_eq!(app.theme, Theme::Peridot);
+    assert!(app.error.is_none(), "{:?}", app.error);
+}
+
+#[test]
 fn an_unreadable_appearance_shows_an_error_and_falls_back_to_system() {
     let f = Fixture::new("appearance-bad");
     std::fs::write(f.prefs(), r#"{"appearance": "sepia"}"#).unwrap();
