@@ -106,7 +106,8 @@ fn graph_toolbar(s: &App, p: &Palette, kit: &Kit) -> El {
             _ => false,
         })
         .build(kit)
-        .key("graph-find");
+        .key("graph-find")
+        .radius(2.0);
     let shown_edges = g.model.edges.iter().filter(|e| g.hidden & e.kind.bit() == 0).count();
     let status = match g.progress {
         Some((step, steps)) => format!("Arranging… {}%", step * 100 / steps.max(1)),
@@ -142,23 +143,24 @@ fn graph_toolbar(s: &App, p: &Palette, kit: &Kit) -> El {
 
 fn legend_chip(kind: EdgeKind, on: bool, p: &Palette) -> El {
     let color = edge_color(kind, p);
+    // A checkbox in the link's own colour: filled and checked when shown, outlined when hidden.
+    let mark = el().key(format!("kind-{}-mark", kind.id())).size(14.0, 14.0).radius(3.0).center();
+    let mark = if on { mark.fill(color).child(icon(&rune_kit::glyphs::CHECK_SMALL, 12.0).color(p.bg)) } else { mark.border(1.5, color.alpha(0.6)) };
     row()
         .key(format!("kind-{}", kind.id()))
         .h(24.0)
-        .px(8.0)
+        .px(6.0)
         .gap(6.0)
-        .radius(12.0)
+        .radius(4.0)
         .center_y()
-        .fill(if on { p.ui.alpha(0.45) } else { p.bg.alpha(0.0) })
-        .border(1.0, p.ui.alpha(if on { 0.0 } else { 0.8 }))
-        .hover(p.ui.alpha(0.6))
+        .hover(p.ui.alpha(0.45))
         .cursor(Cursor::Pointer)
-        .role("switch")
+        .role("checkbox")
         .checked(on)
         .label(kind.label())
         .help(if on { format!("Hide {} links", kind.label().to_lowercase()) } else { format!("Show {} links", kind.label().to_lowercase()) })
         .on_press(move |s: &mut App| s.toggle_graph_kind(kind))
-        .child(el().size(14.0, 3.0).radius(1.5).fill(if on { color } else { color.alpha(0.3) }))
+        .child(mark)
         .child(text(kind.label()).font(SMALL).color(if on { p.tx } else { p.tx3 }))
 }
 

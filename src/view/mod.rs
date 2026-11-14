@@ -280,7 +280,7 @@ fn tabs(s: &App, p: &Palette) -> El {
     let (home, graph) = (s.in_home(), s.in_graph());
     let ons = [home, !home && !graph, graph];
     // Like Chrome's tabs: the active one is a folder tab joined to the page, the others bare labels on the header.
-    let tab = |i: usize, key: &'static str, glyph: &'static Icon, label: &'static str, help: &'static str| {
+    let tab = |i: usize, key: &'static str, glyph: &'static Icon, hue: Color, label: &'static str, help: &'static str| {
         let on = ons[i];
         let mut folder = row()
             .key(key)
@@ -317,7 +317,7 @@ fn tabs(s: &App, p: &Palette) -> El {
         // Keyed, so they keep their identity (and stay put) when the flares, hover fill and
         // divider before them come and go with the active tab.
         folder
-            .child(icon(glyph, 18.0).key(format!("{key}-icon")).color(if on { p.ui3 } else { p.tx3 }))
+            .child(icon(glyph, 18.0).key(format!("{key}-icon")).color(if on { hue } else { hue.alpha(0.7) }))
             .child(text(label).key(format!("{key}-label")).font(HEADING).color(if on { p.tx } else { p.tx2 }))
     };
     row()
@@ -326,9 +326,9 @@ fn tabs(s: &App, p: &Palette) -> El {
         .self_end()
         .role("tablist")
         .label("Sections")
-        .child(tab(0, "home-tab", &icons::HOUSE, "Home", "Recently added and played").on_press(|s: &mut App| s.show_home()))
-        .child(tab(1, "library-tab", &icons::NOTE, "Library", "Back to the library's views").on_press(|s: &mut App| s.go_home()))
-        .child(tab(2, "graph-tab", &icons::GRAPH, "Graph", "Artists and who they've worked with").on_press(|s: &mut App| s.show_graph()))
+        .child(tab(0, "home-tab", &icons::HOUSE, p.orange, "Home", "Recently added and played").on_press(|s: &mut App| s.show_home()))
+        .child(tab(1, "library-tab", &icons::NOTE, p.blue, "Library", "Back to the library's views").on_press(|s: &mut App| s.go_home()))
+        .child(tab(2, "graph-tab", &icons::GRAPH, p.purple, "Graph", "Artists and who they've worked with").on_press(|s: &mut App| s.show_graph()))
 }
 
 fn icon_button(key: &'static str, glyph: &'static Icon, help: &str, p: &Palette) -> El {
