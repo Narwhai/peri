@@ -7,8 +7,16 @@ edition = "2024"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 lofty = "0.25.5"
 rodio = { version = "0.23.0", features = ["symphonia-all"] }
-rune = { git = "https://github.com/anomalyco/rune", rev = "d76c8a9f6cbc6e59ab49b1c08d6f58ff48c74c50", version = "0.0.1", features = ["native-file-dialog"] }
-rune-kit = { git = "https://github.com/anomalyco/rune", rev = "d76c8a9f6cbc6e59ab49b1c08d6f58ff48c74c50", version = "0.0.1" }
+rune = { git = "https://github.com/Narwhai/rune", rev = "1e05a3b584184f5b1427e5a73bd312d56d0b6d14", version = "0.0.1", features = ["native-file-dialog"] }
+rune-kit = { git = "https://github.com/Narwhai/rune", rev = "1e05a3b584184f5b1427e5a73bd312d56d0b6d14", version = "0.0.1" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 ureq = "3.5.1"
+
+# Rune's vendored crates, patched as Rune's own workspace does; apps that build Rune patch them too.
+[patch.crates-io]
+wgpu-hal = { git = "https://github.com/Narwhai/rune", rev = "1e05a3b584184f5b1427e5a73bd312d56d0b6d14" }
+winit = { git = "https://github.com/Narwhai/rune", rev = "1e05a3b584184f5b1427e5a73bd312d56d0b6d14" }
+parley_engine = { git = "https://github.com/Narwhai/rune", rev = "1e05a3b584184f5b1427e5a73bd312d56d0b6d14" }
+accesskit_windows = { git = "https://github.com/Narwhai/rune", rev = "1e05a3b584184f5b1427e5a73bd312d56d0b6d14" }
+accesskit_macos = { git = "https://github.com/Narwhai/rune", rev = "1e05a3b584184f5b1427e5a73bd312d56d0b6d14" }

@@ -10,6 +10,8 @@ mod home;
 mod labels;
 mod list;
 mod player;
+#[cfg(test)]
+pub(crate) use player::VOLUME_DRAG;
 mod search;
 mod settings;
 mod table;

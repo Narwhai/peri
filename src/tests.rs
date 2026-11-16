@@ -4,7 +4,7 @@ use rune::{Env, Key, KeyEvent, Mods, Runtime};
 
 use crate::app::{App, Output, Page};
 use crate::queue::Repeat;
-use crate::view::view;
+use crate::view::{VOLUME_DRAG, view};
 
 fn runtime(dark: bool) -> Runtime<App> {
     let mut app = App::new(Output::Silent, crate::query::store::Store::memory());
@@ -184,15 +184,121 @@ fn shuffle_and_repeat_toggle_from_their_buttons() {
     assert_eq!(rt.state.repeat, Repeat::One);
 }
 
+/// Presses the volume knob at its centre, moves the mouse `dy` points vertically while it holds
+/// the pointer, and lets go where it pressed: the cursor never moved.
+fn turn_volume(rt: &mut Runtime<App>, dy: f32) {
+    let (x, y) = press_volume(rt);
+    rt.pointer_motion(0.0, dy / 2.0);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_motion(0.0, dy / 2.0);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_up(x, y);
+    settle(rt);
+}
+
+/// Presses the volume knob at its centre and returns where.
+fn press_volume(rt: &mut Runtime<App>) -> (f32, f32) {
+    let r = rect_of_key(rt, "volume");
+    let (x, y) = (r[0] + r[2] / 2.0, r[1] + r[3] / 2.0);
+    rt.pointer_move(x, y);
+    rt.pointer_down(x, y);
+    rt.frame(1.0 / 60.0);
+    (x, y)
+}
+
+fn rect_of_key(rt: &Runtime<App>, key: &str) -> [f32; 4] {
+    rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).unwrap_or_else(|| panic!("no element {key}")).rect
+}
+
 #[test]
-fn clicking_the_volume_slider_sets_the_volume_where_clicked() {
+fn dragging_the_volume_knob_up_raises_and_down_lowers_it() {
     let mut rt = runtime(true);
-    let info = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("volume")).unwrap();
-    let [x, y, w, h] = info.rect;
-    rt.pointer_down(x + w * 0.25, y + h / 2.0);
-    rt.pointer_up(x + w * 0.25, y + h / 2.0);
+    rt.update(|s, _| s.set_volume(0.5));
     settle(&mut rt);
-    assert!((rt.state.volume - 0.25).abs() < 0.02, "volume {}", rt.state.volume);
+    turn_volume(&mut rt, -30.0);
+    assert!((rt.state.volume - (0.5 + 30.0 / VOLUME_DRAG)).abs() < 0.01, "volume {}", rt.state.volume);
+    turn_volume(&mut rt, 60.0);
+    assert!((rt.state.volume - (0.5 + 30.0 / VOLUME_DRAG - 60.0 / VOLUME_DRAG)).abs() < 0.01, "volume {}", rt.state.volume);
+}
+
+#[test]
+fn a_click_on_the_volume_knob_leaves_the_volume_alone() {
+    let mut rt = runtime(true);
+    rt.update(|s, _| s.set_volume(0.5));
+    settle(&mut rt);
+    click(&mut rt, "volume");
+    assert!((rt.state.volume - 0.5).abs() < 1e-6, "volume {}", rt.state.volume);
+}
+
+#[test]
+fn the_volume_knob_clamps_between_silent_and_full() {
+    let mut rt = runtime(true);
+    rt.update(|s, _| s.set_volume(0.9));
+    settle(&mut rt);
+    turn_volume(&mut rt, -1000.0);
+    assert_eq!(rt.state.volume, 1.0);
+    turn_volume(&mut rt, 1000.0);
+    assert_eq!(rt.state.volume, 0.0);
+}
+
+#[test]
+fn holding_the_volume_knob_holds_the_pointer_still_until_release() {
+    let mut rt = runtime(true);
+    rt.update(|s, _| s.set_volume(0.5));
+    settle(&mut rt);
+    let (x, y) = press_volume(&mut rt);
+    assert!(rt.pointer_locked(), "the press holds the pointer");
+    assert_eq!(rt.cursor(), rune::Cursor::Hidden);
+    // A mouse moved further down than the screen has room for below the knob.
+    for _ in 0..20 {
+        rt.pointer_motion(0.0, VOLUME_DRAG / 10.0);
+        rt.frame(1.0 / 60.0);
+    }
+    assert_eq!(rt.state.volume, 0.0, "turned all the way down in one movement");
+    assert_eq!(rt.pointer(), Some((x, y)), "the cursor stayed on the knob");
+    rt.pointer_up(x, y);
+    settle(&mut rt);
+    assert!(!rt.pointer_locked(), "the release gives the pointer back");
+    rt.pointer_motion(0.0, -VOLUME_DRAG);
+    settle(&mut rt);
+    assert_eq!(rt.state.volume, 0.0, "the mouse no longer turns it");
+}
+
+#[test]
+fn escape_while_turning_the_volume_knob_puts_the_volume_back() {
+    let mut rt = runtime(true);
+    rt.update(|s, _| s.set_volume(0.5));
+    settle(&mut rt);
+    let (x, y) = press_volume(&mut rt);
+    rt.pointer_motion(0.0, 30.0);
+    rt.frame(1.0 / 60.0);
+    assert!(rt.state.volume < 0.5);
+    rt.key(KeyEvent { key: Key::Escape, mods: Mods::default() });
+    settle(&mut rt);
+    assert!(!rt.pointer_locked());
+    assert!((rt.state.volume - 0.5).abs() < 1e-6, "volume {}", rt.state.volume);
+    rt.pointer_up(x, y);
+    settle(&mut rt);
+    assert!((rt.state.volume - 0.5).abs() < 1e-6, "volume {}", rt.state.volume);
+}
+
+#[test]
+fn clicking_the_seek_bar_seeks_to_the_fraction_pressed() {
+    let mut rt = runtime(true);
+    let eta = idx(&rt, "ETA");
+    rt.update(move |s, _| {
+        s.current = Some(eta);
+        s.playing = true;
+        s.position = 0.0;
+    });
+    settle(&mut rt);
+    let duration = rt.state.duration().expect("ETA has a duration");
+    let r = rect_of_key(&rt, "seek");
+    let (x, y) = (r[0] + r[2] * 0.25, r[1] + r[3] / 2.0);
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    settle(&mut rt);
+    assert!((rt.state.position - duration * 0.25).abs() < duration * 0.02, "position {}", rt.state.position);
 }
 
 #[test]
@@ -479,4 +585,29 @@ fn plays_are_saved_beside_the_preferences_and_count_at_the_next_launch() {
     assert_eq!(eta.plays, 1);
     assert_eq!(next.tracks.iter().map(|t| t.plays).sum::<u32>(), 1, "only ETA played");
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn the_play_button_darkens_as_pause_while_playing_and_lightens_once_paused() {
+    let mut rt = runtime(true);
+    let play = |rt: &Runtime<App>| {
+        let e = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("play")).unwrap_or_else(|| panic!("no play button"));
+        (e.fill.r + e.fill.g + e.fill.b, e.label)
+    };
+    let (raised, label) = play(&rt);
+    assert_eq!(label.as_deref(), Some("Play"));
+    let eta = idx(&rt, "ETA");
+    rt.update(move |s, _| {
+        s.current = Some(eta);
+        s.playing = true;
+    });
+    settle(&mut rt);
+    let (pressed, label) = play(&rt);
+    assert_eq!(label.as_deref(), Some("Pause"));
+    assert!(pressed < raised, "pressed in and darker while playing: {pressed} vs {raised}");
+    click(&mut rt, "play");
+    assert!(!rt.state.playing);
+    let (paused, label) = play(&rt);
+    assert_eq!(label.as_deref(), Some("Play"));
+    assert!((paused - raised).abs() < 1e-3, "back to the raised colour once paused: {paused} vs {raised}");
 }
