@@ -1,1 +1,13 @@
 /target
+# editor / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+# local env / secrets (Last.fm build keys)
+.env
+.env.*
+# stray UI test scene dumps
+/--scene
+# pi agent local state
+/.pi/
