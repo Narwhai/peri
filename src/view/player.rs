@@ -131,7 +131,7 @@ fn seek_bar(s: &App, p: &Palette) -> El {
     let position = s.shown_position();
     let fraction = duration.filter(|d| *d > 0.0).map_or(0.0, |d| (position / d).clamp(0.0, 1.0) as f32);
     let enabled = s.current.is_some() && duration.is_some();
-    let track = fader("seek", fraction, enabled, p)
+    let track = fader("seek", fraction, enabled, s.seek_preview.is_some(), p)
         .a11y_value(clock(position))
         .on_step(|s: &mut App, steps, _tx| s.seek_by(steps as f64 * SEEK_STEP))
         .on_drag(|s: &mut App, d: &mut Drag, _tx: &mut Tx| {
@@ -224,68 +224,65 @@ fn sweep(c: f32, from: f32, span: f32) -> Vec<[f32; 2]> {
         .collect()
 }
 
-/// The seek bar as a hardware fader: tick notches above a recessed slot, and a tall cap at the played fraction
-/// that stands past the slot's top and bottom.
-/// The hit area is the track's full width, so a press at `d.x / d.w` lands where the ticks say.
-fn fader(key: &'static str, fraction: f32, enabled: bool, p: &Palette) -> El {
-    let fill = if enabled { p.tx2 } else { p.ui };
+/// The seek bar as a hardware-style fader: a recessed slot, with a round handle at the played
+/// fraction. The handle's inner dot lights in the accent while the bar is hovered or dragged.
+/// The hit area is the track's full width, so a press at `d.x / d.w` maps to the seek fraction.
+fn fader(key: &'static str, fraction: f32, enabled: bool, dragging: bool, p: &Palette) -> El {
+    let fill = if enabled { p.accent } else { p.ui };
     let slot = el()
         .key("bar")
-        .pin(Some(0.0), Some(SLOT_TOP), Some(0.0), Some(FADER_H - SLOT_TOP - SLOT_H))
+        .pin(Some(0.0), Some(SLOT_TOP), Some(0.0), Some(SLOT_TOP))
         .radius(4.0)
         .fill(p.bg)
         .border(1.0, p.ui.alpha(0.5))
         .box_shadow(Shadow { y: 1.0, blur: 3.0, color: Color::BLACK.alpha(0.5), inset: true, ..Shadow::default() })
         .child(
             el().key("fill").w_frac(fraction).h_full().radius(4.0).fill(fill).motion(SNAPPY).child(
-                // The cap rides the fill's end, centred on it.
+                // The handle rides the fill's end, centred on it.
                 el().key("knob")
-                    .size(CAP_W, CAP_H)
-                    .radius(3.0)
-                    .linear_gradient(0.0, [(0.0, p.ui2), (0.5, p.tx), (1.0, p.ui2)])
-                    .border(1.0, p.bg.alpha(0.6))
+                    .size(HANDLE, HANDLE)
+                    .radius(HANDLE / 2.0)
+                    // The lightest shade in either mode: the background in light, the text colour in dark.
+                    .fill(if p.dark { p.tx } else { p.bg })
+                    .border(1.0, p.ui)
                     .shadow(1.0, 3.0, Color::BLACK.alpha(0.45))
                     .opacity(if enabled { 1.0 } else { 0.0 })
-                    .pin(None, Some((SLOT_H - CAP_H) / 2.0), Some(-CAP_W / 2.0), None)
+                    .pin(None, Some((SLOT_H - HANDLE) / 2.0), Some(-HANDLE / 2.0), None)
                     .motion(SNAPPY)
-                    // The grip line across the cap's middle, like a fader's index mark.
-                    .child(canvas(Shape::new().line([2.5, CAP_H / 2.0], [CAP_W - 2.5, CAP_H / 2.0], 1.5, LineCap::Round, p.bg.alpha(0.7))).size(CAP_W, CAP_H).pin(Some(0.0), Some(0.0), None, None)),
+                    // The handle glides at sub-pixel positions while the track plays; snapping each
+                    // circle to whole pixels on its own would make the inner dot wobble inside it.
+                    .pixel_snap(false)
+                    .child(
+                        el().size(DOT, DOT).radius(DOT / 2.0).fill(p.ui2).pin(Some(DOT_INSET), Some(DOT_INSET), None, None),
+                    )
+                    .child(
+                        el().size(DOT, DOT)
+                            .radius(DOT / 2.0)
+                            .fill(p.accent)
+                            .pin(Some(DOT_INSET), Some(DOT_INSET), None, None)
+                            .group_opacity(if dragging { 1.0 } else { 0.0 }, 1.0)
+                            .motion(SNAPPY),
+                    ),
             ),
         );
     el().key(key)
         .role("slider")
         .label(key)
+        .hover_group()
         .h(FADER_H)
         .min_w(40.0)
         .center_y()
         .cursor(if enabled { Cursor::Pointer } else { Cursor::Default })
         .child(slot)
-        .child(canvas(fader_ticks(p)).pin(Some(0.0), Some(SLOT_TOP - TICKS_GAP - TICKS_H), Some(0.0), None).h(TICKS_H))
 }
 
-/// The seek fader's geometry in points: the ticks on top, the slot under them, and the cap
-/// standing past the slot by the same amount above and below.
-const TICKS_H: f32 = 7.0;
+/// The seek fader's geometry in points: the handle sets the height, and the slot is centred in it.
+const HANDLE: f32 = 16.0;
+const DOT: f32 = 6.0;
+const DOT_INSET: f32 = (HANDLE - DOT) / 2.0;
 const SLOT_H: f32 = 8.0;
-const CAP_W: f32 = 12.0;
-const CAP_H: f32 = 22.0;
-/// The ticks end just above the cap's top, so the cap never covers them.
-const TICKS_GAP: f32 = (CAP_H - SLOT_H) / 2.0 + 1.0;
-const SLOT_TOP: f32 = TICKS_H + TICKS_GAP;
-const FADER_H: f32 = SLOT_TOP + (SLOT_H + CAP_H) / 2.0;
-
-/// Notches in a 100-unit wide box, rising from its bottom edge: short at every 10%, medium at
-/// 25% and 75%, tallest at 50%.
-fn fader_ticks(p: &Palette) -> Shape {
-    let notch = |shape: Shape, x: f32, len: f32| shape.line([x, TICKS_H - len], [x, TICKS_H], 1.0, LineCap::Butt, p.tx3);
-    let mut shape = Shape::new().view_box(100.0, TICKS_H);
-    for i in 0..=10 {
-        let x = i as f32 * 10.0;
-        shape = notch(shape, x, if i == 5 { 8.0 } else { 3.0 });
-    }
-    shape = notch(shape, 25.0, 5.0);
-    notch(shape, 75.0, 5.0)
-}
+const FADER_H: f32 = HANDLE;
+const SLOT_TOP: f32 = (FADER_H - SLOT_H) / 2.0;
 
 /// A 4 pt bar with a fill and a knob, in a taller hit area.
 pub(super) fn slider_track(key: &'static str, fraction: f32, enabled: bool, p: &Palette) -> El {
