@@ -21,7 +21,7 @@ const MAX_LABELS: usize = 160;
 const LABEL_FROM: f32 = 7.0;
 /// The most linked artists in view are named however small they're drawn.
 const ALWAYS_LABEL: usize = 12;
-/// Wheel steps zoom by this per point.
+/// Wheel steps zoom by this per point: a mouse wheel's 40-point notch is about 10%.
 const WHEEL_ZOOM: f32 = 0.0025;
 
 /// A link kind's colour.
@@ -213,7 +213,7 @@ fn canvas_area(g: &Graph, p: &Palette, kit: &Kit, layer: &mut Vec<El>) -> El {
             let cam = s.graph.cam();
             if e.mods.cmd || e.mods.ctrl || !e.precise {
                 // A notched mouse wheel zooms, as on maps; a trackpad pans.
-                s.graph.zoom_about([e.x, e.y], (e.dy * WHEEL_ZOOM * if e.precise { 1.0 } else { 4.0 }).exp());
+                s.graph.zoom_about([e.x, e.y], (e.dy * WHEEL_ZOOM).exp());
             } else {
                 s.graph.set_camera(crate::graph::state::Camera { pan: [cam.pan[0] + e.dx, cam.pan[1] + e.dy], zoom: cam.zoom });
             }
