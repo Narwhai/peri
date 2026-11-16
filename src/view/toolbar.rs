@@ -4,7 +4,7 @@ use rune::{Cursor, El, Tx, col, el, icon, row, text};
 use rune_kit::{Kit, Placement, Select, TextInput, popover, scrim};
 
 use super::*;
-use crate::app::{App, Panel};
+use crate::app::{App, Panel, Reorder, ReorderList};
 use crate::query::property::{Mode, Property};
 use crate::query::view::{Direction, GroupBy, Layout, Sort, View};
 use crate::icons;
@@ -15,6 +15,8 @@ const BAR_H: f32 = 40.0;
 const COMPACT_W: f32 = 900.0;
 /// The album grid's toolbar also holds Grid/List and the card size slider, so it needs more.
 const COMPACT_GRID_W: f32 = 940.0;
+/// The width of a row's grip, or of the empty slot that keeps rows without one aligned.
+const GRIP_W: f32 = 18.0;
 
 /// The toolbar for a window `width` points wide as laid out (unknown before the first layout).
 pub(super) fn toolbar(s: &App, width: Option<f32>, p: &Palette, kit: &Kit, layer: &mut Vec<El>) -> El {
@@ -104,7 +106,8 @@ fn play_view_button(s: &App, albums: bool, p: &Palette) -> El {
         .px(10.0)
         .gap(6.0)
         .center_y()
-        .radius(3.0)
+        .radius(4.0)
+        .fill(p.ui.alpha(0.45))
         .role("button")
         .label(format!("Play {count}"))
         .disabled(empty)
@@ -115,9 +118,8 @@ fn play_view_button(s: &App, albums: bool, p: &Palette) -> El {
     }
     let active = s.views.active;
     button
-        .fill(p.bg.alpha(0.0))
-        .hover(p.ui.alpha(0.45))
-        .press(p.ui.alpha(0.7))
+        .hover(p.ui.alpha(0.65))
+        .press(p.ui.alpha(0.8))
         .cursor(Cursor::Pointer)
         .help("Play the songs in this view")
         .on_press_tx(move |s: &mut App, tx| s.play_view(active, tx))
@@ -167,10 +169,10 @@ fn tool_button(key: &'static str, compact: bool, glyph: &'static rune::Icon, lab
         .px(10.0)
         .gap(6.0)
         .center_y()
-        .radius(3.0)
-        .fill(if open { p.ui.alpha(0.6) } else { p.bg.alpha(0.0) })
-        .hover(p.ui.alpha(0.45))
-        .press(p.ui.alpha(0.7))
+        .radius(4.0)
+        .fill(p.ui.alpha(if open { 0.75 } else { 0.45 }))
+        .hover(p.ui.alpha(0.65))
+        .press(p.ui.alpha(0.8))
         .cursor(Cursor::Pointer)
         .label(label.clone())
         .child(icon(glyph, 15.0).color(ink));
@@ -435,15 +437,15 @@ fn sort_body<'a>(s: &'a App, p: &'a Palette, kit: &'a Kit) -> impl FnOnce(&mut V
                 *d = d.flip();
                 s.views_changed();
             });
-            let mut r = row().key(key).h(32.0).gap(6.0).center_y();
+            let mut r = row().key(key.clone()).h(32.0).gap(6.0).center_y().offset(0.0, reorder_shift(s, ReorderList::Sorts, n));
+            if is_dragged(s, ReorderList::Sorts, n) {
+                r = r.fill(p.ui.alpha(0.6)).radius(3.0).raise();
+            }
+            if view.sorts.len() > 1 {
+                r = r.child(reorder_handle(format!("{key}-handle"), ReorderList::Sorts, n, p));
+            }
             r = r.child(text(if n == 0 { "Sort by" } else { "then by" }).font(SMALL).color(p.tx3).w(52.0));
             r = r.child(prop).child(dir).child(el().grow(1.0));
-            if n > 0 {
-                r = r.child(small_icon_button(format!("sort{n}-up"), &icons::ARROW_UP, "Sort first", p).on_press(move |s: &mut App| {
-                    s.views.active_mut().sorts.swap(n, n - 1);
-                    s.views_changed();
-                }));
-            }
             r = r.child(small_icon_button(format!("sort{n}-remove"), &icons::TRASH, "Remove sort", p).on_press(move |s: &mut App| {
                 s.views.active_mut().sorts.remove(n);
                 s.views_changed();
@@ -529,7 +531,7 @@ fn columns_body<'a>(s: &'a App, p: &'a Palette) -> impl FnOnce(&mut Vec<El>) -> 
         let shown = s.shown_columns();
         let page = s.page != crate::app::Page::Library;
         let mut body = col().key("columns-body").w(300.0).padding(8.0).gap(2.0);
-        body = body.child(hint(if page { "Shown after the title in album and artist pages' song tables. Click to show or hide; ↑ moves a column left." } else { "Shown after the title in this view's song tables. Click to show or hide; ↑ moves a column left." }, p));
+        body = body.child(hint(if page { "Shown after the title in album and artist pages' song tables. Click to show or hide; drag a grip to reorder." } else { "Shown after the title in this view's song tables. Click to show or hide; drag a grip to reorder." }, p));
         if !page && s.mode() == crate::query::property::Mode::Songs {
             body = body.child(covers_switch(s.views.active().covers, p)).child(divider(p));
         }
@@ -539,8 +541,14 @@ fn columns_body<'a>(s: &'a App, p: &'a Palette) -> impl FnOnce(&mut Vec<El>) -> 
         for c in order {
             let at = shown.iter().position(|x| *x == c);
             let key = format!("column-{}", c.label().to_lowercase().replace(' ', "-"));
+            let slot = match at {
+                Some(n) if shown.len() > 1 => reorder_handle(format!("{key}-handle"), ReorderList::Columns, n, p),
+                _ => el().w(GRIP_W),
+            };
+            let shift = at.map_or(0.0, |n| reorder_shift(s, ReorderList::Columns, n));
             let mut r = row()
                 .key(key.clone())
+                .offset(0.0, shift)
                 .w_full()
                 .h(30.0)
                 .pl(8.0)
@@ -563,13 +571,11 @@ fn columns_body<'a>(s: &'a App, p: &'a Palette) -> impl FnOnce(&mut Vec<El>) -> 
                     }
                     s.views_changed();
                 })
+                .child(slot)
                 .child(el().w(14.0).center().child(icon(&rune_kit::glyphs::CHECK_SMALL, 14.0).color(p.accent).opacity(if at.is_some() { 1.0 } else { 0.0 })))
                 .child(text(c.label()).font(BODY).color(if at.is_some() { p.tx } else { p.tx2 }).grow(1.0).shrink().truncate());
-            if let Some(n) = at.filter(|&n| n > 0) {
-                r = r.child(small_icon_button(format!("{key}-up"), &icons::ARROW_UP, "Move left", p).hover_alone().on_press(move |s: &mut App| {
-                    s.shown_columns_mut().swap(n, n - 1);
-                    s.views_changed();
-                }));
+            if at.is_some_and(|n| is_dragged(s, ReorderList::Columns, n)) {
+                r = r.fill(p.ui.alpha(0.6)).raise();
             }
             list = list.child(r);
         }
@@ -611,6 +617,122 @@ fn covers_switch(on: bool, p: &Palette) -> El {
         })
         .child(text("Show covers").font(BODY).color(p.tx).grow(1.0))
         .child(track)
+}
+
+// Reordering
+
+impl ReorderList {
+    /// A row's height plus the gap below it: how far a row moves when a drag passes it.
+    fn pitch(self) -> f32 {
+        match self {
+            ReorderList::Sorts => 36.0,
+            ReorderList::Columns => 32.0,
+        }
+    }
+
+    /// How many rows the list has.
+    fn len(self, s: &App) -> usize {
+        match self {
+            ReorderList::Sorts => s.views.active().sorts.len(),
+            ReorderList::Columns => s.shown_columns().len(),
+        }
+    }
+
+    /// Moves the row at `from` to `to`, then saves the views.
+    fn move_item(self, s: &mut App, from: usize, to: usize) {
+        match self {
+            ReorderList::Sorts => {
+                let sorts = &mut s.views.active_mut().sorts;
+                let item = sorts.remove(from);
+                sorts.insert(to, item);
+            }
+            ReorderList::Columns => {
+                let columns = s.shown_columns_mut();
+                let item = columns.remove(from);
+                columns.insert(to, item);
+            }
+        }
+        s.views_changed();
+    }
+}
+
+/// The row a drag of `dy` points from row `from` lands on: one row per `pitch` points, kept
+/// inside a list of `len` rows.
+fn reorder_target(from: usize, dy: f32, pitch: f32, len: usize) -> usize {
+    let to = from as f32 + (dy / pitch).round();
+    to.clamp(0.0, len.saturating_sub(1) as f32) as usize
+}
+
+/// Whether row `n` of `list` is the one being dragged.
+fn is_dragged(s: &App, list: ReorderList, n: usize) -> bool {
+    s.reorder.is_some_and(|o| o.list == list && o.from == n)
+}
+
+/// How far row `n` of `list` shifts while a drag reorders it: the dragged row follows the
+/// pointer, and the rows it passes slide one row aside. Zero when no drag of `list` is on.
+fn reorder_shift(s: &App, list: ReorderList, n: usize) -> f32 {
+    let Some(o) = s.reorder.filter(|o| o.list == list) else { return 0.0 };
+    let to = reorder_target(o.from, o.dy, list.pitch(), list.len(s));
+    if n == o.from {
+        o.dy
+    } else if to > o.from && n > o.from && n <= to {
+        -list.pitch()
+    } else if to < o.from && n >= to && n < o.from {
+        list.pitch()
+    } else {
+        0.0
+    }
+}
+
+/// A row's grip, at its left edge: drag it to move the row, or press Alt+Up or Alt+Down while
+/// it has focus. `n` is the row's index in `list`.
+fn reorder_handle(key: String, list: ReorderList, n: usize, p: &Palette) -> El {
+    let own = key.clone();
+    el().key(key)
+        .size(GRIP_W, 24.0)
+        .radius(2.0)
+        .center()
+        .hover(p.ui.alpha(0.6))
+        .press(p.ui)
+        .cursor(Cursor::Grab)
+        .label("Drag to reorder")
+        .help("Drag to reorder; Alt+↑ and Alt+↓ move it too")
+        .focusable(true)
+        .child(icon(&icons::GRIP, 14.0).color(p.tx2))
+        .on_drag(move |s: &mut App, d: &mut rune::Drag, _tx: &mut Tx| match d.phase {
+            rune::Phase::Down => s.reorder = Some(Reorder { list, from: n, dy: 0.0 }),
+            rune::Phase::Move => {
+                if let Some(o) = s.reorder.as_mut() {
+                    o.dy = d.dy;
+                }
+            }
+            rune::Phase::Up => {
+                let taken = s.reorder.take();
+                if taken.is_none() || d.cancelled() {
+                    return;
+                }
+                let to = reorder_target(n, d.dy, list.pitch(), list.len(s));
+                if to != n {
+                    list.move_item(s, n, to);
+                }
+            }
+        })
+        .on_key(move |s: &mut App, ev: &rune::KeyEvent, tx: &mut Tx| {
+            let to = match ev.key {
+                rune::Key::Up if ev.mods.alt => n.checked_sub(1),
+                rune::Key::Down if ev.mods.alt => Some(n + 1).filter(|&to| to < list.len(s)),
+                _ => None,
+            };
+            let Some(to) = to else { return false };
+            list.move_item(s, n, to);
+            // A sort's grip is keyed by its place; a column's by its name, which moves with it.
+            let next = match list {
+                ReorderList::Sorts => format!("sort{to}-handle"),
+                ReorderList::Columns => own.clone(),
+            };
+            tx.focus(next, true);
+            true
+        })
 }
 
 // Shared pieces

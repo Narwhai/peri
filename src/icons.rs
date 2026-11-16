@@ -115,7 +115,11 @@ line_icon!(PLUS, "rm-plus", "M12 5 V19", "M5 12 H19");
 line_icon!(TRASH, "rm-trash", "M4 7 H20", "M9 7 V4.5 H15 V7", "M6 7 L7 20 H17 L18 7", "M10 11 V16", "M14 11 V16");
 line_icon!(EDIT, "rm-edit", "M4 20 H8 L19 9 L15 5 L4 16 Z", "M13 7 L17 11");
 line_icon!(COPY, "rm-copy", "M8 8 H20 V20 H8 Z", "M16 8 V4 H4 V16 H8");
-line_icon!(ARROW_UP, "rm-arrow-up", "M12 19 V5", "M6 11 L12 5 L18 11");
+pub static GRIP: Icon = Icon {
+    name: "rm-grip",
+    view: 24.0,
+    body: r#"<circle cx="9" cy="5.5" r="1.7" fill="currentColor"/><circle cx="9" cy="12" r="1.7" fill="currentColor"/><circle cx="9" cy="18.5" r="1.7" fill="currentColor"/><circle cx="15" cy="5.5" r="1.7" fill="currentColor"/><circle cx="15" cy="12" r="1.7" fill="currentColor"/><circle cx="15" cy="18.5" r="1.7" fill="currentColor"/>"#,
+};
 line_icon!(COLLAPSE, "rm-collapse", "M7 9 L12 4 L17 9", "M7 15 L12 20 L17 15");
 line_icon!(EXPAND, "rm-expand", "M7 4 L12 9 L17 4", "M7 20 L12 15 L17 20");
 pub static HOUSE: Icon = stroked!("rm-house", "M4 10.5 L12 4 L20 10.5", "M6 9 V19.5 H10 V14.5 H14 V19.5 H18 V9");

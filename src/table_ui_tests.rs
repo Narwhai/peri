@@ -68,11 +68,30 @@ fn columns_show_and_hide_from_the_popover_and_save_with_the_view() {
     assert_eq!(rt.state.views.active().columns, [Property::Artist, Property::Duration, Property::Producer]);
     assert_eq!(cell(&rt, &dance, "col-producer").as_deref(), Some("Brian Eno"));
     assert!(cell(&rt, &dance, "col-album").is_none());
-    // ↑ moves Producer before Duration.
-    click(&mut rt, "column-producer-up");
+    // Dragging Producer's grip up one row moves it before Duration.
+    drag_vertical(&mut rt, "column-producer-handle", -32.0);
     assert_eq!(rt.state.views.active().columns, [Property::Artist, Property::Producer, Property::Duration]);
     click(&mut rt, "columns-reset");
     assert_eq!(rt.state.views.active().columns, crate::query::view::default_columns());
+}
+
+#[test]
+fn dragging_a_column_grip_across_rows_reorders_and_escape_cancels() {
+    let mut rt = runtime();
+    click(&mut rt, "columns");
+    click(&mut rt, "column-producer");
+    click(&mut rt, "column-album");
+    assert_eq!(rt.state.views.active().columns, [Property::Artist, Property::Duration, Property::Producer]);
+    // Producer, the last shown column, dragged up past both others.
+    drag_vertical(&mut rt, "column-producer-handle", -64.0);
+    assert_eq!(rt.state.views.active().columns, [Property::Producer, Property::Artist, Property::Duration]);
+    // A drag that Escape cancels keeps the order.
+    let (x, y) = drag_held(&mut rt, "column-producer-handle", 64.0);
+    rt.physical_input(rune::PhysicalInput::Key { key: rune::PhysicalKeyCode::Escape, mods: Default::default(), pressed: true, repeat: false });
+    rt.pointer_up(x, y);
+    settle(&mut rt);
+    assert_eq!(rt.state.views.active().columns, [Property::Producer, Property::Artist, Property::Duration]);
+    assert!(rt.state.reorder.is_none(), "the drag ends with the cancel");
 }
 
 #[test]
@@ -218,6 +237,29 @@ fn real_details_dialog() {
 /// The laid-out width of the first element keyed `key` (a row's cell or a header).
 fn width_of(rt: &Runtime<App>, key: &str) -> f32 {
     rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).unwrap_or_else(|| panic!("no {key}")).rect[2]
+}
+
+/// Drags the element keyed `key` by `dy` points, in steps as a hand moves.
+fn drag_vertical(rt: &mut Runtime<App>, key: &str, dy: f32) {
+    let (x, y) = rt.find(key).unwrap_or_else(|| panic!("no element {key}"));
+    rt.pointer_down(x, y);
+    for step in 1..=4 {
+        rt.pointer_move(x, y + dy * step as f32 / 4.0);
+        rt.frame(1.0 / 60.0);
+    }
+    rt.pointer_up(x, y + dy);
+    settle(rt);
+}
+
+/// Presses the grip `key`, drags it by `dy`, and leaves the pointer held: the caller ends the gesture.
+fn drag_held(rt: &mut Runtime<App>, key: &str, dy: f32) -> (f32, f32) {
+    let (x, y) = rt.find(key).unwrap_or_else(|| panic!("no element {key}"));
+    rt.pointer_down(x, y);
+    for step in 1..=4 {
+        rt.pointer_move(x, y + dy * step as f32 / 4.0);
+        rt.frame(1.0 / 60.0);
+    }
+    (x, y + dy)
 }
 
 fn drag(rt: &mut Runtime<App>, key: &str, dx: f32) {

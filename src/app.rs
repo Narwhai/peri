@@ -63,6 +63,22 @@ pub enum Panel {
     LinkArtist,
 }
 
+/// A popover list whose rows a grip drags into a new order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReorderList {
+    Sorts,
+    Columns,
+}
+
+/// A row being dragged by its grip: `from` is its index in `list`, and `dy` how far the pointer
+/// has moved since the press.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Reorder {
+    pub list: ReorderList,
+    pub from: usize,
+    pub dy: f32,
+}
+
 /// What fills the space between the toolbar and the player.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Page {
@@ -187,6 +203,8 @@ pub struct App {
     pub panel: Option<Panel>,
     /// The popover select that's open, by key.
     pub open_select: Option<String>,
+    /// The drag of a sort or column grip in progress, if any.
+    pub reorder: Option<Reorder>,
     /// The view being renamed in the views popover.
     pub renaming: Option<usize>,
     /// The rename field's editor. Always present: the runtime still reaches it to blur the
@@ -310,6 +328,7 @@ impl App {
             collapsed: Default::default(),
             panel: None,
             open_select: None,
+            reorder: None,
             renaming: None,
             rename: TextEdit::new(""),
             filter_edits: Default::default(),
@@ -1529,6 +1548,7 @@ impl App {
         self.panel = None;
         self.open_select = None;
         self.renaming = None;
+        self.reorder = None;
     }
 
     pub fn toggle_panel(&mut self, panel: Panel) {

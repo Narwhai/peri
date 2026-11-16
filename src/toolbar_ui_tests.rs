@@ -33,6 +33,18 @@ fn click(rt: &mut Runtime<App>, key: &str) {
     settle(rt);
 }
 
+/// Drags the element keyed `key` by `dy` points, in steps as a hand moves.
+fn drag_down(rt: &mut Runtime<App>, key: &str, dy: f32) {
+    let (x, y) = rt.find(key).unwrap_or_else(|| panic!("no element {key}"));
+    rt.pointer_down(x, y);
+    for step in 1..=4 {
+        rt.pointer_move(x, y + dy * step as f32 / 4.0);
+        rt.frame(1.0 / 60.0);
+    }
+    rt.pointer_up(x, y + dy);
+    settle(rt);
+}
+
 fn type_text(rt: &mut Runtime<App>, text: &str) {
     for c in text.chars() {
         rt.key(KeyEvent { key: Key::Text(c.to_string()), mods: Mods::default() });
@@ -248,7 +260,7 @@ fn sorts_are_added_reordered_and_flipped_from_the_popover() {
     assert_eq!(titles(&rt)[0], "Meditation #1", "longest first");
     click(&mut rt, "add-sort");
     choose(&mut rt, "sort1-prop", "Year");
-    click(&mut rt, "sort1-up");
+    drag_down(&mut rt, "sort1-handle", -36.0);
     let sorts = &rt.state.views.active().sorts;
     assert_eq!((sorts[0].property, sorts[1].property), (Property::Year, Property::Duration));
     assert_eq!(titles(&rt)[0], "Meditation #1", "1980 first, then the longest of them");
