@@ -6,7 +6,7 @@ use super::table;
 use super::*;
 use crate::album::{Album, ReleaseType};
 use crate::credits::{self, Role};
-use crate::app::{App, album_key, grid_key};
+use crate::app::{App, SongMenuTarget, album_key, grid_key};
 use crate::icons;
 use crate::library::Track;
 use crate::palette::Palette;
@@ -150,6 +150,7 @@ fn grid_card(s: &App, a: usize, section: Option<usize>, w: f32, p: &Palette) -> 
         .role("link")
         .label(format!("{} by {}", album.title, album.artist_name()))
         .on_press_tx(move |s: &mut App, tx| s.show_album(a, tx))
+        .on_secondary_press(move |s: &mut App, at, _tx| s.song_menu = Some((SongMenuTarget::Album(a), at)))
         .child(art)
         .child(el().h(6.0))
         .child(text(album.title.clone()).font(TITLE).color(title_color).truncate())
@@ -175,6 +176,7 @@ pub(super) fn list_card(s: &App, a: usize, section: Option<usize>, p: &Palette) 
         .child(row().gap(8.0).child(play_button("play-album", "Play album", p).on_press_tx(move |s: &mut App, tx| s.play_album(a, None, tx))));
     let card = col()
         .key(album_key(a, section))
+        .on_secondary_press(move |s: &mut App, at, _tx| s.song_menu = Some((SongMenuTarget::Album(a), at)))
         .w_full()
         .padding(16.0)
         .radius(2.0)
@@ -222,6 +224,7 @@ fn track_line(s: &App, t: &Track, i: usize, n: usize, a: usize, columns: table::
         .label(format!("{} by {}", t.title, t.artist().as_deref().unwrap_or(s.albums()[a].artist_name())))
         .on_press(move |s: &mut App| s.selected = Some(i))
         .on_double_press_tx(move |s: &mut App, tx| s.play_album(a, Some(i), tx))
+        .on_secondary_press(move |s: &mut App, at, _tx| s.song_menu = Some((SongMenuTarget::Track(i), at)))
 }
 
 pub(super) fn play_button(key: &'static str, label: &'static str, p: &Palette) -> El {
@@ -509,6 +512,7 @@ pub(super) fn small_card(s: &App, key: &str, o: usize, artists: bool, width: f32
         .role("link")
         .label(other.title.clone())
         .on_press_tx(move |s: &mut App, tx| s.show_album(o, tx))
+        .on_secondary_press(move |s: &mut App, at, _tx| s.song_menu = Some((SongMenuTarget::Album(o), at)))
         .child(cover(format!("{key}-cover{o}"), cover_image(s, other), Some(width - 12.0), p))
         .child(text(other.title.clone()).font(TITLE).color(p.tx).truncate());
     if artists {

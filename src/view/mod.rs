@@ -10,16 +10,18 @@ mod home;
 mod labels;
 mod list;
 mod player;
+mod queue;
 #[cfg(test)]
 pub(crate) use player::VOLUME_DRAG;
 mod search;
+mod song_menu;
 mod settings;
 mod table;
 mod toolbar;
 
 use std::ops::Range;
 
-use rune::{Color, Cursor, Cx, El, Icon, LineCap, Link, LinkPaint, Path, PointerButton, Shape, Spring, TextStyle, col, el, icon, row, text};
+use rune::{Color, Cursor, Cx, El, Icon, LineCap, Link, LinkPaint, Path, PointerButton, PointerPress, Shape, Spring, TextStyle, col, el, icon, row, text};
 use rune_kit::{Kit, PaletteSeed, TextInput};
 
 use crate::app::App;
@@ -71,17 +73,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         .fill(p.bg)
         .child(header(s, zoom, &p, &kit, cx))
         .children(toolbar)
-        .child(match (s.open_album(), s.open_artist(), s.open_label(), s.open_collab()) {
-            (Some(a), _, _, _) => albums::album_page(s, a, &p),
-            (None, Some(name), _, _) => artists::artist_page(s, name, &p, &kit, &mut layer),
-            (None, None, Some(name), _) => labels::label_page(s, name, &p),
-            (None, None, None, Some(names)) => collab::collab_page(s, names, &p),
-            (None, None, None, None) if s.page == crate::app::Page::Search => search::search_page(s, &p),
-            (None, None, None, None) if s.page == crate::app::Page::Settings => settings::settings_page(s, &p, &kit),
-            (None, None, None, None) if s.page == crate::app::Page::Graph => graph::graph_page(s, &p, &kit, &mut layer),
-            (None, None, None, None) if s.page == crate::app::Page::Home => home::home_page(s, &p),
-            (None, None, None, None) => list::list(s, &p, cx),
-        })
+        .child(page_row(s, &p, cx, &kit, zoom, &mut layer))
         .child(player::now_playing(s, &p))
         // The mouse's back and forward buttons, anywhere a control doesn't take them.
         .pointer_buttons([PointerButton::Back, PointerButton::Forward])
@@ -108,8 +100,33 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     });
     layer.extend(drop_veil);
     details::details_dialog(s, &p, &kit, &mut layer);
+    queue::replace_dialog(s, &p, &kit, &mut layer);
+    song_menu::song_menu(s, &kit, zoom, &mut layer);
     layer.extend(zoom_toast(s, zoom, &p));
     zoomed(window, zoom, &p, rune_kit::root(body, layer))
+}
+
+/// The page between the header and the player bar. Pinned, the queue panel docks beside it;
+/// otherwise it floats over the page's right edge.
+fn page_row(s: &App, p: &Palette, cx: &mut Cx<App>, kit: &Kit, zoom: f32, layer: &mut Vec<El>) -> El {
+    let page = match (s.open_album(), s.open_artist(), s.open_label(), s.open_collab()) {
+        (Some(a), _, _, _) => albums::album_page(s, a, p),
+        (None, Some(name), _, _) => artists::artist_page(s, name, p, kit, layer),
+        (None, None, Some(name), _) => labels::label_page(s, name, p),
+        (None, None, None, Some(names)) => collab::collab_page(s, names, p),
+        (None, None, None, None) if s.page == crate::app::Page::Search => search::search_page(s, p),
+        (None, None, None, None) if s.page == crate::app::Page::Settings => settings::settings_page(s, p, kit),
+        (None, None, None, None) if s.page == crate::app::Page::Graph => graph::graph_page(s, p, kit, zoom, layer),
+        (None, None, None, None) if s.page == crate::app::Page::Home => home::home_page(s, p),
+        (None, None, None, None) => list::list(s, p, cx),
+    };
+    let shown = s.queue_shown.then(|| queue::panel(s, p));
+    if s.queue_pinned {
+        return row().key("page-row").w_full().grow(1.0).min_h(0.0).child(page.grow(1.0).shrink()).children(shown);
+    }
+    // Floating: the panel sits over the page's right edge, clear of the header and the bar.
+    let panel = shown.map(|panel| el().key("queue-float").pin(None, Some(queue::PANEL_GAP), Some(queue::PANEL_GAP), Some(queue::PANEL_GAP)).child(panel));
+    col().key("page-row").w_full().grow(1.0).min_h(0.0).child(page).children(panel)
 }
 
 /// The zoom the app draws at in a `window`-sized window: the user's, less when that would lay
@@ -117,6 +134,12 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
 pub fn applied_zoom(zoom: f32, [w, h]: [f32; 2]) -> f32 {
     let fits = (w / MIN_SIZE.0).min(h / MIN_SIZE.1).max(1.0);
     zoom.min(fits)
+}
+
+/// A window point as the overlay layer lays it out: the layer is inside the zoomed app, so a
+/// press in window points is divided by `zoom` to land under the pointer.
+fn unzoomed(at: PointerPress, zoom: f32) -> PointerPress {
+    PointerPress { x: at.x / zoom, y: at.y / zoom }
 }
 
 /// The app at `zoom`: laid out `1 / zoom` the window's size, drawn `zoom` times as large from
@@ -367,7 +390,7 @@ fn toggle_icon(key: &'static str, glyph: &'static Icon, on: bool, help: &str, p:
     b
 }
 
-fn pill_button(key: &'static str, label: &'static str, p: &Palette) -> El {
+pub(super) fn pill_button(key: &'static str, label: &'static str, p: &Palette) -> El {
     el()
         .key(key)
         .h(28.0)

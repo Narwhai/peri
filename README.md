@@ -23,6 +23,9 @@ On Linux, building needs `libxkbcommon`, `wayland` and `alsa-lib` (PipeWire work
 - A virtualised track list, so large libraries scroll smoothly.
 - A now-playing bar with cover art (embedded, else `cover.jpg`/`folder.jpg` next to the file).
 - Play/pause, previous/next, a seek bar, volume and mute, shuffle, and repeat (off/all/one).
+- **The queue** (the Queue button in the bar, or Q) lists what plays next, with the songs already played above the current one. It floats over the page, or **pin** it to dock it beside the page; a pinned queue opens at launch. Double-click a row to play it, drag a grip to reorder the upcoming songs, and × removes a row. Double-clicking a song in a list starts a new queue from it.
+- Right-click a song, album or album card for **Play Next** (right after the current song) or **Play After** (at the end of the queue). A song's menu also has **Song details**.
+- Starting a new list over a queue you've edited asks first: **Replace queue** drops the upcoming songs, **Keep added songs** keeps the ones you added. **Don't ask again** remembers the answer. **Settings → Queue** sets it outright (Ask, Replace queue or Keep added songs).
 
 ## Last.fm scrobbling
 
@@ -162,11 +165,13 @@ The **Graph** tab (next to **Library** at the top left) shows every artist in th
 | Ctrl+F or / | Search (Esc clears it, Enter plays the first match) |
 | Ctrl+O | Open a folder |
 | Ctrl+= / Ctrl+- / Ctrl+0 | Zoom in / out / back to 100% |
-| S / R / M | Shuffle / repeat / mute |
+| S / R / M / Q | Shuffle / repeat / mute / the queue panel |
 | I | Song details for the selected (else playing) song |
-| Esc | Close a toolbar popover or the details dialog, or go back from an album or artist page |
+| Esc | Close a toolbar popover, the queue panel or the details dialog, or go back from an album or artist page |
 
 Double-click a row to play it. Ctrl is Cmd on macOS.
+
+**Queue:** the queue saves to `queue.json` beside `prefs.json` on every change: its order, which songs were added or moved or removed, the place it's at and how far into the song. Play restores it paused at that second. The pin is saved in `prefs.json` as `queue_pinned`; whether the panel is shown is not, so a floating panel starts hidden. If the playing song leaves the library, the queue stops and its file is deleted.
 
 **Zoom:** the slider in the header (or the keys above) zooms the whole window from 50% to 200%; click the level to reset it. A window too small for the zoom draws at what fits (shown as "max …%") and keeps the zoom for when it's bigger. The zoom saves under `zoom` in `prefs.json`.
 
@@ -177,7 +182,7 @@ cargo test                                                   # unit + headless U
 PERI_MUSIC_DIR=~/Music cargo test --release real_library -- --ignored --nocapture
 PERI_MUSIC_FILE=song.flac cargo test --release real_output -- --ignored   # plays muted
 PERI_MUSIC_DIR=~/Music cargo test --release real_library_groups -- --ignored --nocapture
-cargo run -- --snap out.png --scene playing --theme light    # scenes: library playing search error grouped filter views sort albums album-list album artist related link label collab graph home
+cargo run -- --snap out.png --scene playing --theme light    # scenes: library playing search error grouped filter views sort albums album-list album artist related link label collab graph home queue queue-pinned
 ```
 
 Headless runs (`--snap`, `--script`, `--tree`) never open the audio device and keep views in memory.

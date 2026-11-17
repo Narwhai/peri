@@ -5,6 +5,7 @@ use rune::{Cursor, El, ScrollPos, ScrollSpec, Tx, col, el, icon, row, text};
 use super::albums::{CARD_GAP, small_card};
 use super::table;
 use super::*;
+use crate::app::SongMenuTarget;
 use crate::query::property::Property;
 use crate::palette::Palette;
 
@@ -128,4 +129,5 @@ fn song_line(s: &App, i: usize, list: &[usize], stripe: bool, columns: table::Co
         .cursor(Cursor::Pointer)
         .on_press(move |s: &mut App| s.selected = Some(i))
         .on_double_press_tx(move |s: &mut App, tx| s.play_list(list.clone(), i, tx))
+        .on_secondary_press(move |s: &mut App, at, _tx| s.song_menu = Some((SongMenuTarget::Track(i), at)))
 }

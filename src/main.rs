@@ -41,6 +41,14 @@ mod home_ui_tests;
 #[cfg(test)]
 mod label_ui_tests;
 #[cfg(test)]
+mod queue_panel_ui_tests;
+#[cfg(test)]
+mod queue_ui_tests;
+
+#[cfg(test)]
+mod queue_menu_ui_tests;
+
+#[cfg(test)]
 mod lastfm_ui_tests;
 #[cfg(test)]
 mod scroll_ui_tests;
@@ -318,6 +326,33 @@ fn scene_settings(s: &mut App) {
     s.show_settings();
 }
 
+/// The library playing from its third song, with a queue of the whole library: one played song
+/// above the current one, two songs Play Next added after it, and the queue panel open.
+fn scene_queue_pinned(s: &mut App) {
+    scene_queue(s);
+    s.queue_pinned = true;
+}
+
+fn scene_queue(s: &mut App) {
+    scene_library(s);
+    let all: Vec<usize> = (0..s.tracks().len()).collect();
+    let index = |title: &str| s.tracks().iter().position(|t| t.title == title);
+    let added: Vec<usize> = ["ETA", "Says"].iter().filter_map(|t| index(t)).collect();
+    let mut rng = queue::Rng::new(7);
+    let start = all.get(2).copied().unwrap_or(0);
+    let mut queue = queue::Queue::new(all, start, false, &mut rng);
+    // Play Next puts the added songs right after the current one, in order.
+    queue.play_next(&added);
+    s.current = Some(start);
+    s.selected = Some(start);
+    s.queue = Some(queue);
+    s.playing = false;
+    s.position = 61.0;
+    s.repeat = queue::Repeat::All;
+    s.queue_pinned = false;
+    s.queue_shown = true;
+}
+
 /// The demo library with some songs played, on the Home tab: the newest albums and the songs
 /// played last. Each album's `added` is its year, so the newest is Live Sessions.
 fn scene_home(s: &mut App) {
@@ -340,7 +375,8 @@ fn scene_graph(s: &mut App) {
 }
 
 fn main() {
-    rune::run(AppSpec {
+    // `rune::run` is `App::new(spec).run()`; `App` alone takes the close hook.
+    rune::App::new(AppSpec {
         scenes: &[
             ("library", scene_library),
             ("playing", scene_playing),
@@ -362,11 +398,15 @@ fn main() {
             ("settings", scene_settings),
             ("graph", scene_graph),
             ("home", scene_home),
+            ("queue", scene_queue),
+            ("queue-pinned", scene_queue_pinned),
         ],
         min_size: Some(view::MIN_SIZE),
         setup: Some(setup),
         poll: Some(app::poll),
         on_key: Some(app::on_key),
         ..AppSpec::new("Peri", (980.0, 640.0), init, view::view)
-    });
+    })
+    .on_close(app::on_close)
+    .run();
 }

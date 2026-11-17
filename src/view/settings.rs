@@ -74,6 +74,7 @@ pub(super) fn settings_page(s: &App, p: &Palette, kit: &Kit) -> El {
         .child(back)
         .child(text("Settings").key("settings-title").font(PAGE_TITLE).color(p.tx))
         .child(appearance_section(s, p))
+        .child(queue_section(s, p))
         .child(section)
         .child(lastfm_section(s, p, kit));
     col().key("settings-page").w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: false }).child(body)
@@ -100,6 +101,18 @@ fn appearance_section(s: &App, p: &Palette) -> El {
         .child(text("Mode follows the system unless set to Light or Dark.").font(BODY).color(p.tx3).wrap())
         .child(field("Theme", theme))
         .child(field("Mode", mode))
+}
+
+/// What a new list does over an edited queue.
+fn queue_section(s: &App, p: &Palette) -> El {
+    let field = row().w_full().gap(12.0).center_y().child(text("Starting a list over an edited queue".to_string()).font(BODY).color(p.tx2).w(110.0).wrap()).child(super::queue::policy_control(s, p));
+    col()
+        .key("settings-queue")
+        .w_full()
+        .gap(10.0)
+        .child(text("Queue").font(HEADING).color(p.tx))
+        .child(text("Asked about when the queue has songs you added or moved. Replace queue drops the upcoming songs; Keep added songs keeps the ones you added.").font(BODY).color(p.tx3).wrap())
+        .child(field)
 }
 
 /// A round icon button with a runtime key.

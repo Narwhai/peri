@@ -6,7 +6,7 @@ use std::rc::Rc;
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use std::time::Duration;
 
-use rune::{FileDialogOptions, Key, KeyEvent, Live, TextEdit, Tx, Waker};
+use rune::{FileDialogOptions, Key, KeyEvent, Live, PointerPress, TextEdit, Tx, Waker};
 use serde::{Deserialize, Serialize};
 
 use crate::album::{self, Album, AlbumId};
@@ -17,14 +17,14 @@ use crate::pages::{ArtistModel, Pages};
 use crate::search::SearchResults;
 use crate::collab::CollabPage;
 use crate::label::LabelPage;
-use crate::query::store::{Views, Store};
+use crate::query::store::{SavedEntry, SavedQueue, Store, QUEUE_VERSION, Views};
 use crate::query::view::{Evaluated, Layout, Section, Widths, evaluate};
 use crate::lastfm::{self, scrobbling::{Effect, Scrobbling}};
 use crate::library::{self, ScanMsg, Track};
 use crate::listen::{Listen, unix_now};
 use crate::palette::{Appearance, Theme};
 use crate::plays::Plays;
-use crate::queue::{Queue, Repeat, Rng};
+use crate::queue::{Entry, Queue, QueueReplace, Repeat, Rng};
 
 /// How often the view refreshes the playback position while a track plays.
 const TICK: Duration = Duration::from_millis(200);
@@ -42,6 +42,10 @@ pub const SEEK_STEP: f64 = 5.0;
 const RESTART_AFTER: f64 = 3.0;
 /// How many songs and albums the home page lists.
 pub const RECENT_COUNT: usize = 20;
+/// The queue panel's scroll view, and one row's height in it (its rows are a fixed height so the
+/// scroll offset is computable).
+pub const QUEUE_LIST_KEY: &str = "queue-list";
+pub const QUEUE_ROW_H: f32 = 52.0;
 
 /// Where sound goes.
 pub enum Output {
@@ -50,6 +54,22 @@ pub enum Output {
     Open(Engine),
     /// Headless runs and tests: playback state changes, nothing sounds and time stands still.
     Silent,
+}
+
+/// A list to start once the user has said what happens to an edited queue.
+pub struct PendingPlay {
+    queue: Queue,
+    start: usize,
+    /// The shuffle setting the start sets, if it sets one.
+    shuffle: Option<bool>,
+}
+
+/// The user's answer to the queue-replacement question.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum QueueChoice {
+    Replace,
+    KeepAdded,
+    Cancel,
 }
 
 pub struct Scan {
@@ -76,6 +96,8 @@ pub enum Panel {
 pub enum ReorderList {
     Sorts,
     Columns,
+    /// The queue panel's entries; only the upcoming ones move.
+    Queue,
 }
 
 /// A row being dragged by its grip: `from` is its index in `list`, and `dy` how far the pointer
@@ -140,6 +162,13 @@ pub enum ArtistTab {
     Releases,
     /// Every song on their releases in one table.
     Songs,
+}
+
+/// What a song menu acts on: one song or one album.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SongMenuTarget {
+    Track(usize),
+    Album(usize),
 }
 
 pub struct App {
@@ -239,9 +268,26 @@ pub struct App {
     /// Index into `tracks` of the loaded track.
     pub current: Option<usize>,
     pub queue: Option<Queue>,
+    /// What a new list does over an edited queue, saved.
+    pub queue_replace: QueueReplace,
+    /// The queue panel is pinned: docked beside the page and shown at launch. Saved.
+    pub queue_pinned: bool,
+    /// The queue panel is showing. Pinned, it's docked; otherwise it floats over the page.
+    /// Not saved: a pinned panel starts shown, an unpinned one starts hidden.
+    pub queue_shown: bool,
+    /// The replace prompt's "Don't ask again" checkbox, while the prompt is open.
+    pub queue_dont_ask: bool,
+    /// A restored queue's panel scrolls to its place once it's on screen: the next `poll`.
+    queue_scroll_due: bool,
+    /// A list waiting on the user's answer, when the queue was edited and the policy is to ask.
+    pub pending_play: Option<PendingPlay>,
+    /// The queue saved at the last exit, restored once the library loads.
+    queue_restore: Option<SavedQueue>,
+    /// Until the first library load: nothing is saved, so the saved queue isn't lost first.
+    restore_pending: bool,
+    /// The track isn't loaded yet (restored, or the queue ran out): Play loads it at `position`.
+    resume: bool,
     pub playing: bool,
-    /// The queue ran out: play starts the current track again.
-    pub ended: bool,
     /// Seconds into the current track.
     pub position: f64,
     /// While the seek bar is dragged: where it would land, as a fraction of the track.
@@ -257,6 +303,8 @@ pub struct App {
     pub drop_hover: bool,
     /// The open song details dialog.
     pub details: Option<DetailsDialog>,
+    /// The open right-click menu on a song, album or list, and the point it opened at.
+    pub song_menu: Option<(SongMenuTarget, PointerPress)>,
     output: Output,
     rng: Rng,
     waker: Option<Waker>,
@@ -305,6 +353,18 @@ impl App {
         let (appearance, appearance_error) = match store.load_appearance() {
             Ok(appearance) => (appearance, None),
             Err(e) => (Appearance::default(), Some(e)),
+        };
+        let (queue_restore, queue_error) = match store.load_queue() {
+            Ok(saved) => (saved, None),
+            Err(e) => (None, Some(e)),
+        };
+        let (queue_replace, queue_replace_error) = match store.load_queue_replace() {
+            Ok(policy) => (policy, None),
+            Err(e) => (QueueReplace::default(), Some(e)),
+        };
+        let (queue_pinned, queue_pinned_error) = match store.load_queue_pinned() {
+            Ok(pinned) => (pinned, None),
+            Err(e) => (false, Some(e)),
         };
         let page = match tab {
             Some(Tab::Home) => Page::Home,
@@ -362,8 +422,16 @@ impl App {
             selected: None,
             current: None,
             queue: None,
+            queue_replace,
+            queue_pinned,
+            queue_shown: queue_pinned,
+            queue_dont_ask: false,
+            queue_scroll_due: false,
+            pending_play: None,
+            queue_restore,
+            restore_pending: true,
+            resume: false,
             playing: false,
-            ended: false,
             position: 0.0,
             seek_preview: None,
             volume: 0.8,
@@ -371,10 +439,11 @@ impl App {
             volume_before_drag: None,
             shuffle: false,
             repeat: Repeat::Off,
-            error: relations_error.clone().or(lastfm_error).or(plays_error).or(graph_error).or(tab_error).or(theme_error).or(appearance_error),
+            error: relations_error.clone().or(lastfm_error).or(plays_error).or(graph_error).or(tab_error).or(theme_error).or(appearance_error).or(queue_error).or(queue_replace_error).or(queue_pinned_error),
             scan: None,
             drop_hover: false,
             details: None,
+            song_menu: None,
             output,
             rng: Rng::from_time(),
             waker: None,
@@ -617,6 +686,10 @@ impl App {
                 self.stop();
             }
             None => {}
+        }
+        // The first library load restores the queue saved at the last exit.
+        if std::mem::take(&mut self.restore_pending) {
+            self.restore_queue();
         }
     }
 
@@ -1170,9 +1243,8 @@ impl App {
 
     /// Plays song `i` of `list`, queueing the rest of `list` (an artist's songs).
     pub fn play_list(&mut self, list: Vec<usize>, i: usize, tx: &mut Tx) {
-        self.selected = Some(i);
-        self.queue = Some(Queue::new(list, i, self.shuffle, &mut self.rng));
-        self.load(i, tx);
+        let shuffle = self.shuffle;
+        self.start_list(list, i, shuffle, None, tx);
     }
 
     /// Rebuilds the albums from the tracks, and the index from each track to its album.
@@ -1220,22 +1292,14 @@ impl App {
         let Some(album) = self.albums.get(a) else { return };
         let Some(&first) = from.or(album.tracks.first().copied()).as_ref() else { return };
         let list = if self.shown_albums.contains(&a) { self.filtered.clone() } else { album.tracks.clone() };
-        self.selected = Some(first);
-        self.queue = Some(Queue::new(list, first, false, &mut self.rng));
-        if self.shuffle {
-            self.shuffle = false;
-        }
-        self.load(first, tx);
+        self.start_list(list, first, false, Some(false), tx);
     }
 
     /// Plays view `v`'s songs from the first, in order, as the album page's Play does.
     pub fn play_view(&mut self, v: usize, tx: &mut Tx) {
         let list = if v == self.views.active { self.filtered.clone() } else { self.view_songs(v) };
         let Some(&first) = list.first() else { return };
-        self.selected = Some(first);
-        self.queue = Some(Queue::new(list, first, false, &mut self.rng));
-        self.shuffle = false;
-        self.load(first, tx);
+        self.start_list(list, first, false, Some(false), tx);
     }
 
     /// Shuffles album `a` alone.
@@ -1243,10 +1307,7 @@ impl App {
         let Some(album) = self.albums.get(a) else { return };
         let list = album.tracks.clone();
         let start = list[(self.rng.below(list.len() as u64)) as usize];
-        self.shuffle = true;
-        self.queue = Some(Queue::new(list, start, true, &mut self.rng));
-        self.selected = Some(start);
-        self.load(start, tx);
+        self.start_list(list, start, true, Some(true), tx);
     }
 
     fn rebuild_rows(&mut self) {
@@ -1397,20 +1458,235 @@ impl App {
 
     /// Plays library track `i`, queueing the visible list around it.
     pub fn play_index(&mut self, i: usize, tx: &mut Tx) {
-        self.selected = Some(i);
-        self.queue = Some(Queue::new(self.filtered_or(i), i, self.shuffle, &mut self.rng));
-        self.load(i, tx);
+        self.start_list(self.filtered_or(i), i, self.shuffle, None, tx);
+    }
+
+    /// Starts a new list at `start`, shuffled when `shuffle`, and sets the shuffle flag to
+    /// `set_shuffle` when given. Over an edited queue the policy decides: `Ask` holds the list
+    /// in `pending_play` until the user answers.
+    fn start_list(&mut self, list: Vec<usize>, start: usize, shuffle: bool, set_shuffle: Option<bool>, tx: &mut Tx) {
+        let fresh = Queue::new(list, start, shuffle, &mut self.rng);
+        if !self.edited_with_upcoming() {
+            return self.commit_list(fresh, start, set_shuffle, tx);
+        }
+        match self.queue_replace {
+            QueueReplace::Replace => self.commit_list(fresh, start, set_shuffle, tx),
+            QueueReplace::KeepAdded => {
+                let kept = self.keep_added(fresh);
+                self.commit_list(kept, start, set_shuffle, tx);
+            }
+            QueueReplace::Ask => self.pending_play = Some(PendingPlay { queue: fresh, start, shuffle: set_shuffle }),
+        }
+    }
+
+    /// Makes `queue` the playing list and starts its track `start`.
+    fn commit_list(&mut self, queue: Queue, start: usize, set_shuffle: Option<bool>, tx: &mut Tx) {
+        self.selected = Some(start);
+        self.queue = Some(queue);
+        if let Some(shuffle) = set_shuffle {
+            self.shuffle = shuffle;
+        }
+        self.load(start, tx);
+    }
+
+    /// Whether the queue has been edited and has tracks still to play: the case that asks first.
+    fn edited_with_upcoming(&self) -> bool {
+        self.queue.as_ref().is_some_and(|q| q.edited() && !q.upcoming().is_empty())
+    }
+
+    /// `fresh` with the current queue's upcoming added tracks kept after its current track.
+    fn keep_added(&self, fresh: Queue) -> Queue {
+        match &self.queue {
+            Some(old) => old.replace_keeping_added(fresh),
+            None => fresh,
+        }
+    }
+
+    /// Whether the queue has upcoming tracks the user added (for the replace question).
+    pub fn pending_has_added(&self) -> bool {
+        self.queue.as_ref().is_some_and(|q| q.upcoming().iter().any(|e| e.added))
+    }
+
+    /// Sets what a new list does over an edited queue, and saves it.
+    pub fn set_queue_replace(&mut self, policy: QueueReplace) {
+        self.queue_replace = policy;
+        if let Err(e) = self.store.save_queue_replace(policy) {
+            self.error = Some(e);
+        }
+    }
+
+    /// Answers the pending list's question: `remember` saves a Replace or KeepAdded answer as
+    /// Drops the pending list: the question was cancelled, or closed without an answer.
+    pub fn cancel_pending_play(&mut self) {
+        self.pending_play = None;
+        self.queue_dont_ask = false;
+    }
+
+    /// the policy. Cancel drops the list and changes nothing.
+    pub fn resolve_pending_play(&mut self, choice: QueueChoice, remember: bool, tx: &mut Tx) {
+        let Some(pending) = self.pending_play.take() else { return };
+        let (policy, keep) = match choice {
+            QueueChoice::Cancel => return,
+            QueueChoice::Replace => (QueueReplace::Replace, false),
+            QueueChoice::KeepAdded => (QueueReplace::KeepAdded, true),
+        };
+        if remember {
+            self.set_queue_replace(policy);
+        }
+        let queue = if keep { self.keep_added(pending.queue) } else { pending.queue };
+        self.commit_list(queue, pending.start, pending.shuffle, tx);
+    }
+
+    /// Play Next (`next`) or Play After: adds `tracks` to the queue. With no queue, they start one.
+    fn queue_add(&mut self, tracks: Vec<usize>, next: bool, tx: &mut Tx) {
+        let Some(&first) = tracks.first() else { return };
+        if let Some(q) = self.queue.as_mut() {
+            if next { q.play_next(&tracks) } else { q.play_after(&tracks) }
+            self.save_queue();
+            return;
+        }
+        let queue = Queue::new(tracks, first, false, &mut self.rng);
+        self.commit_list(queue, first, None, tx);
+    }
+
+    /// Queues `tracks` to play right after the current track, in order.
+    pub fn queue_play_next(&mut self, tracks: Vec<usize>, tx: &mut Tx) {
+        self.queue_add(tracks, true, tx);
+    }
+
+    /// Queues `tracks` to play at the end of the queue.
+    pub fn queue_play_after(&mut self, tracks: Vec<usize>, tx: &mut Tx) {
+        self.queue_add(tracks, false, tx);
+    }
+
+    /// Removes queue entry `index`; the playing track can't be removed.
+    pub fn queue_remove(&mut self, index: usize) {
+        if self.queue.as_mut().is_some_and(|q| q.remove(index)) {
+            self.save_queue();
+        }
+    }
+
+    /// Moves upcoming queue entry `from` to `to`.
+    pub fn queue_move(&mut self, from: usize, to: usize) {
+        if self.queue.as_mut().is_some_and(|q| q.move_entry(from, to)) {
+            self.save_queue();
+        }
+    }
+
+    /// Plays queue entry `index` now.
+    pub fn queue_jump(&mut self, index: usize, tx: &mut Tx) {
+        let Some(track) = self.queue.as_mut().and_then(|q| q.jump(index)) else { return };
+        self.load(track, tx);
+    }
+
+    /// Shows or hides the queue panel. Shown, it scrolls to the track before the current one.
+    pub fn toggle_queue(&mut self, tx: &mut Tx) {
+        self.queue_shown = !self.queue_shown;
+        if self.queue_shown {
+            self.scroll_queue(tx);
+        }
+    }
+
+    /// Pins the panel beside the page, or lets it float over the page again. Pinning shows it.
+    pub fn set_queue_pinned(&mut self, pinned: bool, tx: &mut Tx) {
+        self.queue_pinned = pinned;
+        self.queue_shown |= pinned;
+        if let Err(e) = self.store.save_queue_pinned(pinned) {
+            self.error = Some(e);
+        }
+        if self.queue_shown {
+            self.scroll_queue(tx);
+        }
+    }
+
+    /// Scrolls the queue panel so the entry before the current one is its top row: one played
+    /// song shows above the current one, and the first entry when nothing has played.
+    pub fn scroll_queue(&self, tx: &mut Tx) {
+        let top = self.queue.as_ref().map_or(0, |q| q.pos().saturating_sub(1));
+        tx.scroll_to_instant(QUEUE_LIST_KEY, 0.0, top as f32 * QUEUE_ROW_H);
+    }
+
+    /// Saves the queue and where playback is in it. Nothing is saved before the first library
+    /// load, so a queue saved at the last exit isn't lost before it's restored.
+    fn save_queue(&mut self) {
+        if self.restore_pending {
+            return;
+        }
+        let saved = self.queue.as_ref().and_then(|q| self.saved_queue(q));
+        if let Err(e) = self.store.save_queue(saved.as_ref()) {
+            self.error = Some(e);
+        }
+    }
+
+    /// The queue as saved: tracks by path. None when the current track isn't in the library.
+    fn saved_queue(&self, q: &Queue) -> Option<SavedQueue> {
+        let path = |i: usize| self.tracks.get(i).map(|t| t.path.clone());
+        let base = q.base().iter().filter_map(|&i| path(i)).collect();
+        let removed = q.removed().iter().filter_map(|&i| path(i)).collect();
+        let mut order = Vec::with_capacity(q.entries().len());
+        let mut pos = None;
+        for (n, e) in q.entries().iter().enumerate() {
+            let Some(path) = path(e.track) else { continue };
+            if n == q.pos() {
+                pos = Some(order.len());
+            }
+            order.push(SavedEntry { path, added: e.added, pinned: e.pinned });
+        }
+        Some(SavedQueue { version: QUEUE_VERSION, base, order, pos: pos?, edited: q.edited(), removed, shuffle: self.shuffle, seconds: self.position })
+    }
+
+    /// Restores the queue saved at the last exit, paused at its saved place. Tracks that left the
+    /// library are dropped; nothing is restored when the current one did.
+    fn restore_queue(&mut self) {
+        let Some(saved) = self.queue_restore.take() else { return };
+        if self.current.is_some() {
+            return;
+        }
+        let restored = {
+            let index: HashMap<&Path, usize> = self.tracks.iter().enumerate().map(|(i, t)| (t.path.as_path(), i)).collect();
+            let find = |p: &Path| index.get(p).copied();
+            let base = saved.base.iter().filter_map(|p| find(p.as_path())).collect();
+            let removed = saved.removed.iter().filter_map(|p| find(p.as_path())).collect();
+            let mut order = Vec::with_capacity(saved.order.len());
+            let mut pos = None;
+            for (n, e) in saved.order.iter().enumerate() {
+                let Some(track) = find(e.path.as_path()) else { continue };
+                if n == saved.pos {
+                    pos = Some(order.len());
+                }
+                order.push(Entry { track, added: e.added, pinned: e.pinned });
+            }
+            pos.and_then(|pos| Queue::from_parts(base, order, pos, saved.edited, removed))
+        };
+        let Some(queue) = restored else { return };
+        let track = queue.current();
+        let duration = self.tracks.get(track).and_then(|t| t.duration);
+        let seconds = duration.map_or(saved.seconds, |d| saved.seconds.min(d)).max(0.0);
+        self.queue = Some(queue);
+        self.queue_scroll_due = self.queue_shown;
+        self.shuffle = saved.shuffle;
+        self.current = Some(track);
+        self.selected = Some(track);
+        self.position = seconds;
+        // Not loaded yet: Play loads the track and starts it here.
+        self.resume = true;
+    }
+
+    /// The window title for track `i`: "Title — Artist", or just the title.
+    fn title_line(&self, i: usize) -> Option<String> {
+        let track = self.tracks.get(i)?;
+        Some(match track.artist() {
+            Some(artist) => format!("{} — {artist}", track.title),
+            None => track.title.clone(),
+        })
     }
 
     fn load(&mut self, i: usize, tx: &mut Tx) {
+        self.resume = false;
         let Some(track) = self.tracks.get(i) else { return };
         let path = track.path.clone();
-        let title = match track.artist() {
-            Some(artist) => format!("{} — {artist}", track.title),
-            None => track.title.clone(),
-        };
+        let title = self.title_line(i);
         self.current = Some(i);
-        self.ended = false;
         self.position = 0.0;
         self.seek_preview = None;
         let gain = audio::gain(self.volume, self.muted);
@@ -1427,9 +1703,14 @@ impl App {
             Ok(()) => {
                 self.playing = true;
                 self.error = None;
-                tx.set_title(title);
+                if let Some(title) = title {
+                    tx.set_title(title);
+                }
                 tx.wake_after(TICK);
                 self.listen = self.tracks.get(i).map(|t| Listen::new(t.duration));
+                if self.queue_shown {
+                    self.scroll_queue(tx);
+                }
                 if let Some(track) = self.tracks.get(i)
                     && let Err(e) = self.lastfm.started(track)
                 {
@@ -1443,6 +1724,7 @@ impl App {
                 self.lastfm.stopped();
             }
         }
+        self.save_queue();
     }
 
     pub fn stop(&mut self) {
@@ -1454,8 +1736,9 @@ impl App {
         self.lastfm.stopped();
         self.current = None;
         self.queue = None;
-        self.ended = false;
+        self.resume = false;
         self.position = 0.0;
+        self.save_queue();
     }
 
     /// Play/pause; with nothing loaded, plays the selected row, else the first visible one.
@@ -1466,10 +1749,12 @@ impl App {
             }
             return;
         }
-        // A finished queue stays loaded but empty: play starts the track again.
-        if self.ended {
+        // A restored track isn't loaded until Play: it starts at the saved place.
+        if self.resume {
             if let Some(i) = self.current {
+                let seconds = self.position;
                 self.load(i, tx);
+                self.seek(seconds);
             }
             return;
         }
@@ -1479,6 +1764,8 @@ impl App {
         }
         if self.playing {
             tx.wake_after(TICK);
+        } else {
+            self.save_queue();
         }
     }
 
@@ -1487,7 +1774,7 @@ impl App {
         let repeat = if self.repeat == Repeat::One { Repeat::All } else { self.repeat };
         match self.queue.as_mut().and_then(|q| q.next(repeat)) {
             Some(i) => self.load(i, tx),
-            None => self.finish(),
+            None => self.finish(tx),
         }
     }
 
@@ -1503,16 +1790,29 @@ impl App {
         }
     }
 
-    /// The queue ran out: keep the last track shown, stopped at its start.
-    fn finish(&mut self) {
+    /// The queue ran out: rewind to its first entry, paused at 0. Play starts it.
+    fn finish(&mut self, tx: &mut Tx) {
         if let Output::Open(engine) = &mut self.output {
             engine.stop();
         }
         self.playing = false;
-        self.ended = true;
-        self.position = 0.0;
         self.listen = None;
         self.lastfm.stopped();
+        if let Some(first) = self.queue.as_mut().and_then(|q| q.jump(0)) {
+            self.current = Some(first);
+            self.selected = Some(first);
+        }
+        self.position = 0.0;
+        self.seek_preview = None;
+        // Not loaded yet: Play loads the track and starts it from the top.
+        self.resume = true;
+        if let Some(title) = self.current.and_then(|i| self.title_line(i)) {
+            tx.set_title(title);
+        }
+        if self.queue_shown {
+            self.scroll_queue(tx);
+        }
+        self.save_queue();
     }
 
     fn track_ended(&mut self, tx: &mut Tx) {
@@ -1520,7 +1820,7 @@ impl App {
             (Repeat::One, Some(i)) => self.load(i, tx),
             _ => match self.queue.as_mut().and_then(|q| q.next(self.repeat)) {
                 Some(i) => self.load(i, tx),
-                None => self.finish(),
+                None => self.finish(tx),
             },
         }
     }
@@ -1532,6 +1832,7 @@ impl App {
             Some(Err(e)) => self.error = Some(e),
             Some(Ok(())) | None => self.position = to,
         }
+        self.save_queue();
     }
 
     pub fn seek_by(&mut self, delta: f64) {
@@ -1569,6 +1870,7 @@ impl App {
         if let Some(q) = &mut self.queue {
             if self.shuffle { q.shuffle(&mut self.rng) } else { q.unshuffle() }
         }
+        self.save_queue();
     }
 
     pub fn cycle_repeat(&mut self) {
@@ -1815,9 +2117,18 @@ fn file_uri(path: &Path) -> String {
     uri
 }
 
+/// `AppSpec::on_close`: saves the queue as the app closes.
+pub fn on_close(s: &mut App, _tx: &mut Tx) {
+    s.save_queue();
+}
+
 /// `AppSpec::poll`: take scan results, follow the playing track, and move on when it ends.
 pub fn poll(s: &mut App, now: f64, tx: &mut Tx) -> bool {
     let mut changed = s.drain_scan();
+    if std::mem::take(&mut s.queue_scroll_due) {
+        s.scroll_queue(tx);
+        changed = true;
+    }
     changed |= s.drain_details();
     if let Some(covers) = &s.covers {
         changed |= covers.drain();
@@ -1890,6 +2201,11 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         }
         return false;
     }
+    // Escape closes the floating queue panel first; a docked one stays until its button hides it.
+    if ev.key == Key::Escape && s.queue_shown && !s.queue_pinned {
+        s.queue_shown = false;
+        return true;
+    }
     if ev.key == Key::Escape && s.page == Page::Search {
         s.clear_search(tx);
         return true;
@@ -1952,6 +2268,7 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
             "s" => s.toggle_shuffle(),
             "r" => s.cycle_repeat(),
             "m" => s.toggle_mute(),
+            "q" => s.toggle_queue(tx),
             "i" => match s.selected.or(s.current) {
                 Some(i) => s.show_details(i, tx),
                 None => return false,

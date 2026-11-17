@@ -128,6 +128,8 @@ line_icon!(BACK, "rm-back", "M15 5 L8 12 L15 19");
 line_icon!(FORWARD, "rm-forward", "M9 5 L16 12 L9 19");
 line_icon!(INFO, "rm-info", "M12 3 A9 9 0 1 0 12.01 3 Z", "M12 11 V16.5", "M12 7.6 V7.7");
 line_icon!(COLUMNS, "rm-columns", "M3 5 H21 V19 H3 Z", "M9 5 V19", "M15 5 V19");
+line_icon!(QUEUE, "rm-queue", "M4 6 H14", "M4 11 H14", "M4 16 H10", "M16 13 L20 15.5 L16 18 Z");
+line_icon!(PIN, "rm-pin", "M9 4 H15 L14.2 9.5 L17 13 H7 L9.8 9.5 Z", "M12 13 V20");
 line_icon!(FOLDER_OPEN, "rm-folder-open", "M3 7 V18 H19 L21.5 10.5 H7 L4.5 18", "M3 7 V5 H9 L11 7 H18 V10.5");
 line_icon!(SETTINGS, "rm-settings", "M4 7 H14", "M18 7 H20", "M14 5 V9", "M4 17 H6", "M10 17 H20", "M10 15 V19");
 line_icon!(EXTERNAL, "rm-external", "M15 3 H21 V9", "M10 14 L21 3", "M18 13 V19 H5 V6 H11");

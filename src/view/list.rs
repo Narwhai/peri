@@ -5,7 +5,7 @@ use rune::{Align, Cursor, Cx, El, GrowthSpec, Live, ScrollPos, ScrollSpec, Tx, c
 use super::albums::{grid_row, grid_row_h, list_card, song_cover};
 use super::table;
 use super::*;
-use crate::app::{App, Row, album_key, grid_key, header_key, row_key};
+use crate::app::{App, Row, SongMenuTarget, album_key, grid_key, header_key, row_key};
 use crate::query::property::Mode;
 use crate::query::view::Layout;
 use crate::query::view::Section;
@@ -202,6 +202,7 @@ fn track_row(t: &Track, i: usize, section: Option<usize>, number: usize, selecte
         .label(format!("{} by {}", t.title, t.artist().as_deref().unwrap_or("unknown artist")))
         .on_press(move |s: &mut App| s.selected = Some(i))
         .on_double_press_tx(move |s: &mut App, tx| s.play_index(i, tx))
+        .on_secondary_press(move |s: &mut App, at, _tx| s.song_menu = Some((SongMenuTarget::Track(i), at)))
 }
 
 fn empty_state(s: &App, p: &Palette) -> El {

@@ -6,6 +6,7 @@ use rune::prefs::Prefs;
 use serde::{Deserialize, Serialize};
 
 use super::property::Property;
+use crate::queue::QueueReplace;
 use super::view::View;
 use crate::palette::{Appearance, Theme};
 
@@ -19,8 +20,36 @@ const GRAPH_KEY: &str = "graph";
 const TAB_KEY: &str = "tab";
 const APPEARANCE_KEY: &str = "appearance";
 const THEME_KEY: &str = "theme";
+const QUEUE_REPLACE_KEY: &str = "queue_replace";
+const QUEUE_PINNED_KEY: &str = "queue_pinned";
+/// The play queue's file, beside the preferences.
+const QUEUE_FILE: &str = "queue.json";
 /// Bumped when the saved shape changes incompatibly.
 const VERSION: u32 = 1;
+/// Bumped when the saved queue's shape changes incompatibly.
+pub const QUEUE_VERSION: u32 = 1;
+
+/// The play queue as saved: tracks by path, so it survives a rescan.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SavedQueue {
+    pub version: u32,
+    pub base: Vec<std::path::PathBuf>,
+    pub order: Vec<SavedEntry>,
+    pub pos: usize,
+    pub edited: bool,
+    pub removed: Vec<std::path::PathBuf>,
+    pub shuffle: bool,
+    /// Seconds into the current track.
+    pub seconds: f64,
+}
+
+/// One place in the saved queue.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SavedEntry {
+    pub path: std::path::PathBuf,
+    pub added: bool,
+    pub pinned: bool,
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Views {
@@ -105,6 +134,72 @@ impl Store {
             Some(dir) => crate::plays::Plays::open(dir.join(crate::plays::FILE)),
             None => (crate::plays::Plays::memory(), None),
         }
+    }
+
+    /// The play queue file, beside the preferences; none when they're in memory.
+    fn queue_file(&self) -> Option<std::path::PathBuf> {
+        self.prefs.path().and_then(|p| p.parent()).map(|dir| dir.join(QUEUE_FILE))
+    }
+
+    /// The saved play queue; none when nothing is saved. An error when the file is unreadable or
+    /// from an incompatible version.
+    pub fn load_queue(&self) -> Result<Option<SavedQueue>, String> {
+        let Some(path) = self.queue_file() else { return Ok(None) };
+        let text = match std::fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(format!("Couldn't read the queue in {}: {e}", path.display())),
+        };
+        let saved: SavedQueue = serde_json::from_str(&text).map_err(|e| format!("Couldn't read the queue in {}: {e}", path.display()))?;
+        if saved.version != QUEUE_VERSION {
+            return Err(format!("Couldn't read the queue in {}: it's from another version of peri", path.display()));
+        }
+        Ok(Some(saved))
+    }
+
+    /// Writes the play queue, or removes the file when there is none. Nothing is written when
+    /// the preferences are in memory.
+    pub fn save_queue(&self, queue: Option<&SavedQueue>) -> Result<(), String> {
+        let Some(path) = self.queue_file() else { return Ok(()) };
+        let result = match queue {
+            Some(saved) => serde_json::to_string(saved)
+                .map_err(|e| e.to_string())
+                .and_then(|text| {
+                    if let Some(dir) = path.parent() {
+                        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+                    }
+                    std::fs::write(&path, text).map_err(|e| e.to_string())
+                }),
+            None => match std::fs::remove_file(&path) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
+                _ => Ok(()),
+            },
+        };
+        result.map_err(|e| format!("Couldn't save the queue: {e}"))
+    }
+
+    /// What a new list does over an edited queue; Ask when unset, an error when unreadable.
+    pub fn load_queue_replace(&self) -> Result<QueueReplace, String> {
+        if !self.prefs.contains(QUEUE_REPLACE_KEY) {
+            return Ok(QueueReplace::default());
+        }
+        self.prefs.get(QUEUE_REPLACE_KEY).ok_or_else(|| format!("Couldn't read \"{QUEUE_REPLACE_KEY}\" in the preferences"))
+    }
+
+    pub fn save_queue_replace(&mut self, policy: QueueReplace) -> Result<(), String> {
+        self.prefs.set(QUEUE_REPLACE_KEY, &policy).map_err(|e| format!("Couldn't save the queue setting: {e}"))
+    }
+
+    /// Whether the queue panel is pinned open beside the page; false when unset.
+    pub fn load_queue_pinned(&self) -> Result<bool, String> {
+        if !self.prefs.contains(QUEUE_PINNED_KEY) {
+            return Ok(false);
+        }
+        self.prefs.get(QUEUE_PINNED_KEY).ok_or_else(|| format!("Couldn't read \"{QUEUE_PINNED_KEY}\" in the preferences"))
+    }
+
+    pub fn save_queue_pinned(&mut self, pinned: bool) -> Result<(), String> {
+        self.prefs.set(QUEUE_PINNED_KEY, &pinned).map_err(|e| format!("Couldn't save the queue panel: {e}"))
     }
 
     /// The saved views, or the default when there is none or it's from an incompatible version.

@@ -160,6 +160,11 @@ fn forgetting_the_library_empties_it_and_its_saved_folders() {
     rt.update(|s, _| s.replace_library(vec![music]));
     finish_scan(&mut rt);
     click(&mut rt, "settings");
+    // The Queue section sits above the library controls: scroll them into view, as a user would.
+    rt.update(|_, tx| tx.scroll_into_view_in("settings-page", "library-forget"));
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
     click(&mut rt, "library-forget");
     assert!(rt.state.tracks().is_empty());
     assert!(Store::at(f.prefs()).load_library().is_empty());
@@ -264,3 +269,4 @@ fn an_unreadable_appearance_shows_an_error_and_falls_back_to_system() {
     assert_eq!(app.appearance, Appearance::System);
     assert!(app.error.as_deref().is_some_and(|e| e.contains("\"appearance\"")), "{:?}", app.error);
 }
+

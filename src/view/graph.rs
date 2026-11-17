@@ -51,14 +51,14 @@ fn edge_width(kind: EdgeKind) -> f32 {
     }
 }
 
-pub(super) fn graph_page(s: &App, p: &Palette, kit: &Kit, layer: &mut Vec<El>) -> El {
+pub(super) fn graph_page(s: &App, p: &Palette, kit: &Kit, zoom: f32, layer: &mut Vec<El>) -> El {
     let g = &s.graph;
     let body = if s.tracks().is_empty() && s.scan.is_none() {
         empty("No artists yet", "Open a folder to see how its artists are linked.", p)
     } else if g.model.nodes.is_empty() {
         empty(if s.scan.is_some() { "Reading your music…" } else { "No artists" }, "Artists show once songs with artist tags are in the library.", p)
     } else {
-        canvas_area(g, p, kit, layer)
+        canvas_area(g, p, kit, zoom, layer)
     };
     col().key("graph-page").w_full().grow(1.0).min_h(0.0).child(graph_toolbar(s, p, kit)).child(body)
 }
@@ -165,7 +165,7 @@ fn legend_chip(kind: EdgeKind, on: bool, p: &Palette) -> El {
 }
 
 /// The canvas: the world under the camera, and what's hovered over it.
-fn canvas_area(g: &Graph, p: &Palette, kit: &Kit, layer: &mut Vec<El>) -> El {
+fn canvas_area(g: &Graph, p: &Palette, kit: &Kit, zoom: f32, layer: &mut Vec<El>) -> El {
     let (region, rect) = g.region();
     let p = *p;
     // While an artist is dragged, what moves draws on its own layer, every frame; the rest
@@ -312,7 +312,7 @@ fn canvas_area(g: &Graph, p: &Palette, kit: &Kit, layer: &mut Vec<El>) -> El {
             let open = name.clone();
             // The menu's trigger is an empty point: wrapping the canvas in it would take the
             // canvas out of the column's flex layout.
-            let menu = context_menu("graph-menu", el().size(0.0, 0.0), Some(at))
+            let menu = context_menu("graph-menu", el().size(0.0, 0.0), Some(unzoomed(at, zoom)))
                 .group_label(name)
                 .item(MenuItem::new("Open artist").on_select_tx(move |s: &mut App, tx| {
                     s.graph.menu = None;

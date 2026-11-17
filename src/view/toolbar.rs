@@ -4,7 +4,7 @@ use rune::{Cursor, El, Tx, col, el, icon, row, text};
 use rune_kit::{Kit, Placement, Select, TextInput, popover, scrim};
 
 use super::*;
-use crate::app::{App, Panel, Reorder, ReorderList};
+use crate::app::{App, Panel, QUEUE_ROW_H, Reorder, ReorderList};
 use crate::query::property::{Mode, Property};
 use crate::query::view::{Direction, GroupBy, Layout, Sort, View};
 use crate::icons;
@@ -16,7 +16,7 @@ const COMPACT_W: f32 = 900.0;
 /// The album grid's toolbar also holds Grid/List and the card size slider, so it needs more.
 const COMPACT_GRID_W: f32 = 940.0;
 /// The width of a row's grip, or of the empty slot that keeps rows without one aligned.
-const GRIP_W: f32 = 18.0;
+pub(super) const GRIP_W: f32 = 18.0;
 
 /// The toolbar for a window `width` points wide as laid out (unknown before the first layout).
 pub(super) fn toolbar(s: &App, width: Option<f32>, p: &Palette, kit: &Kit, layer: &mut Vec<El>) -> El {
@@ -627,6 +627,15 @@ impl ReorderList {
         match self {
             ReorderList::Sorts => 36.0,
             ReorderList::Columns => 32.0,
+            ReorderList::Queue => QUEUE_ROW_H,
+        }
+    }
+
+    /// The first row a drag may land on: the queue's upcoming entries start after the current one.
+    fn first(self, s: &App) -> usize {
+        match self {
+            ReorderList::Sorts | ReorderList::Columns => 0,
+            ReorderList::Queue => s.queue.as_ref().map_or(0, |q| q.pos() + 1),
         }
     }
 
@@ -635,6 +644,7 @@ impl ReorderList {
         match self {
             ReorderList::Sorts => s.views.active().sorts.len(),
             ReorderList::Columns => s.shown_columns().len(),
+            ReorderList::Queue => s.queue.as_ref().map_or(0, |q| q.entries().len()),
         }
     }
 
@@ -651,6 +661,10 @@ impl ReorderList {
                 let item = columns.remove(from);
                 columns.insert(to, item);
             }
+            ReorderList::Queue => {
+                s.queue_move(from, to);
+                return;
+            }
         }
         s.views_changed();
     }
@@ -658,21 +672,21 @@ impl ReorderList {
 
 /// The row a drag of `dy` points from row `from` lands on: one row per `pitch` points, kept
 /// inside a list of `len` rows.
-fn reorder_target(from: usize, dy: f32, pitch: f32, len: usize) -> usize {
+fn reorder_target(from: usize, dy: f32, pitch: f32, first: usize, len: usize) -> usize {
     let to = from as f32 + (dy / pitch).round();
-    to.clamp(0.0, len.saturating_sub(1) as f32) as usize
+    to.clamp(first as f32, len.saturating_sub(1).max(first) as f32) as usize
 }
 
 /// Whether row `n` of `list` is the one being dragged.
-fn is_dragged(s: &App, list: ReorderList, n: usize) -> bool {
+pub(super) fn is_dragged(s: &App, list: ReorderList, n: usize) -> bool {
     s.reorder.is_some_and(|o| o.list == list && o.from == n)
 }
 
 /// How far row `n` of `list` shifts while a drag reorders it: the dragged row follows the
 /// pointer, and the rows it passes slide one row aside. Zero when no drag of `list` is on.
-fn reorder_shift(s: &App, list: ReorderList, n: usize) -> f32 {
+pub(super) fn reorder_shift(s: &App, list: ReorderList, n: usize) -> f32 {
     let Some(o) = s.reorder.filter(|o| o.list == list) else { return 0.0 };
-    let to = reorder_target(o.from, o.dy, list.pitch(), list.len(s));
+    let to = reorder_target(o.from, o.dy, list.pitch(), list.first(s), list.len(s));
     if n == o.from {
         o.dy
     } else if to > o.from && n > o.from && n <= to {
@@ -686,7 +700,7 @@ fn reorder_shift(s: &App, list: ReorderList, n: usize) -> f32 {
 
 /// A row's grip, at its left edge: drag it to move the row, or press Alt+Up or Alt+Down while
 /// it has focus. `n` is the row's index in `list`.
-fn reorder_handle(key: String, list: ReorderList, n: usize, p: &Palette) -> El {
+pub(super) fn reorder_handle(key: String, list: ReorderList, n: usize, p: &Palette) -> El {
     let own = key.clone();
     el().key(key)
         .size(GRIP_W, 24.0)
@@ -711,7 +725,7 @@ fn reorder_handle(key: String, list: ReorderList, n: usize, p: &Palette) -> El {
                 if taken.is_none() || d.cancelled() {
                     return;
                 }
-                let to = reorder_target(n, d.dy, list.pitch(), list.len(s));
+                let to = reorder_target(n, d.dy, list.pitch(), list.first(s), list.len(s));
                 if to != n {
                     list.move_item(s, n, to);
                 }
@@ -728,7 +742,7 @@ fn reorder_handle(key: String, list: ReorderList, n: usize, p: &Palette) -> El {
             // A sort's grip is keyed by its place; a column's by its name, which moves with it.
             let next = match list {
                 ReorderList::Sorts => format!("sort{to}-handle"),
-                ReorderList::Columns => own.clone(),
+                ReorderList::Columns | ReorderList::Queue => own.clone(),
             };
             tx.focus(next, true);
             true

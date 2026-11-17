@@ -111,9 +111,8 @@ fn next_and_previous_walk_the_list_and_stop_at_the_end() {
     assert_eq!(rt.state.current, Some(last));
     click(&mut rt, "next");
     assert!(!rt.state.playing, "past the last track playback stops");
-    assert_eq!(rt.state.current, Some(last));
-    click(&mut rt, "prev");
-    assert_eq!(rt.state.current, Some(before));
+    assert_eq!(rt.state.current, Some(rt.state.filtered[0]), "rewound to the queue's first track");
+    assert_eq!(rt.state.position, 0.0);
 }
 
 #[test]
@@ -645,17 +644,39 @@ fn queue_titles(rt: &Runtime<App>) -> Vec<String> {
 }
 
 #[test]
-fn play_after_the_queue_ran_out_starts_the_last_track_again() {
+fn running_out_of_the_queue_rewinds_to_its_first_track_paused() {
     let mut rt = runtime(true);
-    let eta = idx(&rt, "ETA");
-    rt.update(move |s, tx| s.play_list(vec![eta], eta, tx));
+    let list: Vec<usize> = (0..3).collect();
+    let first = list[0];
+    rt.update(move |s, tx| s.play_list(list, first, tx));
+    rt.update(|s, tx| s.next(tx));
+    rt.update(|s, tx| s.next(tx));
+    assert_eq!(rt.state.queue.as_ref().map(|q| q.pos()), Some(2));
     rt.update(|s, tx| s.next(tx));
     assert!(!rt.state.playing);
-    assert_eq!(rt.state.current, Some(eta));
+    assert_eq!(rt.state.current, Some(first));
+    assert_eq!(rt.state.queue.as_ref().map(|q| q.pos()), Some(0));
+    assert_eq!(rt.state.position, 0.0);
     rt.update(|s, tx| s.toggle(tx));
-    assert!(rt.state.playing, "play starts the finished track again");
-    assert_eq!(rt.state.current, Some(eta));
-    assert!(!rt.state.ended);
+    assert!(rt.state.playing, "play starts the first track");
+    assert_eq!(rt.state.current, Some(first));
+    assert_eq!(rt.state.position, 0.0);
+}
+
+#[test]
+fn running_out_from_the_middle_rewinds_to_the_queues_first_track() {
+    let mut rt = runtime(true);
+    let list: Vec<usize> = (0..3).collect();
+    let (first, middle) = (list[0], list[1]);
+    rt.update(move |s, tx| s.play_list(list, middle, tx));
+    rt.update(|s, tx| s.next(tx));
+    rt.update(|s, tx| s.next(tx));
+    assert!(!rt.state.playing);
+    assert_eq!(rt.state.current, Some(first), "not the track the list started on");
+    assert_eq!(rt.state.queue.as_ref().map(|q| q.pos()), Some(0));
+    rt.update(|s, tx| s.toggle(tx));
+    assert!(rt.state.playing);
+    assert_eq!(rt.state.current, Some(first));
 }
 
 #[test]

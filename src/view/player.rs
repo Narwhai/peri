@@ -96,12 +96,14 @@ pub(super) fn now_playing(s: &App, p: &Palette) -> El {
     let center = col().grow(1.0).shrink().min_w(260.0).max_w(560.0).gap(6.0).items_center().child(controls).child(seek_bar(s, p));
 
     let volume_icon = if s.muted || s.volume == 0.0 { &icons::MUTED } else { &icons::VOLUME };
+    let queue = toggle_icon("queue", &icons::QUEUE, s.queue_shown, "Queue (Q)", p).on_press_tx(|s: &mut App, tx| s.toggle_queue(tx));
     let right = row()
         .w(300.0)
         .shrink()
         .gap(8.0)
         .center_y()
         .justify_end()
+        .child(queue)
         .child(icon_button("mute", volume_icon, "Mute (M)", p).on_press(|s: &mut App| s.toggle_mute()))
         .child(volume_slider(s, p));
 

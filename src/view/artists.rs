@@ -9,7 +9,7 @@ use super::table;
 use super::toolbar::{hint, segmented};
 use super::*;
 use crate::album::ReleaseType;
-use crate::app::{ArtistTab, Panel};
+use crate::app::{ArtistTab, Panel, SongMenuTarget};
 use crate::artist::{ArtistPage, everything, known, page, suggest};
 use crate::credits::Role;
 use crate::library::Track;
@@ -572,4 +572,5 @@ fn song_line(s: &App, key: &str, i: usize, list: &[usize], pills: Vec<Option<tab
         .label(format!("{} by {}", t.title, t.artist().unwrap_or_else(|| "unknown artist".into())))
         .on_press(move |s: &mut App| s.selected = Some(i))
         .on_double_press_tx(move |s: &mut App, tx| s.play_list(list.clone(), i, tx))
+        .on_secondary_press(move |s: &mut App, at, _tx| s.song_menu = Some((SongMenuTarget::Track(i), at)))
 }
