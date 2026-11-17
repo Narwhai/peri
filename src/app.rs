@@ -1,6 +1,7 @@
 //! The player's state and everything that changes it: library scans, playback, the queue.
 
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
@@ -221,6 +222,8 @@ pub struct App {
     pub current: Option<usize>,
     pub queue: Option<Queue>,
     pub playing: bool,
+    /// The queue ran out: play starts the current track again.
+    pub ended: bool,
     /// Seconds into the current track.
     pub position: f64,
     /// While the seek bar is dragged: where it would land, as a fraction of the track.
@@ -338,6 +341,7 @@ impl App {
             current: None,
             queue: None,
             playing: false,
+            ended: false,
             position: 0.0,
             seek_preview: None,
             volume: 0.8,
@@ -460,7 +464,12 @@ impl App {
             }
         }
         self.save_library();
-        self.start_scan(roots, true);
+        // A running scan would be dropped with its results, so rescan every saved root instead.
+        if self.scan.is_some() {
+            self.start_scan(self.library.clone(), false);
+        } else {
+            self.start_scan(roots, true);
+        }
     }
 
     /// Settings' remove button: drops saved root `i` and rescans what's left.
@@ -548,7 +557,10 @@ impl App {
         crate::credits::resolve(&mut tracks);
         library::sort(&mut tracks);
         self.plays.apply(&mut tracks);
-        self.tracks = tracks;
+        let old_tracks = std::mem::replace(&mut self.tracks, tracks);
+        // Keep the queue playing: remap its indices onto the new tracks by path.
+        let index: HashMap<&Path, usize> = self.tracks.iter().enumerate().map(|(i, t)| (t.path.as_path(), i)).collect();
+        let remapped = self.queue.as_ref().and_then(|q| q.remap(|i| old_tracks.get(i).and_then(|t| index.get(t.path.as_path()).copied())));
         self.graph.invalidate();
         if self.page == Page::Graph {
             self.refresh_graph();
@@ -561,7 +573,10 @@ impl App {
         match current {
             Some(i) => {
                 self.current = Some(i);
-                self.queue = Some(Queue::new(self.filtered_or(i), i, self.shuffle, &mut self.rng));
+                self.queue = Some(match remapped {
+                    Some(queue) => queue,
+                    None => Queue::new(self.filtered_or(i), i, self.shuffle, &mut self.rng),
+                });
             }
             None if playing_path.is_some() => {
                 // The playing file left the library: stop rather than play on unseen.
@@ -1240,6 +1255,7 @@ impl App {
             None => track.title.clone(),
         };
         self.current = Some(i);
+        self.ended = false;
         self.position = 0.0;
         self.seek_preview = None;
         let gain = audio::gain(self.volume, self.muted);
@@ -1284,6 +1300,7 @@ impl App {
         self.lastfm.stopped();
         self.current = None;
         self.queue = None;
+        self.ended = false;
         self.position = 0.0;
         self.cover = None;
     }
@@ -1297,7 +1314,7 @@ impl App {
             return;
         }
         // A finished queue stays loaded but empty: play starts the track again.
-        if !self.playing && self.engine().is_some_and(Engine::finished) {
+        if self.ended {
             if let Some(i) = self.current {
                 self.load(i, tx);
             }
@@ -1339,6 +1356,7 @@ impl App {
             engine.stop();
         }
         self.playing = false;
+        self.ended = true;
         self.position = 0.0;
         self.listen = None;
         self.lastfm.stopped();

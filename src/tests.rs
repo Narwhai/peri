@@ -611,3 +611,90 @@ fn the_play_button_darkens_as_pause_while_playing_and_lightens_once_paused() {
     assert_eq!(label.as_deref(), Some("Play"));
     assert!((paused - raised).abs() < 1e-3, "back to the raised colour once paused: {paused} vs {raised}");
 }
+
+/// The titles a queue plays from its current track to its end, without the playing state.
+fn queue_titles(rt: &Runtime<App>) -> Vec<String> {
+    let mut queue = rt.state.queue.clone().expect("a queue is playing");
+    let mut titles = vec![rt.state.tracks[queue.current()].title.clone()];
+    while let Some(i) = queue.next(Repeat::Off) {
+        titles.push(rt.state.tracks[i].title.clone());
+    }
+    titles
+}
+
+#[test]
+fn play_after_the_queue_ran_out_starts_the_last_track_again() {
+    let mut rt = runtime(true);
+    let eta = idx(&rt, "ETA");
+    rt.update(move |s, tx| s.play_list(vec![eta], eta, tx));
+    rt.update(|s, tx| s.next(tx));
+    assert!(!rt.state.playing);
+    assert_eq!(rt.state.current, Some(eta));
+    rt.update(|s, tx| s.toggle(tx));
+    assert!(rt.state.playing, "play starts the finished track again");
+    assert_eq!(rt.state.current, Some(eta));
+    assert!(!rt.state.ended);
+}
+
+#[test]
+fn a_rescan_keeps_the_shuffled_queue_a_list_started() {
+    let mut rt = runtime(true);
+    let all: Vec<usize> = (0..rt.state.tracks.len()).collect();
+    let eta = idx(&rt, "ETA");
+    rt.update(move |s, tx| {
+        s.shuffle = true;
+        s.play_list(all, eta, tx);
+    });
+    let before = queue_titles(&rt);
+    assert_eq!(before[0], "ETA");
+    rt.update(|s, _| s.set_library(crate::demo_tracks(), false));
+    assert_eq!(queue_titles(&rt), before);
+}
+
+#[test]
+fn a_rescan_drops_queued_tracks_that_left_the_library() {
+    let mut rt = runtime(true);
+    let all: Vec<usize> = (0..rt.state.tracks.len()).collect();
+    let eta = idx(&rt, "ETA");
+    rt.update(move |s, tx| s.play_list(all, eta, tx));
+    let before = queue_titles(&rt);
+    let mut library = crate::demo_tracks();
+    library.retain(|t| t.title != "Meditation #1");
+    rt.update(move |s, _| s.set_library(library, false));
+    let expected: Vec<String> = before.into_iter().filter(|t| t != "Meditation #1").collect();
+    assert_eq!(queue_titles(&rt), expected);
+}
+
+#[test]
+fn adding_a_folder_while_the_launch_scan_runs_keeps_both_folders() {
+    let dir = std::env::temp_dir().join(format!("peri-b2-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let (a, b) = (dir.join("a"), dir.join("b"));
+    std::fs::create_dir_all(&a).unwrap();
+    std::fs::create_dir_all(&b).unwrap();
+    std::fs::write(a.join("one.mp3"), b"not audio").unwrap();
+    std::fs::write(b.join("two.mp3"), b"not audio").unwrap();
+    let mut rt = Runtime::new(App::new(Output::Silent, crate::query::store::Store::memory()), view, (980.0, 640.0), Env::new(true, 1.0));
+    rt.poll = Some(crate::app::poll);
+    rt.update(|s, _| s.set_waker(std::sync::Arc::new(|| {})));
+    let first = a.clone();
+    rt.update(move |s, _| s.replace_library(vec![first]));
+    // The launch scan is still running (no frame has drained it) when the second folder is added.
+    let second = b.clone();
+    rt.update(move |s, _| s.add_to_library(vec![second]));
+    for _ in 0..400 {
+        rt.frame(0.0);
+        if rt.state.scan.is_none() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(rt.state.scan.is_none(), "the scan finishes");
+    let mut paths: Vec<std::path::PathBuf> = rt.state.tracks.iter().map(|t| t.path.clone()).collect();
+    paths.sort();
+    let mut expected = vec![a.join("one.mp3"), b.join("two.mp3")];
+    expected.sort();
+    assert_eq!(paths, expected, "both folders are in the library");
+    assert_eq!(rt.state.library, vec![a.clone(), b.clone()]);
+    std::fs::remove_dir_all(&dir).unwrap();
+}

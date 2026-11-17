@@ -64,10 +64,17 @@ pub struct Queue {
 }
 
 impl Queue {
-    /// A queue over `list` starting at `start`, which must be in it. Shuffled, `start` plays
-    /// first and the rest follow in random order.
-    pub fn new(list: Vec<usize>, start: usize, shuffle: bool, rng: &mut Rng) -> Queue {
-        let pos = list.iter().position(|&i| i == start).expect("the started track is in its list");
+    /// A queue over `list` starting at `start`. If `start` isn't in `list`, it is inserted at the
+    /// front so a stale list can't panic playback. Shuffled, `start` plays first and the rest
+    /// follow in random order.
+    pub fn new(mut list: Vec<usize>, start: usize, shuffle: bool, rng: &mut Rng) -> Queue {
+        let pos = match list.iter().position(|&i| i == start) {
+            Some(pos) => pos,
+            None => {
+                list.insert(0, start);
+                0
+            }
+        };
         let mut q = Queue { order: list.clone(), base: list, pos };
         if shuffle {
             q.shuffle(rng);
@@ -79,6 +86,16 @@ impl Queue {
         self.order[self.pos]
     }
 
+    /// The queue with every index mapped by `map` (e.g. onto a rebuilt library). Entries that
+    /// map to nothing are dropped; order, shuffle and position are kept. `None` when the
+    /// current track doesn't map.
+    pub fn remap(&self, map: impl Fn(usize) -> Option<usize>) -> Option<Queue> {
+        let base: Vec<usize> = self.base.iter().filter_map(|&i| map(i)).collect();
+        let order: Vec<usize> = self.order.iter().filter_map(|&i| map(i)).collect();
+        let current = map(self.current())?;
+        let pos = order.iter().position(|&i| i == current)?;
+        Some(Queue { base, order, pos })
+    }
 
     /// Move to the next track; at the end, wrap with `Repeat::All` and stop otherwise.
     /// `Repeat::One` is the caller's: a track ending replays it, a press of Next still moves on.
@@ -162,6 +179,35 @@ mod tests {
         q.unshuffle();
         assert_eq!(q.current(), now);
         assert_eq!(q.next(Repeat::Off), (now + 1 < 20).then_some(now + 1));
+    }
+
+    #[test]
+    fn a_start_missing_from_the_list_is_put_at_the_front() {
+        let mut rng = Rng::new(3);
+        let mut q = Queue::new(vec![1, 2], 9, false, &mut rng);
+        assert_eq!(q.current(), 9);
+        assert_eq!(q.next(Repeat::Off), Some(1));
+        assert_eq!(q.prev(Repeat::Off), Some(9));
+    }
+
+    #[test]
+    fn remap_keeps_order_shuffle_and_position_and_drops_missing_tracks() {
+        let mut rng = Rng::new(3);
+        let q = Queue::new(vec![5, 6, 7, 8, 9], 7, true, &mut rng);
+        let before = q.current();
+        // Track 8 left the library and the rest shifted down by five.
+        let r = q.remap(|i| (i != 8).then(|| i - 5)).expect("the current track maps");
+        assert_eq!(r.current(), before - 5);
+        let expected: Vec<usize> = q.order.iter().filter(|&&i| i != 8).map(|&i| i - 5).collect();
+        assert_eq!(r.order, expected);
+        assert_eq!(r.base, vec![0, 1, 2, 4]);
+    }
+
+    #[test]
+    fn remap_is_none_when_the_current_track_is_gone() {
+        let mut rng = Rng::new(3);
+        let q = Queue::new(vec![1, 2, 3], 2, false, &mut rng);
+        assert_eq!(q.remap(|i| (i != 2).then_some(i)), None);
     }
 
     #[test]
