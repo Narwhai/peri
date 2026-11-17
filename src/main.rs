@@ -108,7 +108,7 @@ fn scene_library(s: &mut App) {
 
 fn scene_playing(s: &mut App) {
     scene_library(s);
-    let eta = s.tracks.iter().position(|t| t.title == "ETA").expect("demo has ETA");
+    let eta = s.tracks().iter().position(|t| t.title == "ETA").expect("demo has ETA");
     s.current = Some(eta);
     s.selected = Some(eta);
     s.playing = true;
@@ -211,7 +211,7 @@ fn scene_artist(s: &mut App) {
         ..Track::default()
     });
     s.set_library(tracks, false);
-    let i = s.tracks.iter().position(|t| t.title == "Calypso Gene").expect("demo has Calypso Gene");
+    let i = s.tracks().iter().position(|t| t.title == "Calypso Gene").expect("demo has Calypso Gene");
     s.current = Some(i);
     s.playing = true;
     s.page = app::Page::Artist("The Alchemist".into());
@@ -227,8 +227,8 @@ fn scene_related(s: &mut App) {
             relations::Link { from: "Armand Hammer".into(), kind: relations::LinkKind::Alias, to: "the alchemist".into() },
         ],
     });
-    let i = s.tracks.iter().position(|t| t.title == "Calypso Gene").expect("demo has Calypso Gene");
-    s.tracks[i].credits.push(credits::Credit::parse(credits::Role::Composer, "Alan Maman"));
+    let i = s.tracks().iter().position(|t| t.title == "Calypso Gene").expect("demo has Calypso Gene");
+    s.edit_track(i, |t| t.credits.push(credits::Credit::parse(credits::Role::Composer, "Alan Maman")));
     s.artist_with_aliases = true;
 }
 
@@ -295,8 +295,8 @@ fn scene_collab(s: &mut App) {
 
 fn scene_album_page(s: &mut App) {
     album_view(s, Layout::Grid);
-    let a = s.albums.iter().position(|a| a.title == "Day of Radiance").expect("demo has Day of Radiance");
-    s.page = app::Page::Album(s.albums[a].id());
+    let a = s.albums().iter().position(|a| a.title == "Day of Radiance").expect("demo has Day of Radiance");
+    s.page = app::Page::Album(s.albums()[a].id());
 }
 
 /// The demo library with Laraaji's and Nils Frahm's albums on one label, on its page.
@@ -323,7 +323,7 @@ fn scene_settings(s: &mut App) {
 fn scene_home(s: &mut App) {
     s.set_library(demo_tracks(), false);
     for (n, title) in ["Hammers", "New Jeans", "Says", "ETA", "Mary"].into_iter().enumerate() {
-        if let Some(i) = s.tracks.iter().position(|t| t.title == title) {
+        if let Some(i) = s.tracks().iter().position(|t| t.title == title) {
             // Oldest first, so the most recent is at the top.
             let _ = s.record_play(i, 1_800_000_000 + n as i64 * 60);
         }

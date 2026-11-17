@@ -43,7 +43,7 @@ fn key(rt: &mut Runtime<App>, key: Key) {
 }
 
 fn idx(rt: &Runtime<App>, title: &str) -> usize {
-    rt.state.tracks.iter().position(|t| t.title == title).unwrap_or_else(|| panic!("no song {title}"))
+    rt.state.tracks().iter().position(|t| t.title == title).unwrap_or_else(|| panic!("no song {title}"))
 }
 
 /// The text of the element keyed `key` inside row `row`.
@@ -113,8 +113,8 @@ fn the_album_column_opens_the_songs_album() {
     let dance = idx(&rt, "The Dance #1");
     assert_eq!(cell(&rt, &row_key(dance, None), "col-album").as_deref(), Some("Day of Radiance"));
     click(&mut rt, &format!("album:{dance}"));
-    let a = rt.state.albums.iter().position(|a| a.title == "Day of Radiance").expect("album");
-    assert_eq!(rt.state.page, Page::Album(rt.state.albums[a].id()));
+    let a = rt.state.albums().iter().position(|a| a.title == "Day of Radiance").expect("album");
+    assert_eq!(rt.state.page, Page::Album(rt.state.albums()[a].id()));
 }
 
 #[test]
@@ -167,7 +167,7 @@ fn album_pages_use_their_own_columns() {
         s.views_changed();
     });
     settle(&mut rt);
-    let a = rt.state.albums.iter().position(|a| a.title == "Day of Radiance").expect("album");
+    let a = rt.state.albums().iter().position(|a| a.title == "Day of Radiance").expect("album");
     click(&mut rt, &album_key(a, None));
     let row = format!("t{}", idx(&rt, "The Dance #1"));
     assert_eq!(cell(&rt, &row, "col-format").as_deref(), Some("FLAC"), "pages default to artist, format, duration");

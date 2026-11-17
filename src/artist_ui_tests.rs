@@ -99,16 +99,16 @@ fn text_of(rt: &Runtime<App>, key: &str) -> String {
 #[test]
 fn a_featured_artists_name_in_a_song_row_opens_their_page() {
     let mut rt = runtime();
-    let calypso = rt.state.tracks.iter().position(|t| t.title == "Calypso Gene").expect("Calypso Gene");
-    assert_eq!(rt.state.tracks[calypso].featured, ["Silka", "Cleo Reed"]);
-    assert_eq!(rt.state.tracks[calypso].album_artists, ["Armand Hammer", "The Alchemist"]);
+    let calypso = rt.state.tracks().iter().position(|t| t.title == "Calypso Gene").expect("Calypso Gene");
+    assert_eq!(rt.state.tracks()[calypso].featured, ["Silka", "Cleo Reed"]);
+    assert_eq!(rt.state.tracks()[calypso].album_artists, ["Armand Hammer", "The Alchemist"]);
     click(&mut rt, "Cleo Reed");
     assert_eq!(rt.state.page, Page::Artist("Cleo Reed".into()));
     assert_eq!(text_of(&rt, "artist-name"), "Cleo Reed");
     assert!(rt.find("appears-on").is_some(), "Mercy is an album Cleo Reed appears on");
     assert!(rt.find("artist-albums").is_none(), "Cleo Reed has no albums of their own");
     assert!(rt.find("credits").is_some(), "their performer credits list too");
-    let calypso = rt.state.tracks.iter().position(|t| t.title == "Calypso Gene").expect("Calypso Gene");
+    let calypso = rt.state.tracks().iter().position(|t| t.title == "Calypso Gene").expect("Calypso Gene");
     let pill = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("tag-performer-·-vocals"));
     assert!(pill.is_some(), "the credit's pill says what they played");
     assert!(rt.find(&format!("credits-t{calypso}")).is_some());
@@ -153,14 +153,14 @@ fn the_ampersand_between_album_artists_opens_what_they_made_together() {
         s.views_changed();
     });
     settle(&mut rt);
-    let mercy = rt.state.albums.iter().position(|a| a.title == "Mercy").expect("Mercy");
+    let mercy = rt.state.albums().iter().position(|a| a.title == "Mercy").expect("Mercy");
     click(&mut rt, &album_key(mercy, None));
     let both = crate::view::collab_id(&["Armand Hammer", "The Alchemist"]);
     click(&mut rt, &both);
     assert_eq!(rt.state.page, Page::Collab(strings(&["Armand Hammer", "The Alchemist"])));
     assert_eq!(text_of(&rt, "collab-name"), "Armand Hammer & The Alchemist");
     assert!(rt.find(&format!("collab-albums{mercy}")).is_some(), "Mercy is theirs together");
-    let ruins = rt.state.albums.iter().position(|a| a.title == "Ruins").expect("Ruins");
+    let ruins = rt.state.albums().iter().position(|a| a.title == "Ruins").expect("Ruins");
     assert!(rt.find(&format!("collab-albums{ruins}")).is_none(), "Armand Hammer's solo album isn't");
     // Each name in the title opens that artist's page, and Back returns here.
     click(&mut rt, "The Alchemist");
@@ -177,7 +177,7 @@ fn the_ampersand_between_album_artists_opens_what_they_made_together() {
 #[test]
 fn a_song_rows_ampersand_links_its_main_artists_not_the_featured_ones() {
     let mut rt = runtime();
-    let calypso = rt.state.tracks.iter().position(|t| t.title == "Calypso Gene").expect("Calypso Gene");
+    let calypso = rt.state.tracks().iter().position(|t| t.title == "Calypso Gene").expect("Calypso Gene");
     rt.update(|s, tx| s.play_index(calypso, tx));
     settle(&mut rt);
     let main = crate::view::collab_id(&["Armand Hammer", "The Alchemist"]);
@@ -189,7 +189,7 @@ fn a_song_rows_ampersand_links_its_main_artists_not_the_featured_ones() {
 #[test]
 fn the_now_playing_bar_links_the_playing_songs_artists() {
     let mut rt = runtime();
-    let calypso = rt.state.tracks.iter().position(|t| t.title == "Calypso Gene").expect("Calypso Gene");
+    let calypso = rt.state.tracks().iter().position(|t| t.title == "Calypso Gene").expect("Calypso Gene");
     rt.update(|s, tx| s.play_index(calypso, tx));
     settle(&mut rt);
     assert_eq!(text_of(&rt, "np-artist"), "Armand Hammer & The Alchemist feat. Silka & Cleo Reed", "the artist line reads as tagged");
@@ -247,8 +247,8 @@ fn click_tab(rt: &mut Runtime<App>, value: &str) {
 #[test]
 fn the_releases_tab_is_the_default_and_songs_list_every_song_newest_album_first() {
     let mut rt = armand_hammer();
-    let mercy = rt.state.albums.iter().position(|a| a.title == "Mercy").expect("Mercy");
-    let ruins = rt.state.albums.iter().position(|a| a.title == "Ruins").expect("Ruins");
+    let mercy = rt.state.albums().iter().position(|a| a.title == "Mercy").expect("Mercy");
+    let ruins = rt.state.albums().iter().position(|a| a.title == "Ruins").expect("Ruins");
     assert!(rt.find("artist-tab").is_some());
     assert!(rt.find(&format!("artist-albums{mercy}")).is_some(), "Releases is the default");
     assert!(rt.find("artist-songs-table").is_none());
@@ -256,7 +256,7 @@ fn the_releases_tab_is_the_default_and_songs_list_every_song_newest_album_first(
     click_tab(&mut rt, "songs");
     assert!(rt.find(&format!("artist-albums{mercy}")).is_none(), "the strips give way to the table");
     assert!(rt.find("artist-songs-table").is_some());
-    let order: Vec<usize> = rt.state.albums[mercy].tracks.iter().chain(&rt.state.albums[ruins].tracks).copied().collect();
+    let order: Vec<usize> = rt.state.albums()[mercy].tracks.iter().chain(&rt.state.albums()[ruins].tracks).copied().collect();
     assert_eq!(order.len(), 4);
     let y = |rt: &Runtime<App>, key: &str| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).unwrap_or_else(|| panic!("no {key}")).rect[1];
     let ys: Vec<f32> = order.iter().map(|i| y(&rt, &format!("artist-songs-t{i}"))).collect();
@@ -267,7 +267,7 @@ fn the_releases_tab_is_the_default_and_songs_list_every_song_newest_album_first(
 #[test]
 fn switching_back_restores_the_releases_and_another_artist_opens_on_them() {
     let mut rt = armand_hammer();
-    let mercy = rt.state.albums.iter().position(|a| a.title == "Mercy").expect("Mercy");
+    let mercy = rt.state.albums().iter().position(|a| a.title == "Mercy").expect("Mercy");
     click_tab(&mut rt, "songs");
     click_tab(&mut rt, "releases");
     assert!(rt.find(&format!("artist-albums{mercy}")).is_some());
@@ -341,8 +341,8 @@ fn eps_and_singles_list_apart_from_albums_on_the_artist_page_and_in_search() {
     let mut rt = runtime();
     rt.update(|s, _| s.set_library(tracks, false));
     settle(&mut rt);
-    let shrines = rt.state.albums.iter().position(|a| a.title == "Shrines EP").expect("Shrines EP");
-    let mercy = rt.state.albums.iter().position(|a| a.title == "Mercy").expect("Mercy");
+    let shrines = rt.state.albums().iter().position(|a| a.title == "Shrines EP").expect("Shrines EP");
+    let mercy = rt.state.albums().iter().position(|a| a.title == "Mercy").expect("Mercy");
 
     rt.update(|s, tx| s.show_artist("Armand Hammer", tx));
     settle(&mut rt);
@@ -368,8 +368,8 @@ fn a_song_with_several_of_the_artists_credits_lists_once_with_a_pill_per_role() 
     let mut songs = elsewhere();
     songs[0].credits.extend([Credit::parse(Role::Composer, "The Alchemist"), Credit::parse(Role::Mixer, "The Alchemist")]);
     let rt = alchemist(songs);
-    let over = rt.state.tracks.iter().position(|t| t.title == "Over There").expect("Over There");
-    let far = rt.state.tracks.iter().position(|t| t.title == "Far Off").expect("Far Off");
+    let over = rt.state.tracks().iter().position(|t| t.title == "Over There").expect("Over There");
+    let far = rt.state.tracks().iter().position(|t| t.title == "Far Off").expect("Far Off");
     let keys: Vec<String> = rt.elements().into_iter().filter_map(|e| e.key).collect();
     assert_eq!(keys.iter().filter(|k| *k == &format!("credits-t{over}")).count(), 1, "Over There lists once");
     assert!(keys.iter().any(|k| k == &format!("credits-t{far}")));
@@ -423,7 +423,7 @@ fn credits_on_their_own_album_show_on_its_card() {
         t
     });
     let rt = alchemist(songs);
-    let mercy = rt.state.albums.iter().position(|a| a.title == "Mercy").expect("Mercy");
+    let mercy = rt.state.albums().iter().position(|a| a.title == "Mercy").expect("Mercy");
     let pills: Vec<String> = rt
         .elements()
         .into_iter()
@@ -439,7 +439,7 @@ fn credits_on_their_own_album_show_on_its_card() {
     for r in [producer, engineer, mixer] {
         assert!(r[0] >= card[0] && r[0] + r[2] <= card[0] + card[2], "pill {r:?} inside card {card:?}");
     }
-    let dry = rt.state.tracks.iter().position(|t| t.title == "Dry Spell").expect("Dry Spell");
+    let dry = rt.state.tracks().iter().position(|t| t.title == "Dry Spell").expect("Dry Spell");
     assert!(rt.find(&format!("credits-t{dry}")).is_none(), "own-album songs stay out of Credits");
     assert_eq!(text_of(&rt, "artist-counts"), "1 album  •  3 songs  •  credited on 2 songs");
 }
@@ -505,7 +505,7 @@ fn unreadable_relations_say_so_instead_of_vanishing() {
     let prefs = Prefs::new("typo", r#"{ "merges": [["A", "B"]], "linkz": [] }"#);
     let rt = prefs.runtime();
     assert!(rt.state.error.as_deref().is_some_and(|e| e.contains("\"artists\"")), "{:?}", rt.state.error);
-    assert!(rt.state.relations.merges.is_empty());
+    assert!(rt.state.relations().merges.is_empty());
 }
 
 #[test]
@@ -525,7 +525,7 @@ fn include_aliases_adds_what_they_released_under_other_names_and_play_follows() 
     while let Some(i) = queue.next(crate::queue::Repeat::Off) {
         order.push(i);
     }
-    let played: Vec<String> = order.into_iter().map(|i| rt.state.tracks[i].title.clone()).collect();
+    let played: Vec<String> = order.into_iter().map(|i| rt.state.tracks()[i].title.clone()).collect();
     assert_eq!(played, ["Over There", "Far Off", "Laraaji", "Calypso Gene"], "Elsewhere (2020), then Mercy (2025)");
     // It stays on for the alias's page, which offers it too.
     click(&mut rt, "artist-pill-The Alchemist");
@@ -620,7 +620,7 @@ fn a_band_section_is_collapsed_until_opened_and_play_everything_plays_it() {
     while let Some(i) = queue.next(crate::queue::Repeat::Off) {
         order.push(i);
     }
-    let played: Vec<String> = order.into_iter().map(|i| rt.state.tracks[i].title.clone()).collect();
+    let played: Vec<String> = order.into_iter().map(|i| rt.state.tracks()[i].title.clone()).collect();
     assert_eq!(played, ["Over There", "Far Off", "Laraaji", "Calypso Gene"], "Somebody's own, then the band's, each once");
 }
 

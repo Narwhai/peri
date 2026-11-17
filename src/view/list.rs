@@ -20,7 +20,7 @@ const LIST_PX: f32 = 8.0;
 const GRID_PX: f32 = 16.0;
 
 pub(super) fn list(s: &App, p: &Palette, cx: &mut Cx<App>) -> El {
-    if s.tracks.is_empty() {
+    if s.tracks().is_empty() {
         return empty_state(s, p);
     }
     let albums = s.mode() == Mode::Albums;
@@ -67,12 +67,12 @@ pub(super) fn list(s: &App, p: &Palette, cx: &mut Cx<App>) -> El {
             },
             move |s: &App, n| match s.rows[n] {
                 Row::Album { album, section } => {
-                    let current = s.current.filter(|c| s.albums[album].tracks.contains(c));
+                    let current = s.current.filter(|c| s.albums()[album].tracks.contains(c));
                     let covers = s.covers.as_ref().map_or(0, |c| c.generation());
                     memo(album_key(album, section), (s.list_version, current, s.playing, s.selected, covers, p.dark), || list_card(s, album, section, &p))
                 }
                 Row::Grid { start, section } => {
-                    let playing = s.current.filter(|c| s.grid_albums(start, section).iter().any(|&a| s.albums[a].tracks.contains(c)));
+                    let playing = s.current.filter(|c| s.grid_albums(start, section).iter().any(|&a| s.albums()[a].tracks.contains(c)));
                     let covers = s.covers.as_ref().map_or(0, |c| c.generation());
                     memo(grid_key(start, section), (s.list_version, playing, s.playing, covers, width.to_bits(), s.card_size().to_bits(), p.dark), || {
                         grid_row(s, start, section, width, &p)
@@ -93,7 +93,7 @@ pub(super) fn list(s: &App, p: &Palette, cx: &mut Cx<App>) -> El {
                     let covers = if view.covers { s.covers.as_ref().map_or(0, |c| c.generation()) } else { 0 };
                     memo(row_key(track, section), (s.list_version, number, selected, current, playing, p.dark, columns.version(), covers), || {
                         let cover = view.covers.then(|| song_cover(s, format!("cover{track}"), track, table::COVER_W, &p));
-                        track_row(&s.tracks[track], track, section, number, selected, current, playing, cover, columns, &p)
+                        track_row(&s.tracks()[track], track, section, number, selected, current, playing, cover, columns, &p)
                     })
                 }
             },

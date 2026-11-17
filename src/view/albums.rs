@@ -66,7 +66,7 @@ fn album_artist(a: &Album, color: rune::Color) -> El {
 
 pub(super) fn cover_image(s: &App, a: &Album) -> Option<Image> {
     let first = *a.tracks.first()?;
-    s.covers.as_ref()?.get(&s.tracks[first].path).filter(|i| i.error().is_none())
+    s.covers.as_ref()?.get(&s.tracks()[first].path).filter(|i| i.error().is_none())
 }
 
 /// A square cover, or a placeholder with a note while it loads or when there is none.
@@ -90,7 +90,7 @@ pub(super) fn cover(key: String, image: Option<Image>, size: Option<f32>, p: &Pa
 /// Song `i`'s album cover at `size`, dimmed under the playing or paused icon when it's the
 /// current song.
 pub(super) fn song_cover(s: &App, key: String, i: usize, size: f32, p: &Palette) -> El {
-    let image = s.album_of(i).and_then(|a| cover_image(s, &s.albums[a]));
+    let image = s.album_of(i).and_then(|a| cover_image(s, &s.albums()[a]));
     let art = cover(key, image, Some(size), p);
     if s.current != Some(i) {
         return art;
@@ -117,7 +117,7 @@ pub(super) fn grid_row(s: &App, start: usize, section: Option<usize>, width: f32
 }
 
 fn grid_card(s: &App, a: usize, section: Option<usize>, w: f32, p: &Palette) -> El {
-    let album = &s.albums[a];
+    let album = &s.albums()[a];
     let playing = s.current.is_some_and(|c| album.tracks.contains(&c));
     let play = el()
         .key("play")
@@ -161,7 +161,7 @@ fn grid_card(s: &App, a: usize, section: Option<usize>, w: f32, p: &Palette) -> 
 
 /// An album card: header with cover, then its track table.
 pub(super) fn list_card(s: &App, a: usize, section: Option<usize>, p: &Palette) -> El {
-    let album = &s.albums[a];
+    let album = &s.albums()[a];
     let open = move |s: &mut App, tx: &mut Tx| s.show_album(a, tx);
     let art = cover(format!("cover{a}"), cover_image(s, album), Some(LIST_COVER), p).cursor(Cursor::Pointer).on_press_tx(open);
     let head = col()
@@ -189,12 +189,12 @@ pub(super) fn list_card(s: &App, a: usize, section: Option<usize>, p: &Palette) 
 /// The album's songs as a table with the page columns. Double-click plays the album from
 /// that song. Album cards in list views use the view's columns instead.
 fn track_table(s: &App, a: usize, columns: table::Columns, p: &Palette) -> El {
-    let album = &s.albums[a];
-    let discs = album.discs(&s.tracks);
+    let album = &s.albums()[a];
+    let discs = album.discs(s.tracks());
     let mut rows = col().w_full();
     let mut disc = None;
     for (n, &i) in album.tracks.iter().enumerate() {
-        let t = &s.tracks[i];
+        let t = &s.tracks()[i];
         if discs.len() > 1 && t.disc != disc {
             disc = t.disc;
             let label = disc.map_or("No disc".to_string(), |d| format!("Disc {d}"));
@@ -219,7 +219,7 @@ fn track_line(s: &App, t: &Track, i: usize, n: usize, a: usize, columns: table::
     let look = table::RowLook { lead, cover: None, selected: s.selected == Some(i), current, stripe: !n.is_multiple_of(2), height: TRACK_ROW_H, px: 8.0, pills: Vec::new() };
     table::song_row(t, i, columns, look, p)
         .key(format!("t{i}"))
-        .label(format!("{} by {}", t.title, t.artist().as_deref().unwrap_or(s.albums[a].artist_name())))
+        .label(format!("{} by {}", t.title, t.artist().as_deref().unwrap_or(s.albums()[a].artist_name())))
         .on_press(move |s: &mut App| s.selected = Some(i))
         .on_double_press_tx(move |s: &mut App, tx| s.play_album(a, Some(i), tx))
 }
@@ -334,7 +334,7 @@ pub(super) fn secondary_button(key: &'static str, glyph: &'static rune::Icon, la
 // Album page
 
 pub(super) fn album_page(s: &App, a: usize, p: &Palette) -> El {
-    let album = &s.albums[a];
+    let album = &s.albums()[a];
     let back = row()
         .key("back")
         .h(28.0)
@@ -415,7 +415,7 @@ pub(super) fn back_label(s: &App) -> String {
     match s.history.last() {
         Some(crate::app::Page::Artist(name) | crate::app::Page::Label(name)) => name.clone(),
         Some(crate::app::Page::Collab(names)) => crate::collab::title(names),
-        Some(crate::app::Page::Album(id)) => s.albums.iter().find(|a| &a.id() == id).map_or_else(|| "Back".to_string(), |a| a.title.clone()),
+        Some(crate::app::Page::Album(id)) => s.albums().iter().find(|a| &a.id() == id).map_or_else(|| "Back".to_string(), |a| a.title.clone()),
         Some(crate::app::Page::Search) => format!("Results for “{}”", s.search.text.trim()),
         Some(crate::app::Page::Settings) => "Settings".to_string(),
         Some(crate::app::Page::Graph) => "Graph".to_string(),
@@ -452,15 +452,15 @@ fn fact(label: &str, value: El, p: &Palette) -> El {
 
 /// "More by {artist}": the artist's other albums, newest first, as a scrolling row of covers.
 fn more_by(s: &App, a: usize, p: &Palette) -> Option<El> {
-    let album = &s.albums[a];
+    let album = &s.albums()[a];
     let artist = album.artist.as_deref()?.to_lowercase();
-    let mut others: Vec<usize> = (0..s.albums.len())
-        .filter(|&o| o != a && s.albums[o].artist.as_deref().is_some_and(|x| x.to_lowercase() == artist))
+    let mut others: Vec<usize> = (0..s.albums().len())
+        .filter(|&o| o != a && s.albums()[o].artist.as_deref().is_some_and(|x| x.to_lowercase() == artist))
         .collect();
     if others.is_empty() {
         return None;
     }
-    others.sort_by_key(|&o| std::cmp::Reverse(s.albums[o].year));
+    others.sort_by_key(|&o| std::cmp::Reverse(s.albums()[o].year));
     Some(album_strip(s, "more", &format!("More by {}", album.artist_name()), &others, false, &[], p))
 }
 
@@ -497,7 +497,7 @@ pub(super) fn album_wall(s: &App, key: &str, title: &str, albums: &[usize], arti
 /// A strip or wall's card: cover, title, optionally the artists, then kind and year. Opens
 /// the album.
 pub(super) fn small_card(s: &App, key: &str, o: usize, artists: bool, width: f32, p: &Palette) -> El {
-    let other = &s.albums[o];
+    let other = &s.albums()[o];
     let mut card = col()
         .key(format!("{key}{o}"))
         .w(width)

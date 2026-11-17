@@ -40,11 +40,11 @@ fn click(rt: &mut Runtime<App>, key: &str) {
 }
 
 fn album(rt: &Runtime<App>, title: &str) -> usize {
-    rt.state.albums.iter().position(|a| a.title == title).unwrap_or_else(|| panic!("no album {title}"))
+    rt.state.albums().iter().position(|a| a.title == title).unwrap_or_else(|| panic!("no album {title}"))
 }
 
 fn shown_titles(rt: &Runtime<App>) -> Vec<String> {
-    rt.state.shown_albums.iter().map(|&a| rt.state.albums[a].title.clone()).collect()
+    rt.state.shown_albums.iter().map(|&a| rt.state.albums()[a].title.clone()).collect()
 }
 
 fn text_of(rt: &Runtime<App>, key: &str) -> String {
@@ -113,7 +113,7 @@ fn playing_an_album_continues_into_the_next_album_of_the_view() {
     let a = album(&rt, "Get Up");
     click(&mut rt, &album_key(a, None));
     click(&mut rt, "page-play");
-    let titles = |rt: &Runtime<App>| rt.state.tracks[rt.state.current.expect("playing")].title.clone();
+    let titles = |rt: &Runtime<App>| rt.state.tracks()[rt.state.current.expect("playing")].title.clone();
     assert_eq!(titles(&rt), "New Jeans");
     for _ in 0..4 {
         click(&mut rt, "next");
@@ -127,7 +127,7 @@ fn double_clicking_a_track_plays_its_album_from_there() {
     click(&mut rt, "mode/albums");
     let a = album(&rt, "Get Up");
     click(&mut rt, &album_key(a, None));
-    let shy = rt.state.tracks.iter().position(|t| t.title == "Super Shy").unwrap();
+    let shy = rt.state.tracks().iter().position(|t| t.title == "Super Shy").unwrap();
     let (x, y) = row_point(&rt, &format!("t{shy}"));
     for _ in 0..2 {
         rt.pointer_down(x, y);
@@ -137,13 +137,13 @@ fn double_clicking_a_track_plays_its_album_from_there() {
     settle(&mut rt);
     assert_eq!(rt.state.current, Some(shy));
     click(&mut rt, "next");
-    assert_eq!(rt.state.tracks[rt.state.current.unwrap()].title, "ETA");
+    assert_eq!(rt.state.tracks()[rt.state.current.unwrap()].title, "ETA");
 }
 
 #[test]
 fn the_now_playing_cover_opens_the_playing_album() {
     let mut rt = runtime();
-    let eta = rt.state.tracks.iter().position(|t| t.title == "ETA").unwrap();
+    let eta = rt.state.tracks().iter().position(|t| t.title == "ETA").unwrap();
     rt.update(|s, tx| s.play_index(eta, tx));
     settle(&mut rt);
     click(&mut rt, "cover");
@@ -243,7 +243,7 @@ fn hovering_a_grid_cards_play_button_keeps_it_shown_and_pressing_it_plays_withou
     rt.pointer_up(x, y);
     settle(&mut rt);
     assert_eq!(rt.state.page, Page::Library, "pressing play doesn't open the album");
-    assert_eq!(rt.state.tracks[rt.state.current.expect("playing")].title, "New Jeans");
+    assert_eq!(rt.state.tracks()[rt.state.current.expect("playing")].title, "New Jeans");
 }
 
 fn rect(rt: &Runtime<App>, key: &str) -> [f32; 4] {
@@ -291,7 +291,7 @@ fn an_album_page_without_credits_shows_its_buttons_without_a_divider() {
 fn long_credits(s: &mut App) {
     use crate::credits::{Credit, Role};
     crate::scene_library(s);
-    let mut tracks = s.tracks.clone();
+    let mut tracks = s.tracks().to_vec();
     let composers = "Erika de Casier, Jinsu Park, Fine Glindvad Jensen, Frankie Scoca, Kristine Bogan, 250, Ylva Dimberg, Donghyun Kim, freekind., Henriette Motzfeldt, Catharina Stoltenberg";
     let lyricists = "Erika de Casier, Gigi, Haerin, Fine Glindvad Jensen, Kristine Bogan, Danielle, Donghyun Kim, Beenzino, Ylva Dimberg, freekind., Henriette Motzfeldt, Catharina Stoltenberg";
     let roles = [(Role::Composer, composers), (Role::Lyricist, lyricists), (Role::Producer, "250, Erika de Casier"), (Role::Performer, "NewJeans (background vocals), Emily Kim (background vocals)"), (Role::Engineer, "Bill Zimmerman"), (Role::Mixer, "Phil Tan, Nathan Boddy, Tony Maserati, Jonny Breakwell, David K. Younghyun")];
@@ -313,13 +313,13 @@ fn an_album_page_shows_its_genres_as_pills_and_its_label_under_the_tracks() {
     let a = album(&rt, "Spaces");
     rt.update(|s, tx| s.show_album(a, tx));
     settle(&mut rt);
-    let genres = rt.state.albums[a].genres.clone();
+    let genres = rt.state.albums()[a].genres.clone();
     assert!(!genres.is_empty(), "the demo album has genres");
     for n in 0..genres.len() {
         assert!(rt.find(&format!("page-genre{n}")).is_some(), "genre {n} shows as a pill");
     }
     assert!(rt.find("fact-label").is_none(), "the label left the facts");
-    let year = rt.state.albums[a].year.expect("a year");
+    let year = rt.state.albums()[a].year.expect("a year");
     assert_eq!(text_of(&rt, "page-release"), format!("℗ {year} Erased Tapes"));
     assert!(rect(&rt, "page-release")[1] > rect(&rt, "tracks")[1], "it sits under the track list");
 }

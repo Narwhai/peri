@@ -102,7 +102,7 @@ fn music(s: &App, info: &ArtistPage, pills: &[(usize, Vec<table::Pill>)], p: &Pa
         // Mixed with their aliases' releases, cards say which name each is under.
         ArtistTab::Releases => col().key("artist-releases").w_full().gap(22.0).children(release_strips(s, "artist", &info.albums, info.with_aliases, pills, p)),
         ArtistTab::Songs => {
-            let list: Vec<usize> = info.albums.iter().flat_map(|&a| s.albums[a].tracks.iter().copied()).collect();
+            let list: Vec<usize> = info.albums.iter().flat_map(|&a| s.albums()[a].tracks.iter().copied()).collect();
             col().key("artist-songs-list").w_full().child(song_table(s, "artist-songs", untagged(&list), &[], &list, p))
         }
     };
@@ -146,7 +146,7 @@ pub(super) fn release_strips(s: &App, key: &str, albums: &[usize], artists: bool
     ReleaseType::ALL
         .into_iter()
         .filter_map(|kind| {
-            let of_kind: Vec<usize> = albums.iter().copied().filter(|&a| s.albums[a].release_type == kind).collect();
+            let of_kind: Vec<usize> = albums.iter().copied().filter(|&a| s.albums()[a].release_type == kind).collect();
             let section = format!("{key}-{}", kind.plural().to_lowercase());
             (!of_kind.is_empty()).then(|| album_strip(s, &section, kind.plural(), &of_kind, artists, pills, p))
         })
@@ -158,10 +158,10 @@ pub(super) fn release_strips(s: &App, key: &str, albums: &[usize], artists: bool
 pub(super) fn head(s: &App, info: &ArtistPage, others: &[(Relation, ArtistPage)], link: Option<El>, p: &Palette) -> El {
     let linked = link.is_none();
     let first = info.albums.first().copied().or_else(|| info.appears_on.first().and_then(|&i| s.album_of(i)));
-    let mut art = cover("artist-cover".into(), first.and_then(|a| cover_image(s, &s.albums[a])), Some(160.0), p);
+    let mut art = cover("artist-cover".into(), first.and_then(|a| cover_image(s, &s.albums()[a])), Some(160.0), p);
     let mut counts = Vec::new();
     for kind in ReleaseType::ALL {
-        let n = info.albums.iter().filter(|&&a| s.albums[a].release_type == kind).count();
+        let n = info.albums.iter().filter(|&&a| s.albums()[a].release_type == kind).count();
         if n > 0 {
             counts.push(kind.count(n));
         }
@@ -195,29 +195,29 @@ pub(super) fn head(s: &App, info: &ArtistPage, others: &[(Relation, ArtistPage)]
         });
     }
     let mut buttons = row().gap(8.0);
-    if !info.play_list(&s.albums).is_empty() {
+    if !info.play_list(s.albums()).is_empty() {
         let (who, with_aliases) = (info.name.clone(), info.with_aliases);
         buttons = buttons.child(play_button("artist-play", "Play", p).on_press_tx(move |s: &mut App, tx| {
-            let list = page(&who, &s.tracks, &s.albums, &s.relations, with_aliases).play_list(&s.albums);
+            let list = page(&who, s.tracks(), s.albums(), s.relations(), with_aliases).play_list(s.albums());
             if let Some(&first) = list.first() {
                 s.play_list(list, first, tx);
             }
         }));
     }
-    if !info.discography(&s.albums).is_empty() {
+    if !info.discography(s.albums()).is_empty() {
         let (who, with_aliases) = (info.name.clone(), info.with_aliases);
         buttons = buttons.child(tinted_button("artist-discography", &icons::PLAY, "Play Discography", p).on_press_tx(move |s: &mut App, tx| {
-            let list = page(&who, &s.tracks, &s.albums, &s.relations, with_aliases).discography(&s.albums);
+            let list = page(&who, s.tracks(), s.albums(), s.relations(), with_aliases).discography(s.albums());
             if let Some(&first) = list.first() {
                 s.play_list(list, first, tx);
             }
         }));
     }
     // Play Everything also plays the bands and members, when they have music.
-    if !linked && others.iter().any(|(_, o)| !o.all_songs(&s.albums).is_empty()) {
+    if !linked && others.iter().any(|(_, o)| !o.all_songs(s.albums()).is_empty()) {
         let (who, with_aliases) = (info.name.clone(), info.with_aliases);
         buttons = buttons.child(tinted_button("artist-play-everything", &icons::PLAY, "Play Everything", p).on_press_tx(move |s: &mut App, tx| {
-            let list = everything(&who, &s.tracks, &s.albums, &s.relations, with_aliases);
+            let list = everything(&who, s.tracks(), s.albums(), s.relations(), with_aliases);
             if let Some(&first) = list.first() {
                 s.play_list(list, first, tx);
             }
@@ -239,7 +239,7 @@ pub(super) fn head(s: &App, info: &ArtistPage, others: &[(Relation, ArtistPage)]
 
 /// Their albums' pills, one row per album with credits on it.
 fn album_pill_rows(s: &App, info: &ArtistPage, p: &Palette) -> Vec<(usize, Vec<table::Pill>)> {
-    info.album_credits.iter().map(|(a, roles)| (*a, album_pills(s.albums[*a].tracks.len(), roles, p))).collect()
+    info.album_credits.iter().map(|(a, roles)| (*a, album_pills(s.albums()[*a].tracks.len(), roles, p))).collect()
 }
 
 /// A collapsed section for a band the artist is in, or a member of their band: the other
@@ -252,7 +252,7 @@ fn involved_section(s: &App, relation: Relation, other: &ArtistPage, p: &Palette
         Relation::Member => format!("{} (solo)", other.name),
         Relation::Alias => return None,
     };
-    let count = other.all_songs(&s.albums).len();
+    let count = other.all_songs(s.albums()).len();
     let open = s.artist_related_open.contains(&other.name);
     let who = other.name.clone();
     let toggle = section_toggle(&format!("{key}-toggle"), &title, count, open, p).on_press(move |s: &mut App| {
@@ -289,7 +289,7 @@ fn related(s: &App, info: &ArtistPage, p: &Palette) -> El {
         let list = names.into_iter().fold(row().gap(8.0).flex_wrap(), |list, name| {
             let who = name.clone();
             let remove = remove_button(format!("unlink-{}-{name}", relation.id()), &format!("Remove {name}"), p).on_press(move |s: &mut App| s.unlink_artist(relation, &who));
-            list.child(artist_pill(name, known(name, &s.tracks), p).pr(4.0).gap(4.0).child(remove))
+            list.child(artist_pill(name, known(name, s.tracks()), p).pr(4.0).gap(4.0).child(remove))
         });
         section = section.child(col().gap(6.0).child(text(relation.title()).font(SMALL).color(p.tx3)).child(list));
     }
@@ -357,7 +357,7 @@ fn link_artist(s: &App, info: &ArtistPage, p: &Palette, kit: &Kit, layer: &mut V
     }
     let typed = s.link_name.text.trim().to_string();
     let taken: Vec<String> = info.names.iter().chain(info.related.iter().map(|(_, n)| n)).cloned().collect();
-    let found = suggest(&typed, &s.tracks, &taken, 6);
+    let found = suggest(&typed, s.tracks(), &taken, 6);
     // Enter takes the library's spelling of what's typed, else it as typed.
     let exact = found.iter().find(|n| n.eq_ignore_ascii_case(&typed)).cloned();
     let field = TextInput::new(&s.link_name)
@@ -496,7 +496,7 @@ fn credits(s: &App, key: &str, info: &ArtistPage, p: &Palette) -> El {
         .credits
         .iter()
         .map(|(i, roles)| {
-            let pills = used.iter().map(|r| roles.contains(r).then(|| role_pill(&s.tracks[*i], *r, &info.matched, p))).collect();
+            let pills = used.iter().map(|r| roles.contains(r).then(|| role_pill(&s.tracks()[*i], *r, &info.matched, p))).collect();
             (*i, pills)
         })
         .collect();
@@ -562,7 +562,7 @@ fn section_toggle(key: &str, title: &str, count: usize, open: bool, p: &Palette)
 
 #[allow(clippy::too_many_arguments)]
 fn song_line(s: &App, key: &str, i: usize, list: &[usize], pills: Vec<Option<table::Pill>>, stripe: bool, columns: table::Columns, p: &Palette) -> El {
-    let t = &s.tracks[i];
+    let t = &s.tracks()[i];
     let current = s.current == Some(i);
     let lead = song_cover(s, format!("{key}-cover{i}"), i, COVER_W, p);
     let list = list.to_vec();

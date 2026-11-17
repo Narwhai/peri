@@ -143,9 +143,9 @@ pub enum ArtistTab {
 }
 
 pub struct App {
-    pub tracks: Vec<Track>,
+    tracks: Vec<Track>,
     /// The library gathered into albums, in library order.
-    pub albums: Vec<Album>,
+    albums: Vec<Album>,
     /// For each track, the index in `albums` of the album it is on; see `album_of`.
     album_index: Vec<Option<usize>>,
     /// Bumped whenever the tracks, albums or relations change; page models are keyed by it.
@@ -210,7 +210,7 @@ pub struct App {
     /// The folders and files the library is made of, saved and scanned at launch.
     pub library: Vec<PathBuf>,
     /// Merges and links between artists, from the preferences file (edited by hand for now).
-    pub relations: crate::relations::Relations,
+    relations: crate::relations::Relations,
     /// Set when the saved relations couldn't be read: editing them would overwrite the file.
     relations_unreadable: bool,
     /// The Link artist popover: what the picked name becomes, and the name field.
@@ -707,10 +707,35 @@ impl App {
         self.pages.recent_songs.get(self.data_version, || self.recently_played())
     }
 
+    /// The library's tracks, in library order.
+    pub fn tracks(&self) -> &[Track] {
+        &self.tracks
+    }
+
+    /// The library gathered into albums, in library order.
+    pub fn albums(&self) -> &[Album] {
+        &self.albums
+    }
+
+    /// The artist relations.
+    pub fn relations(&self) -> &crate::relations::Relations {
+        &self.relations
+    }
+
+    /// Applies `edit` to the track at `i` (if any), then rebuilds the albums, whose credits come from their tracks.
+    pub fn edit_track(&mut self, i: usize, edit: impl FnOnce(&mut Track)) {
+        let Some(track) = self.tracks.get_mut(i) else { return };
+        edit(track);
+        self.rebuild_albums();
+        self.graph.invalidate();
+        self.refilter();
+    }
+
     /// Replaces the artist relations, as a change to them: page models built from them are rebuilt.
     pub fn set_relations(&mut self, relations: crate::relations::Relations) {
         self.relations = relations;
         self.data_version = self.data_version.wrapping_add(1);
+        self.graph.invalidate();
     }
 
     /// The album shown on the album page, if it's still in the library.

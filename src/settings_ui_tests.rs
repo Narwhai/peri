@@ -78,7 +78,7 @@ fn click(rt: &mut Runtime<App>, key: &str) {
 }
 
 fn titles(rt: &Runtime<App>) -> Vec<String> {
-    let mut t: Vec<String> = rt.state.tracks.iter().map(|t| t.title.clone()).collect();
+    let mut t: Vec<String> = rt.state.tracks().iter().map(|t| t.title.clone()).collect();
     t.sort();
     t
 }
@@ -104,7 +104,7 @@ fn an_opened_folder_is_remembered_and_scanned_at_the_next_launch() {
     // No command-line folders: the test harness's own arguments aren't the app's.
     app.setup_with(Arc::new(|| {}), Vec::new());
     assert_eq!(app.library, [music]);
-    assert_eq!(app.tracks.len(), 2, "headless setup waits for the saved library's scan");
+    assert_eq!(app.tracks().len(), 2, "headless setup waits for the saved library's scan");
 }
 
 #[test]
@@ -161,7 +161,7 @@ fn forgetting_the_library_empties_it_and_its_saved_folders() {
     finish_scan(&mut rt);
     click(&mut rt, "settings");
     click(&mut rt, "library-forget");
-    assert!(rt.state.tracks.is_empty());
+    assert!(rt.state.tracks().is_empty());
     assert!(Store::at(f.prefs()).load_library().is_empty());
     assert!(rt.find("library-empty").is_some());
 }

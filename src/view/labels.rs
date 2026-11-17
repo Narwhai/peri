@@ -29,17 +29,17 @@ pub(super) fn label_page(s: &App, name: &str, p: &Palette) -> El {
         .child(text(back_label(s)).font(TITLE).color(p.tx2));
 
     let first = info.albums.first().copied();
-    let art = cover("label-cover".into(), first.and_then(|a| cover_image(s, &s.albums[a])), Some(160.0), p);
+    let art = cover("label-cover".into(), first.and_then(|a| cover_image(s, &s.albums()[a])), Some(160.0), p);
     let mut counts = Vec::new();
     for kind in ReleaseType::ALL {
-        let n = info.albums.iter().filter(|&&a| s.albums[a].release_type == kind).count();
+        let n = info.albums.iter().filter(|&&a| s.albums()[a].release_type == kind).count();
         if n > 0 {
             counts.push(kind.count(n));
         }
     }
     let mut artists: Vec<String> = Vec::new();
     for &a in &info.albums {
-        let name = s.albums[a].artist_name();
+        let name = s.albums()[a].artist_name();
         if !artists.iter().any(|x| x.eq_ignore_ascii_case(name)) {
             artists.push(name.to_string());
         }
@@ -57,7 +57,7 @@ pub(super) fn label_page(s: &App, name: &str, p: &Palette) -> El {
     if !info.albums.is_empty() {
         let who = info.name.clone();
         details = details.child(el().h(10.0)).child(row().gap(8.0).child(play_button("label-play", "Play", p).on_press_tx(move |s: &mut App, tx| {
-            let list = page(&who, &s.albums).play_list(&s.albums);
+            let list = page(&who, s.albums()).play_list(s.albums());
             if let Some(&first) = list.first() {
                 s.play_list(list, first, tx);
             }
@@ -70,7 +70,7 @@ pub(super) fn label_page(s: &App, name: &str, p: &Palette) -> El {
         body = body.child(text(format!("Nothing in the library was released on {}.", info.name)).key("label-empty").font(BODY).color(p.tx3));
     }
     for kind in ReleaseType::ALL {
-        let of_kind: Vec<usize> = info.albums.iter().copied().filter(|&a| s.albums[a].release_type == kind).collect();
+        let of_kind: Vec<usize> = info.albums.iter().copied().filter(|&a| s.albums()[a].release_type == kind).collect();
         if !of_kind.is_empty() {
             body = body.child(album_wall(s, &format!("label-{}", kind.plural().to_lowercase()), kind.plural(), &of_kind, true, p));
         }

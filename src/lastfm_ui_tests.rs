@@ -161,7 +161,7 @@ fn playing_sends_now_playing_and_the_scrobble_once() {
     Store::at(prefs.path()).save_lastfm(&saved(Some(session("key")))).unwrap();
     let mut f = Fake::new(&prefs.path());
     f.rt.update(|s, _| crate::scene_library(s));
-    let eta = f.rt.state.tracks.iter().position(|t| t.title == "ETA").unwrap();
+    let eta = f.rt.state.tracks().iter().position(|t| t.title == "ETA").unwrap();
     f.rt.update(|s, tx| s.play_index(eta, tx));
     f.rt.frame(0.0);
     assert!(matches!(f.calls().as_slice(), [Call::NowPlaying { session, song }] if session == "sk" && song.track == "ETA" && song.artist == "NewJeans"));

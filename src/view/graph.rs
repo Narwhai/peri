@@ -53,7 +53,7 @@ fn edge_width(kind: EdgeKind) -> f32 {
 
 pub(super) fn graph_page(s: &App, p: &Palette, kit: &Kit, layer: &mut Vec<El>) -> El {
     let g = &s.graph;
-    let body = if s.tracks.is_empty() && s.scan.is_none() {
+    let body = if s.tracks().is_empty() && s.scan.is_none() {
         empty("No artists yet", "Open a folder to see how its artists are linked.", p)
     } else if g.model.nodes.is_empty() {
         empty(if s.scan.is_some() { "Reading your music…" } else { "No artists" }, "Artists show once songs with artist tags are in the library.", p)

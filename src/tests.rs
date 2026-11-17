@@ -53,7 +53,7 @@ fn key(rt: &mut Runtime<App>, key: Key) {
 
 /// The library index of the demo song titled `title`.
 fn idx(rt: &Runtime<App>, title: &str) -> usize {
-    rt.state.tracks.iter().position(|t| t.title == title).unwrap_or_else(|| panic!("no song {title}"))
+    rt.state.tracks().iter().position(|t| t.title == title).unwrap_or_else(|| panic!("no song {title}"))
 }
 
 fn text_of(rt: &Runtime<App>, key: &str) -> String {
@@ -139,7 +139,7 @@ fn searching_opens_results_that_back_returns_to_and_clearing_leaves() {
     assert!(rt.find("artist-name").is_none(), "no artist is named radiance");
     assert!(rt.find("search-albums").is_some());
     // An album opened from the results goes back to them.
-    let a = rt.state.albums.iter().position(|a| a.title == "Day of Radiance").expect("Day of Radiance");
+    let a = rt.state.albums().iter().position(|a| a.title == "Day of Radiance").expect("Day of Radiance");
     rt.update(|s, tx| s.show_album(a, tx));
     settle(&mut rt);
     assert_eq!(text_of(&rt, "page-title"), "Day of Radiance");
@@ -431,7 +431,7 @@ fn the_mouse_back_and_forward_buttons_walk_the_pages() {
     let mut rt = runtime(true);
     rt.update(|s, tx| s.show_artist("Laraaji", tx));
     settle(&mut rt);
-    let a = rt.state.albums.iter().position(|a| a.title == "Day of Radiance").expect("Day of Radiance");
+    let a = rt.state.albums().iter().position(|a| a.title == "Day of Radiance").expect("Day of Radiance");
     rt.update(|s, tx| s.show_album(a, tx));
     settle(&mut rt);
     let album = rt.state.page.clone();
@@ -553,8 +553,8 @@ fn real_library_groups_by_every_property() {
 #[test]
 fn a_play_counts_at_half_the_song_and_shows_in_columns_and_details() {
     let mut rt = runtime(true);
-    let eta = rt.state.tracks.iter().position(|t| t.title == "ETA").expect("ETA is in the demo library");
-    assert_eq!(rt.state.tracks[eta].plays, 0);
+    let eta = rt.state.tracks().iter().position(|t| t.title == "ETA").expect("ETA is in the demo library");
+    assert_eq!(rt.state.tracks()[eta].plays, 0);
     rt.update(|s, tx| s.play_index(eta, tx));
     rt.frame(0.0);
     // ETA lasts 151 seconds: the play counts after 75.5 of them, heard in 0.2 s ticks.
@@ -562,14 +562,14 @@ fn a_play_counts_at_half_the_song_and_shows_in_columns_and_details() {
         rt.update(|s, _| s.position = f64::from(step) * 0.2);
         rt.frame(0.2);
         if step == 350 {
-            let eta = rt.state.tracks.iter().find(|t| t.title == "ETA").expect("still there");
+            let eta = rt.state.tracks().iter().find(|t| t.title == "ETA").expect("still there");
             assert_eq!(eta.plays, 0, "70 seconds isn't half of 151");
         }
     }
-    let eta = rt.state.tracks.iter().position(|t| t.title == "ETA").expect("still there");
-    assert_eq!(rt.state.tracks[eta].plays, 1, "counted once");
-    assert!(rt.state.tracks[eta].last_played.is_some());
-    let album = rt.state.albums.iter().find(|a| a.tracks.contains(&eta)).expect("ETA's album");
+    let eta = rt.state.tracks().iter().position(|t| t.title == "ETA").expect("still there");
+    assert_eq!(rt.state.tracks()[eta].plays, 1, "counted once");
+    assert!(rt.state.tracks()[eta].last_played.is_some());
+    let album = rt.state.albums().iter().find(|a| a.tracks.contains(&eta)).expect("ETA's album");
     assert_eq!(album.plays, 1, "the album adds up its songs' plays");
 
     rt.update(|s, _| s.views.active_mut().columns.push(crate::query::property::Property::Plays));
@@ -592,7 +592,7 @@ fn plays_are_saved_beside_the_preferences_and_count_at_the_next_launch() {
     let mut rt = Runtime::new(app, view, (980.0, 640.0), Env::new(true, 1.0));
     rt.poll = Some(crate::app::poll);
     rt.frame(0.0);
-    let eta = rt.state.tracks.iter().position(|t| t.title == "ETA").expect("ETA is in the demo library");
+    let eta = rt.state.tracks().iter().position(|t| t.title == "ETA").expect("ETA is in the demo library");
     rt.update(|s, tx| s.play_index(eta, tx));
     rt.frame(0.0);
     for step in 1..=400 {
@@ -603,9 +603,9 @@ fn plays_are_saved_beside_the_preferences_and_count_at_the_next_launch() {
 
     let mut next = App::new(Output::Silent, Store::at(&file));
     crate::scene_library(&mut next);
-    let eta = next.tracks.iter().find(|t| t.title == "ETA").expect("ETA is in the demo library");
+    let eta = next.tracks().iter().find(|t| t.title == "ETA").expect("ETA is in the demo library");
     assert_eq!(eta.plays, 1);
-    assert_eq!(next.tracks.iter().map(|t| t.plays).sum::<u32>(), 1, "only ETA played");
+    assert_eq!(next.tracks().iter().map(|t| t.plays).sum::<u32>(), 1, "only ETA played");
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
@@ -637,9 +637,9 @@ fn the_play_button_darkens_as_pause_while_playing_and_lightens_once_paused() {
 /// The titles a queue plays from its current track to its end, without the playing state.
 fn queue_titles(rt: &Runtime<App>) -> Vec<String> {
     let mut queue = rt.state.queue.clone().expect("a queue is playing");
-    let mut titles = vec![rt.state.tracks[queue.current()].title.clone()];
+    let mut titles = vec![rt.state.tracks()[queue.current()].title.clone()];
     while let Some(i) = queue.next(Repeat::Off) {
-        titles.push(rt.state.tracks[i].title.clone());
+        titles.push(rt.state.tracks()[i].title.clone());
     }
     titles
 }
@@ -661,7 +661,7 @@ fn play_after_the_queue_ran_out_starts_the_last_track_again() {
 #[test]
 fn a_rescan_keeps_the_shuffled_queue_a_list_started() {
     let mut rt = runtime(true);
-    let all: Vec<usize> = (0..rt.state.tracks.len()).collect();
+    let all: Vec<usize> = (0..rt.state.tracks().len()).collect();
     let eta = idx(&rt, "ETA");
     rt.update(move |s, tx| {
         s.shuffle = true;
@@ -676,7 +676,7 @@ fn a_rescan_keeps_the_shuffled_queue_a_list_started() {
 #[test]
 fn a_rescan_drops_queued_tracks_that_left_the_library() {
     let mut rt = runtime(true);
-    let all: Vec<usize> = (0..rt.state.tracks.len()).collect();
+    let all: Vec<usize> = (0..rt.state.tracks().len()).collect();
     let eta = idx(&rt, "ETA");
     rt.update(move |s, tx| s.play_list(all, eta, tx));
     let before = queue_titles(&rt);
@@ -712,7 +712,7 @@ fn adding_a_folder_while_the_launch_scan_runs_keeps_both_folders() {
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
     assert!(rt.state.scan.is_none(), "the scan finishes");
-    let mut paths: Vec<std::path::PathBuf> = rt.state.tracks.iter().map(|t| t.path.clone()).collect();
+    let mut paths: Vec<std::path::PathBuf> = rt.state.tracks().iter().map(|t| t.path.clone()).collect();
     paths.sort();
     let mut expected = vec![a.join("one.mp3"), b.join("two.mp3")];
     expected.sort();
@@ -725,17 +725,17 @@ fn adding_a_folder_while_the_launch_scan_runs_keeps_both_folders() {
 fn album_of_matches_the_albums_after_a_library_change_and_a_play() {
     use crate::query::store::Store;
     let mut app = App::new(Output::Silent, Store::memory());
-    let album_of_by_scan = |app: &App, i: usize| app.albums.iter().position(|a| a.tracks.contains(&i));
+    let album_of_by_scan = |app: &App, i: usize| app.albums().iter().position(|a| a.tracks.contains(&i));
     app.set_library(crate::demo_tracks(), false);
-    assert!(!app.albums.is_empty());
-    for i in 0..app.tracks.len() {
+    assert!(!app.albums().is_empty());
+    for i in 0..app.tracks().len() {
         assert_eq!(app.album_of(i), album_of_by_scan(&app, i), "track {i} after set_library");
     }
     app.record_play(0, 1_000).expect("the play is recorded");
-    for i in 0..app.tracks.len() {
+    for i in 0..app.tracks().len() {
         assert_eq!(app.album_of(i), album_of_by_scan(&app, i), "track {i} after record_play");
     }
-    assert_eq!(app.album_of(app.tracks.len()), None, "out of range is no album");
+    assert_eq!(app.album_of(app.tracks().len()), None, "out of range is no album");
 }
 
 #[test]
@@ -743,14 +743,14 @@ fn cached_page_models_match_fresh_builds_and_follow_library_changes() {
     use crate::query::store::Store;
     let mut app = App::new(Output::Silent, Store::memory());
     app.set_library(crate::demo_tracks(), false);
-    let artist = app.tracks[0].artist().expect("the demo's first song has an artist");
+    let artist = app.tracks()[0].artist().expect("the demo's first song has an artist");
 
     app.search.text = "  NILS  ".into();
-    let fresh = crate::search::search("nils", &app.tracks, &app.albums, &app.relations);
+    let fresh = crate::search::search("nils", app.tracks(), app.albums(), app.relations());
     assert_eq!(*app.search_results(), fresh, "cached search equals a fresh search");
     assert!(Rc::ptr_eq(&app.search_results(), &app.search_results()), "a repeat asks for the kept model");
 
-    let (page, others) = (crate::artist::page(&artist, &app.tracks, &app.albums, &app.relations, true), crate::artist::involved(&artist, &app.tracks, &app.albums, &app.relations, true));
+    let (page, others) = (crate::artist::page(&artist, app.tracks(), app.albums(), app.relations(), true), crate::artist::involved(&artist, app.tracks(), app.albums(), app.relations(), true));
     let model = app.artist_model(&artist, true);
     assert_eq!(model.0, page, "cached artist page equals a fresh build");
     assert_eq!(model.1, others, "cached involved artists equal a fresh build");
@@ -759,7 +759,7 @@ fn cached_page_models_match_fresh_builds_and_follow_library_changes() {
     app.record_play(0, 1_000).expect("the play is recorded");
     let after = app.search_results();
     assert!(!Rc::ptr_eq(&before, &after), "a library change rebuilds the search results");
-    assert_eq!(*after, crate::search::search("nils", &app.tracks, &app.albums, &app.relations), "rebuilt search equals a fresh search");
+    assert_eq!(*after, crate::search::search("nils", app.tracks(), app.albums(), app.relations()), "rebuilt search equals a fresh search");
     assert_eq!(app.recent_songs().first().copied(), Some(0), "the played song leads Recently Played after the change");
 }
 
@@ -788,14 +788,14 @@ fn a_play_updates_its_album_in_place_like_a_rebuild() {
     use crate::query::store::Store;
     let mut app = App::new(Output::Silent, Store::memory());
     app.set_library(crate::demo_tracks(), false);
-    let before = app.albums.clone();
+    let before = app.albums().to_vec();
     let i = 0;
     let a = app.album_of(i).expect("the first song is in an album");
     app.record_play(i, 1_000).expect("the play is recorded");
-    assert_eq!(app.albums, crate::album::build(&app.tracks), "the in-place update equals a full rebuild");
-    assert_eq!(app.albums.len(), before.len(), "albums keep their count");
-    assert_eq!(app.albums[a].plays, before[a].plays + 1, "the album's plays went up by one");
-    assert_eq!(app.albums[a].last_played, Some(1_000), "the album's last played is the play");
+    assert_eq!(app.albums(), crate::album::build(app.tracks()), "the in-place update equals a full rebuild");
+    assert_eq!(app.albums().len(), before.len(), "albums keep their count");
+    assert_eq!(app.albums()[a].plays, before[a].plays + 1, "the album's plays went up by one");
+    assert_eq!(app.albums()[a].last_played, Some(1_000), "the album's last played is the play");
     assert_eq!(app.album_of(i), Some(a), "the song is still in its album");
 }
 
@@ -804,22 +804,22 @@ fn copies_of_a_song_in_two_albums_both_update_their_plays() {
     use crate::query::store::Store;
     let mut app = App::new(Output::Silent, Store::memory());
     app.set_library(crate::demo_tracks(), false);
-    let mut tracks = app.tracks.clone();
+    let mut tracks = app.tracks().to_vec();
     let mut copy = tracks[0].clone();
     copy.path = "/elsewhere/copy.flac".into();
     copy.album_artist = Some("Someone Else".into());
     tracks.push(copy);
     app.set_library(tracks, false);
-    let played = app.tracks.iter().position(|t| t.path == std::path::Path::new("/demo/Big Thief;Laraaji/Live Sessions/00 Mary.flac")).expect("the first song is in the library");
-    let other = app.tracks.iter().position(|t| t.path == std::path::Path::new("/elsewhere/copy.flac")).expect("the copy is in the library");
+    let played = app.tracks().iter().position(|t| t.path == std::path::Path::new("/demo/Big Thief;Laraaji/Live Sessions/00 Mary.flac")).expect("the first song is in the library");
+    let other = app.tracks().iter().position(|t| t.path == std::path::Path::new("/elsewhere/copy.flac")).expect("the copy is in the library");
     let first = app.album_of(played).expect("the song is in an album");
     let second = app.album_of(other).expect("the copy is in an album");
     assert_ne!(first, second, "the copies land in different albums");
     app.record_play(played, 1_000).expect("the play is recorded");
-    assert_eq!(app.albums, crate::album::build(&app.tracks), "the in-place update equals a full rebuild");
-    assert_eq!(app.albums[first].plays, 1, "the played album counts the play");
-    assert_eq!(app.albums[second].plays, 1, "the copy's album counts the shared play");
-    assert_eq!(app.albums[second].last_played, Some(1_000), "the copy's album shows the shared last played");
+    assert_eq!(app.albums(), crate::album::build(app.tracks()), "the in-place update equals a full rebuild");
+    assert_eq!(app.albums()[first].plays, 1, "the played album counts the play");
+    assert_eq!(app.albums()[second].plays, 1, "the copy's album counts the shared play");
+    assert_eq!(app.albums()[second].last_played, Some(1_000), "the copy's album shows the shared last played");
 }
 
 #[test]

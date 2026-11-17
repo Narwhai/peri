@@ -37,7 +37,7 @@ fn library() -> Vec<Track> {
 
 fn runtime(store: Store) -> Runtime<App> {
     let mut app = App::new(Output::Silent, store);
-    app.relations = Relations { merges: Vec::new(), links: vec![Link { from: "billy woods".into(), kind: LinkKind::MemberOf, to: "Armand Hammer".into() }] };
+    app.set_relations(Relations { merges: Vec::new(), links: vec![Link { from: "billy woods".into(), kind: LinkKind::MemberOf, to: "Armand Hammer".into() }] });
     app.set_library(library(), false);
     let mut rt = Runtime::new(app, view, (1200.0, 800.0), Env::new(true, 1.0));
     rt.on_key = Some(crate::app::on_key);
@@ -314,7 +314,7 @@ fn real_library_graph() {
         }
     };
     let mut app = App::new(Output::Silent, Store::memory());
-    app.relations = Store::open().load_relations().unwrap_or_default();
+    app.set_relations(Store::open().load_relations().unwrap_or_default());
     app.set_library(tracks, false);
     let t = std::time::Instant::now();
     app.show_graph();
@@ -346,7 +346,7 @@ fn real_link_midpoint() {
         }
     };
     let mut app = App::new(Output::Silent, Store::memory());
-    app.relations = Store::open().load_relations().unwrap_or_default();
+    app.set_relations(Store::open().load_relations().unwrap_or_default());
     app.set_library(tracks, false);
     let mut rt = Runtime::new(app, view, (980.0, 640.0), Env::new(true, 1.0));
     settle(&mut rt);

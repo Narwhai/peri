@@ -113,7 +113,7 @@ fn section_empty(key: &str, title: &str, line: &str, p: &Palette) -> El {
 
 /// A song row: a click selects it, a double-click plays the list from it.
 fn song_line(s: &App, i: usize, list: &[usize], stripe: bool, columns: table::Columns, p: &Palette) -> El {
-    let t = &s.tracks[i];
+    let t = &s.tracks()[i];
     let current = s.current == Some(i);
     let lead = if current {
         icon(if s.playing { &icons::BARS } else { &icons::PAUSE }, 13.0).color(p.accent)

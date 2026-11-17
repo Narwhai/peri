@@ -76,7 +76,7 @@ fn choose(rt: &mut Runtime<App>, key: &str, option: &str) {
 }
 
 fn titles(rt: &Runtime<App>) -> Vec<String> {
-    rt.state.filtered.iter().map(|&i| rt.state.tracks[i].title.clone()).collect()
+    rt.state.filtered.iter().map(|&i| rt.state.tracks()[i].title.clone()).collect()
 }
 
 #[test]
@@ -146,7 +146,7 @@ fn play_in_an_album_view_queues_its_albums_songs() {
     click(&mut rt, "albums");
     click(&mut rt, "play-view");
     let first_album = rt.state.shown_albums[0];
-    assert_eq!(rt.state.current, rt.state.albums[first_album].tracks.first().copied());
+    assert_eq!(rt.state.current, rt.state.albums()[first_album].tracks.first().copied());
 }
 
 #[test]
@@ -239,10 +239,10 @@ fn grouping_shows_sticky_headers_that_collapse_and_next_follows_the_view() {
     // Play the first New Age song; Next walks the view's order: the rest of New Age, then K-Pop.
     let first = rt.state.sections[1].items[0];
     rt.update(|s, tx| s.play_index(first, tx));
-    let mut played = vec![rt.state.tracks[first].title.clone()];
+    let mut played = vec![rt.state.tracks()[first].title.clone()];
     for _ in 0..3 {
         click(&mut rt, "next");
-        played.push(rt.state.tracks[rt.state.current.expect("playing")].title.clone());
+        played.push(rt.state.tracks()[rt.state.current.expect("playing")].title.clone());
     }
     // The K-Pop songs already played in Pop, so the next song is Folk's first.
     assert_eq!(played, ["The Dance #1", "The Dance #2", "Meditation #1", "Mary"], "a song plays once, in its first group");

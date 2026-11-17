@@ -36,7 +36,7 @@ fn text_of(rt: &Runtime<App>, key: &str) -> String {
 }
 
 fn album(rt: &Runtime<App>, title: &str) -> usize {
-    rt.state.albums.iter().position(|a| a.title == title).unwrap_or_else(|| panic!("no album {title}"))
+    rt.state.albums().iter().position(|a| a.title == title).unwrap_or_else(|| panic!("no album {title}"))
 }
 
 #[test]
@@ -54,7 +54,7 @@ fn the_album_pages_label_opens_the_labels_albums() {
     }
     assert!(rt.find(&format!("label-albums{}", album(&rt, "Get Up"))).is_none(), "Get Up has no label");
     click(&mut rt, "back");
-    assert_eq!(rt.state.page, Page::Album(rt.state.albums[spaces].id()));
+    assert_eq!(rt.state.page, Page::Album(rt.state.albums()[spaces].id()));
 }
 
 #[test]
@@ -64,7 +64,7 @@ fn a_card_opens_its_album_and_play_plays_newest_first() {
     settle(&mut rt);
     assert_eq!(text_of(&rt, "label-name"), "Erased Tapes", "matched ignoring case");
     click(&mut rt, "label-play");
-    let playing = rt.state.current.map(|i| rt.state.tracks[i].title.clone());
+    let playing = rt.state.current.map(|i| rt.state.tracks()[i].title.clone());
     assert_eq!(playing.as_deref(), Some("Mary"), "Live Sessions (2024) comes first");
     let day = album(&rt, "Day of Radiance");
     click(&mut rt, &format!("label-albums{day}"));

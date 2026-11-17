@@ -74,7 +74,7 @@ fn back_from_an_artist_page_returns_the_song_list_to_where_it_was() {
     scroll_down(&mut rt, 1500.0);
     let before = scrolled(&rt);
     assert!(before > 1000.0, "the list scrolled, to {before}");
-    let song = rt.state.tracks.iter().position(|t| t.title == "Song 08-1").expect("Song 08-1");
+    let song = rt.state.tracks().iter().position(|t| t.title == "Song 08-1").expect("Song 08-1");
     assert!(rt.find(&row_key(song, None)).is_some(), "a row 1500 points down shows");
     rt.update(|s, tx| s.show_artist("Artist 08", tx));
     settle(&mut rt);

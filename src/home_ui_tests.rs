@@ -70,15 +70,15 @@ fn has(rt: &Runtime<App>, key: &str) -> bool {
 }
 
 fn album(rt: &Runtime<App>, title: &str) -> usize {
-    rt.state.albums.iter().position(|a| a.title == title).unwrap_or_else(|| panic!("no album {title}"))
+    rt.state.albums().iter().position(|a| a.title == title).unwrap_or_else(|| panic!("no album {title}"))
 }
 
 fn track(rt: &Runtime<App>, title: &str) -> usize {
-    rt.state.tracks.iter().position(|t| t.title == title).unwrap_or_else(|| panic!("no track {title}"))
+    rt.state.tracks().iter().position(|t| t.title == title).unwrap_or_else(|| panic!("no track {title}"))
 }
 
 fn titles(rt: &Runtime<App>, list: &[usize]) -> Vec<String> {
-    list.iter().map(|&i| rt.state.tracks[i].title.clone()).collect()
+    list.iter().map(|&i| rt.state.tracks()[i].title.clone()).collect()
 }
 
 fn escape(rt: &mut Runtime<App>) {
@@ -222,8 +222,8 @@ fn recently_added_shows_the_newest_albums_first() {
     let rt = runtime();
     let newest = rt.state.recently_added();
     assert_eq!(newest.len(), 4, "the demo has four albums, all dated");
-    assert_eq!(rt.state.albums[newest[0]].title, "Live Sessions", "2024 is the newest");
-    assert_eq!(rt.state.albums[newest[3]].title, "Day of Radiance", "1980 is the oldest");
+    assert_eq!(rt.state.albums()[newest[0]].title, "Live Sessions", "2024 is the newest");
+    assert_eq!(rt.state.albums()[newest[3]].title, "Day of Radiance", "1980 is the oldest");
     for &a in &newest {
         assert!(has(&rt, &format!("recent-albums{a}")), "card for album {a} shows");
     }
@@ -232,7 +232,7 @@ fn recently_added_shows_the_newest_albums_first() {
 #[test]
 fn recently_added_takes_at_most_recent_count_and_leaves_out_undated_albums() {
     let mut rt = runtime();
-    let mut tracks: Vec<Track> = rt.state.tracks.clone();
+    let mut tracks: Vec<Track> = rt.state.tracks().to_vec();
     // More dated albums than the page lists, plus one song with no date at all.
     for n in 0..RECENT_COUNT + 2 {
         tracks.push(Track {
@@ -249,11 +249,11 @@ fn recently_added_takes_at_most_recent_count_and_leaves_out_undated_albums() {
     settle(&mut rt);
     let newest = rt.state.recently_added();
     assert_eq!(newest.len(), RECENT_COUNT);
-    let added: Vec<Option<i64>> = newest.iter().map(|&a| rt.state.albums[a].added).collect();
+    let added: Vec<Option<i64>> = newest.iter().map(|&a| rt.state.albums()[a].added).collect();
     let mut sorted = added.clone();
     sorted.sort_by_key(|&d| std::cmp::Reverse(d));
     assert_eq!(added, sorted, "newest first");
-    assert!(newest.iter().all(|&a| rt.state.albums[a].title != "Undated album"), "an album with no date is left out");
+    assert!(newest.iter().all(|&a| rt.state.albums()[a].title != "Undated album"), "an album with no date is left out");
     assert!(!has(&rt, "recent-albums-empty"));
 }
 
@@ -274,7 +274,7 @@ fn recently_played_ties_break_by_library_order_and_never_played_songs_are_left_o
     app.set_library(crate::demo_tracks(), false);
     app.show_home();
     // More songs than the page lists, to be played at one moment.
-    let mut tracks = app.tracks.clone();
+    let mut tracks = app.tracks().to_vec();
     let demo = tracks.len();
     for n in 0..RECENT_COUNT + 1 {
         tracks.push(Track { path: format!("/extra/{n:02}.flac").into(), title: format!("Extra {n}"), ..Track::default() });
@@ -294,7 +294,7 @@ fn recently_played_ties_break_by_library_order_and_never_played_songs_are_left_o
     }
     let played = rt.state.recently_played();
     assert_eq!(played.len(), RECENT_COUNT, "RECENT_COUNT at most");
-    assert!(played.iter().all(|&i| rt.state.tracks[i].last_played == Some(at)), "all tied");
+    assert!(played.iter().all(|&i| rt.state.tracks()[i].last_played == Some(at)), "all tied");
     assert!(played.windows(2).all(|w| w[0] < w[1]), "ties by library order, ascending");
     assert_eq!(played, (demo..demo + RECENT_COUNT).collect::<Vec<_>>(), "never-played songs are left out; ties keep library order");
 }
@@ -326,7 +326,7 @@ fn an_album_opened_from_home_keeps_home_highlighted_and_back_returns() {
     let mut rt = runtime();
     let spaces = album(&rt, "Spaces");
     click(&mut rt, &format!("recent-albums{spaces}"));
-    assert_eq!(rt.state.page, Page::Album(rt.state.albums[spaces].id()));
+    assert_eq!(rt.state.page, Page::Album(rt.state.albums()[spaces].id()));
     assert!(rt.state.in_home(), "Home stays highlighted on a page opened from it");
     assert!(!rt.state.in_graph());
     click(&mut rt, "back");

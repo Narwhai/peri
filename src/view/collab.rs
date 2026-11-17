@@ -32,15 +32,15 @@ pub(super) fn collab_page(s: &App, names: &[String], p: &Palette) -> El {
         .child(text(back_label(s)).font(TITLE).color(p.tx2));
 
     let first = info.albums.first().copied().or_else(|| info.appears_on.first().and_then(|&i| s.album_of(i)));
-    let art = cover("collab-cover".into(), first.and_then(|a| cover_image(s, &s.albums[a])), Some(160.0), p);
+    let art = cover("collab-cover".into(), first.and_then(|a| cover_image(s, &s.albums()[a])), Some(160.0), p);
     let mut counts = Vec::new();
     for kind in ReleaseType::ALL {
-        let n = info.albums.iter().filter(|&&a| s.albums[a].release_type == kind).count();
+        let n = info.albums.iter().filter(|&&a| s.albums()[a].release_type == kind).count();
         if n > 0 {
             counts.push(kind.count(n));
         }
     }
-    let songs_together = info.play_list(&s.albums).len();
+    let songs_together = info.play_list(s.albums()).len();
     if songs_together > 0 {
         counts.push(plural(songs_together, "song"));
     }
@@ -58,7 +58,7 @@ pub(super) fn collab_page(s: &App, names: &[String], p: &Palette) -> El {
     if songs_together > 0 {
         let who = names.to_vec();
         buttons = buttons.child(play_button("collab-play", "Play", p).on_press_tx(move |s: &mut App, tx| {
-            let list = page(&who, &s.tracks, &s.albums, &s.relations).play_list(&s.albums);
+            let list = page(&who, s.tracks(), s.albums(), s.relations()).play_list(s.albums());
             if let Some(&first) = list.first() {
                 s.play_list(list, first, tx);
             }
@@ -67,7 +67,7 @@ pub(super) fn collab_page(s: &App, names: &[String], p: &Palette) -> El {
     if !info.albums.is_empty() {
         let who = names.to_vec();
         buttons = buttons.child(tinted_button("collab-discography", &icons::PLAY, "Play Discography", p).on_press_tx(move |s: &mut App, tx| {
-            let list = page(&who, &s.tracks, &s.albums, &s.relations).discography(&s.albums);
+            let list = page(&who, s.tracks(), s.albums(), s.relations()).discography(s.albums());
             if let Some(&first) = list.first() {
                 s.play_list(list, first, tx);
             }

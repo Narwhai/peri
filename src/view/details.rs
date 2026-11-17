@@ -20,7 +20,7 @@ pub(super) fn details_dialog(s: &App, p: &Palette, kit: &Kit, layer: &mut Vec<El
         Some(i) => body(s, i, open, p),
         None => text("This song is no longer in the library.").key("details-gone").font(BODY).color(p.tx3).padding(16.0),
     };
-    let title = s.details_track().map_or_else(|| "Song details".to_string(), |i| s.tracks[i].title.clone());
+    let title = s.details_track().map_or_else(|| "Song details".to_string(), |i| s.tracks()[i].title.clone());
     Dialog::new("details", title)
         .open(true)
         .width(640.0)
@@ -31,7 +31,7 @@ pub(super) fn details_dialog(s: &App, p: &Palette, kit: &Kit, layer: &mut Vec<El
 }
 
 fn body(s: &App, i: usize, open: &DetailsDialog, p: &Palette) -> El {
-    let t = &s.tracks[i];
+    let t = &s.tracks()[i];
     let mut b = col().key("details-body").w_full().px(16.0).pb(16.0).gap(18.0);
 
     let mut song = section("Song", p);
