@@ -245,6 +245,8 @@ pub struct App {
     pub seek_preview: Option<f32>,
     pub volume: f32,
     pub muted: bool,
+    /// While the volume knob is held: the volume and mute it started from, which Escape restores.
+    pub volume_before_drag: Option<(f32, bool)>,
     pub shuffle: bool,
     pub repeat: Repeat,
     pub error: Option<String>,
@@ -363,6 +365,7 @@ impl App {
             seek_preview: None,
             volume: 0.8,
             muted: false,
+            volume_before_drag: None,
             shuffle: false,
             repeat: Repeat::Off,
             error: relations_error.clone().or(lastfm_error).or(plays_error).or(graph_error).or(tab_error).or(theme_error).or(appearance_error),
@@ -1469,6 +1472,13 @@ impl App {
 
     pub fn toggle_mute(&mut self) {
         self.muted = !self.muted;
+        self.apply_gain();
+    }
+
+    /// Puts the volume and mute back as they were, as when a knob drag is cancelled.
+    pub fn restore_volume(&mut self, volume: f32, muted: bool) {
+        self.volume = volume.clamp(0.0, 1.0);
+        self.muted = muted;
         self.apply_gain();
     }
 

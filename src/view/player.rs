@@ -198,13 +198,16 @@ fn volume_slider(s: &App, p: &Palette) -> El {
         .cursor(Cursor::ResizeRow)
         .a11y_value(format!("{}%", (shown * 100.0).round()))
         .on_step(|s: &mut App, steps, _tx| s.set_volume(s.volume + steps as f32 * 0.05))
-        // The press keeps where the volume started, so Escape puts it back.
+        // The press keeps the volume and mute it started from, so Escape puts both back.
         .on_drag(|s: &mut App, d: &mut Drag, _tx: &mut Tx| match d.phase {
-            Phase::Down => {
-                d.data = if s.muted { 0.0 } else { s.volume };
+            Phase::Down => s.volume_before_drag = Some((s.volume, s.muted)),
+            Phase::Up => {
+                if let (true, Some((volume, muted))) = (d.cancelled(), s.volume_before_drag.take()) {
+                    s.restore_volume(volume, muted);
+                }
+                s.volume_before_drag = None;
             }
-            Phase::Up if d.cancelled() => s.set_volume(d.data),
-            Phase::Move | Phase::Up => {}
+            Phase::Move => {}
         })
         .pointer_lock_while_held(|s: &mut App, [_, dy]: [f32; 2], _tx: &mut Tx| {
             let shown = if s.muted { 0.0 } else { s.volume };

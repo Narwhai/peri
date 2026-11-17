@@ -267,6 +267,26 @@ fn holding_the_volume_knob_holds_the_pointer_still_until_release() {
 }
 
 #[test]
+fn escape_while_turning_a_muted_volume_knob_keeps_it_muted_at_its_volume() {
+    let mut rt = runtime(true);
+    rt.update(|s, _| {
+        s.set_volume(0.6);
+        s.toggle_mute();
+    });
+    settle(&mut rt);
+    let (x, y) = press_volume(&mut rt);
+    rt.pointer_motion(0.0, -30.0);
+    rt.frame(1.0 / 60.0);
+    assert!(!rt.state.muted, "turning the knob unmutes");
+    rt.key(KeyEvent { key: Key::Escape, mods: Mods::default() });
+    settle(&mut rt);
+    rt.pointer_up(x, y);
+    settle(&mut rt);
+    assert!(rt.state.muted, "Escape puts the mute back");
+    assert!((rt.state.volume - 0.6).abs() < 1e-6, "volume {}", rt.state.volume);
+}
+
+#[test]
 fn escape_while_turning_the_volume_knob_puts_the_volume_back() {
     let mut rt = runtime(true);
     rt.update(|s, _| s.set_volume(0.5));
