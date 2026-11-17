@@ -1,0 +1,52 @@
+//! Memoized page models. Pages are built from the whole library and views run every frame, so
+//! each page keeps the model it last built and reuses it while its inputs are unchanged.
+
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use crate::artist::ArtistPage;
+use crate::collab::CollabPage;
+use crate::label::LabelPage;
+use crate::relations::Relation;
+use crate::search::SearchResults;
+
+/// An artist's page, and the artists involved with them, each with their page.
+pub type ArtistModel = (ArtistPage, Vec<(Relation, ArtistPage)>);
+
+/// The last model a page built, with the key it was built for. Views only have `&App`, so it
+/// sits behind a `RefCell`.
+pub struct Memo<K, V>(RefCell<Option<(K, Rc<V>)>>);
+
+impl<K, V> Default for Memo<K, V> {
+    fn default() -> Self {
+        Memo(RefCell::new(None))
+    }
+}
+
+impl<K: PartialEq, V> Memo<K, V> {
+    /// The model for `key`: the kept one when its key matches, else one `build` makes, which then
+    /// replaces it.
+    pub fn get(&self, key: K, build: impl FnOnce() -> V) -> Rc<V> {
+        if let Some((kept, model)) = self.0.borrow().as_ref()
+            && *kept == key
+        {
+            return model.clone();
+        }
+        let model = Rc::new(build());
+        *self.0.borrow_mut() = Some((key, model.clone()));
+        model
+    }
+}
+
+/// Each page's memo. Keys carry the library's data version, so a change to the library rebuilds them.
+#[derive(Default)]
+pub struct Pages {
+    /// Keyed by the trimmed, lowercase query.
+    pub search: Memo<(String, u64), SearchResults>,
+    /// Keyed by the artist's name and whether their aliases are in.
+    pub artist: Memo<(String, bool, u64), ArtistModel>,
+    pub collab: Memo<(Vec<String>, u64), CollabPage>,
+    pub label: Memo<(String, u64), LabelPage>,
+    pub recent_albums: Memo<u64, Vec<usize>>,
+    pub recent_songs: Memo<u64, Vec<usize>>,
+}

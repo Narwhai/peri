@@ -13,7 +13,8 @@ use crate::queue::Repeat;
 pub(super) fn now_playing(s: &App, p: &Palette) -> El {
     let track = s.current_track();
     let cover = el().key("cover").size(COVER, COVER).fill(p.ui).center();
-    let mut cover = match s.cover.as_ref().filter(|c| c.error().is_none()) {
+    let image = track.and_then(|t| s.covers.as_ref()?.get(&t.path)).filter(|c| c.error().is_none());
+    let mut cover = match image {
         Some(image) => cover.pixels_fit(image.pixels(), SurfaceFit::Fill),
         None => cover.child(icon(&icons::NOTE, 22.0).color(p.ui2)),
     };

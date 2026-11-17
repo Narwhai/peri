@@ -10,7 +10,7 @@ use super::toolbar::{hint, segmented};
 use super::*;
 use crate::album::ReleaseType;
 use crate::app::{ArtistTab, Panel};
-use crate::artist::{ArtistPage, everything, involved, known, page, suggest};
+use crate::artist::{ArtistPage, everything, known, page, suggest};
 use crate::credits::Role;
 use crate::library::Track;
 use crate::palette::Palette;
@@ -28,7 +28,8 @@ const TAB_RADIUS: f32 = 3.0;
 const COVER_W: f32 = table::LEAD_W;
 
 pub(super) fn artist_page(s: &App, name: &str, p: &Palette, kit: &Kit, layer: &mut Vec<El>) -> El {
-    let info = page(name, &s.tracks, &s.albums, &s.relations, s.artist_with_aliases);
+    let model = s.artist_model(name, s.artist_with_aliases);
+    let (info, others) = (&model.0, &model.1);
     let back = row()
         .key("back")
         .h(28.0)
@@ -44,12 +45,11 @@ pub(super) fn artist_page(s: &App, name: &str, p: &Palette, kit: &Kit, layer: &m
         .on_press_tx(|s: &mut App, tx| s.go_back(tx))
         .child(icon(&icons::BACK, 16.0).color(p.tx2))
         .child(text(back_label(s)).font(TITLE).color(p.tx2));
-    let others = involved(name, &s.tracks, &s.albums, &s.relations, s.artist_with_aliases);
-    let mut body = col().key("artist-page-body").w_full().px(28.0).py(16.0).gap(22.0).child(back).child(head(s, &info, &others, Some(link_artist(s, &info, p, kit, layer)), p));
+    let mut body = col().key("artist-page-body").w_full().px(28.0).py(16.0).gap(22.0).child(back).child(head(s, info, others, Some(link_artist(s, info, p, kit, layer)), p));
     if info.is_empty() {
         body = body.child(text(format!("Nothing in the library is by or credits {}.", info.name)).key("artist-empty").font(BODY).color(p.tx3));
     }
-    col().key("artist-page").w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: false }).child(body.children(sections(s, &info, &others, p)))
+    col().key("artist-page").w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: false }).child(body.children(sections(s, info, others, p)))
 }
 
 /// Their releases or songs (a tab), the songs they appear on, their credits, then related artists.

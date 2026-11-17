@@ -8,12 +8,13 @@ use super::artists::{boxed, release_strips, songs};
 use super::*;
 use crate::album::ReleaseType;
 use crate::collab::page;
+
 use crate::palette::Palette;
 
 const PAGE_TITLE: TextStyle = TextStyle::new(28.0, 700.0);
 
 pub(super) fn collab_page(s: &App, names: &[String], p: &Palette) -> El {
-    let info = page(names, &s.tracks, &s.albums, &s.relations);
+    let info = s.collab_model(names);
     let back = row()
         .key("back")
         .h(28.0)

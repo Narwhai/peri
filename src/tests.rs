@@ -2,6 +2,8 @@
 
 use rune::{Env, Key, KeyEvent, Mods, Runtime};
 
+use std::rc::Rc;
+
 use crate::app::{App, Output, Page};
 use crate::queue::Repeat;
 use crate::view::{VOLUME_DRAG, view};
@@ -714,4 +716,29 @@ fn album_of_matches_the_albums_after_a_library_change_and_a_play() {
         assert_eq!(app.album_of(i), album_of_by_scan(&app, i), "track {i} after record_play");
     }
     assert_eq!(app.album_of(app.tracks.len()), None, "out of range is no album");
+}
+
+#[test]
+fn cached_page_models_match_fresh_builds_and_follow_library_changes() {
+    use crate::query::store::Store;
+    let mut app = App::new(Output::Silent, Store::memory());
+    app.set_library(crate::demo_tracks(), false);
+    let artist = app.tracks[0].artist().expect("the demo's first song has an artist");
+
+    app.search.text = "  NILS  ".into();
+    let fresh = crate::search::search("nils", &app.tracks, &app.albums, &app.relations);
+    assert_eq!(*app.search_results(), fresh, "cached search equals a fresh search");
+    assert!(Rc::ptr_eq(&app.search_results(), &app.search_results()), "a repeat asks for the kept model");
+
+    let (page, others) = (crate::artist::page(&artist, &app.tracks, &app.albums, &app.relations, true), crate::artist::involved(&artist, &app.tracks, &app.albums, &app.relations, true));
+    let model = app.artist_model(&artist, true);
+    assert_eq!(model.0, page, "cached artist page equals a fresh build");
+    assert_eq!(model.1, others, "cached involved artists equal a fresh build");
+
+    let before = app.search_results();
+    app.record_play(0, 1_000).expect("the play is recorded");
+    let after = app.search_results();
+    assert!(!Rc::ptr_eq(&before, &after), "a library change rebuilds the search results");
+    assert_eq!(*after, crate::search::search("nils", &app.tracks, &app.albums, &app.relations), "rebuilt search equals a fresh search");
+    assert_eq!(app.recent_songs().first().copied(), Some(0), "the played song leads Recently Played after the change");
 }

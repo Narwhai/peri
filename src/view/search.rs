@@ -6,11 +6,10 @@ use rune::{El, ScrollSpec, col, row, text};
 use super::artists;
 use super::*;
 use crate::palette::Palette;
-use crate::search::search;
 
 pub(super) fn search_page(s: &App, p: &Palette) -> El {
     let query = s.search.text.trim().to_string();
-    let found = search(&query, &s.tracks, &s.albums, &s.relations);
+    let found = s.search_results();
     let mut body = col().key("search-page-body").w_full().px(28.0).py(16.0).gap(22.0);
     if found.is_empty() {
         body = body.child(

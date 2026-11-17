@@ -9,6 +9,7 @@ mod artist;
 mod audio;
 mod query;
 mod covers;
+mod pages;
 mod collab;
 mod credits;
 mod details;
@@ -219,13 +220,13 @@ fn scene_artist(s: &mut App) {
 /// The Alchemist merged with another name, linked to a band and an alias.
 fn scene_related(s: &mut App) {
     scene_artist(s);
-    s.relations = relations::Relations {
+    s.set_relations(relations::Relations {
         merges: vec![vec!["The Alchemist".into(), "Alan Maman".into()]],
         links: vec![
             relations::Link { from: "The Alchemist".into(), kind: relations::LinkKind::MemberOf, to: "Step Brothers".into() },
             relations::Link { from: "Armand Hammer".into(), kind: relations::LinkKind::Alias, to: "the alchemist".into() },
         ],
-    };
+    });
     let i = s.tracks.iter().position(|t| t.title == "Calypso Gene").expect("demo has Calypso Gene");
     s.tracks[i].credits.push(credits::Credit::parse(credits::Role::Composer, "Alan Maman"));
     s.artist_with_aliases = true;

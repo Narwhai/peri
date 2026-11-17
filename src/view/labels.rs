@@ -11,7 +11,7 @@ use crate::palette::Palette;
 const PAGE_TITLE: TextStyle = TextStyle::new(28.0, 700.0);
 
 pub(super) fn label_page(s: &App, name: &str, p: &Palette) -> El {
-    let info = page(name, &s.albums);
+    let info = s.label_model(name);
     let back = row()
         .key("back")
         .h(28.0)

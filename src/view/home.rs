@@ -32,12 +32,12 @@ pub(super) fn home_page(s: &App, p: &Palette) -> El {
 /// Recently Added: the newest albums as one row of cards across the page, scrolling sideways
 /// from the arrow buttons at either end.
 fn recent_albums(s: &App, p: &Palette) -> El {
-    let albums = s.recently_added();
+    let albums = s.recent_albums();
     if albums.is_empty() {
         return section_empty("recent-albums", "Recently Added", "No albums in the library yet.", p);
     }
     let mut strip = row().gap(CARD_GAP).items_start();
-    for &o in &albums {
+    for &o in albums.iter() {
         strip = strip.child(small_card(s, "recent-albums", o, true, CARD_W, p));
     }
     let (at, width) = (s.home_strip.clone(), s.home_viewport.clone());
@@ -88,7 +88,7 @@ fn arrow_button(key: &'static str, glyph: &'static Icon, help: &str, p: &Palette
 
 /// Recently Played: the songs played last, most recent at the top, as a table.
 fn recent_songs(s: &App, p: &Palette) -> El {
-    let list = s.recently_played();
+    let list = s.recent_songs();
     if list.is_empty() {
         return section_empty("recent-songs", "Recently Played", "Nothing played yet.", p);
     }

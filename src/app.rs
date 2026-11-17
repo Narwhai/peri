@@ -2,16 +2,21 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
-use rune::{FileDialogOptions, Image, ImageCache, Key, KeyEvent, Live, TextEdit, Tx, Waker};
+use rune::{FileDialogOptions, Key, KeyEvent, Live, TextEdit, Tx, Waker};
 use serde::{Deserialize, Serialize};
 
 use crate::album::{self, Album, AlbumId};
 use crate::audio::{self, Engine};
 use crate::query::property::{Mode, Property};
 use crate::covers::Covers;
+use crate::pages::{ArtistModel, Pages};
+use crate::search::SearchResults;
+use crate::collab::CollabPage;
+use crate::label::LabelPage;
 use crate::query::store::{Views, Store};
 use crate::query::view::{Evaluated, Layout, Section, Widths, evaluate};
 use crate::lastfm::{self, scrobbling::{Effect, Scrobbling}};
@@ -138,6 +143,10 @@ pub struct App {
     pub albums: Vec<Album>,
     /// For each track, the index in `albums` of the album it is on; see `album_of`.
     album_index: Vec<Option<usize>>,
+    /// Bumped whenever the tracks, albums or relations change; page models are keyed by it.
+    data_version: u64,
+    /// The page models last built, reused while their inputs are unchanged.
+    pages: Pages,
     pub page: Page,
     /// The pages Back returns to, newest last; the library when empty.
     pub history: Vec<Page>,
@@ -234,7 +243,6 @@ pub struct App {
     pub muted: bool,
     pub shuffle: bool,
     pub repeat: Repeat,
-    pub cover: Option<Image>,
     pub error: Option<String>,
     pub scan: Option<Scan>,
     pub drop_hover: bool,
@@ -243,7 +251,6 @@ pub struct App {
     output: Output,
     rng: Rng,
     waker: Option<Waker>,
-    images: Option<ImageCache>,
     /// Last.fm: the connected account, and the playing song's scrobble.
     pub lastfm: Scrobbling,
     /// Every song's plays, saved as they count.
@@ -300,6 +307,8 @@ impl App {
             tracks: Vec::new(),
             albums: Vec::new(),
             album_index: Vec::new(),
+            data_version: 0,
+            pages: Pages::default(),
             page,
             history: Vec::new(),
             forward: Vec::new(),
@@ -351,7 +360,6 @@ impl App {
             muted: false,
             shuffle: false,
             repeat: Repeat::Off,
-            cover: None,
             error: relations_error.clone().or(lastfm_error).or(plays_error).or(graph_error).or(tab_error).or(theme_error).or(appearance_error),
             scan: None,
             drop_hover: false,
@@ -359,7 +367,6 @@ impl App {
             output,
             rng: Rng::from_time(),
             waker: None,
-            images: None,
             lastfm,
             plays,
             listen: None,
@@ -382,7 +389,6 @@ impl App {
 
     /// Sets up and scans `roots`, or the saved library when there are none.
     pub fn setup_with(&mut self, waker: Waker, roots: Vec<PathBuf>) {
-        self.images = Some(ImageCache::new(waker.clone()));
         self.covers = Some(if matches!(self.output, Output::Silent) { Covers::synchronous(waker.clone()) } else { Covers::new(waker.clone()) });
         // Headless runs and tests never reach the network.
         if !matches!(self.output, Output::Silent) {
@@ -641,6 +647,48 @@ impl App {
         played.into_iter().take(RECENT_COUNT).map(|(_, i)| i).collect()
     }
 
+    /// The search page's results for `query`, built once per library version and query.
+    pub fn search_results(&self) -> Rc<SearchResults> {
+        let query = self.search.text.trim().to_lowercase();
+        self.pages.search.get((query.clone(), self.data_version), || crate::search::search(&query, &self.tracks, &self.albums, &self.relations))
+    }
+
+    /// The artist page for `name` and the artists involved with them, built once per library version.
+    pub fn artist_model(&self, name: &str, with_aliases: bool) -> Rc<ArtistModel> {
+        let key = (name.to_string(), with_aliases, self.data_version);
+        self.pages.artist.get(key, || {
+            let info = crate::artist::page(name, &self.tracks, &self.albums, &self.relations, with_aliases);
+            let others = crate::artist::involved(name, &self.tracks, &self.albums, &self.relations, with_aliases);
+            (info, others)
+        })
+    }
+
+    /// The collaboration page for `names`, built once per library version.
+    pub fn collab_model(&self, names: &[String]) -> Rc<CollabPage> {
+        self.pages.collab.get((names.to_vec(), self.data_version), || crate::collab::page(names, &self.tracks, &self.albums, &self.relations))
+    }
+
+    /// The label page for `name`, built once per library version.
+    pub fn label_model(&self, name: &str) -> Rc<LabelPage> {
+        self.pages.label.get((name.to_string(), self.data_version), || crate::label::page(name, &self.albums))
+    }
+
+    /// `recently_added`, kept until the library changes.
+    pub fn recent_albums(&self) -> Rc<Vec<usize>> {
+        self.pages.recent_albums.get(self.data_version, || self.recently_added())
+    }
+
+    /// `recently_played`, kept until the library changes.
+    pub fn recent_songs(&self) -> Rc<Vec<usize>> {
+        self.pages.recent_songs.get(self.data_version, || self.recently_played())
+    }
+
+    /// Replaces the artist relations, as a change to them: page models built from them are rebuilt.
+    pub fn set_relations(&mut self, relations: crate::relations::Relations) {
+        self.relations = relations;
+        self.data_version = self.data_version.wrapping_add(1);
+    }
+
     /// The album shown on the album page, if it's still in the library.
     pub fn open_album(&self) -> Option<usize> {
         match &self.page {
@@ -706,7 +754,9 @@ impl App {
         if self.relations_unreadable {
             return Err("The artist links in the preferences file couldn't be read: fix or remove its \"artists\" entry first".into());
         }
-        edit(&mut self.relations)?;
+        let edited = edit(&mut self.relations);
+        self.data_version = self.data_version.wrapping_add(1);
+        edited?;
         self.graph.invalidate();
         self.store.save_relations(&self.relations)
     }
@@ -1066,6 +1116,7 @@ impl App {
     /// Rebuilds the albums from the tracks, and the index from each track to its album.
     fn rebuild_albums(&mut self) {
         self.albums = album::build(&self.tracks);
+        self.data_version = self.data_version.wrapping_add(1);
         self.album_index = vec![None; self.tracks.len()];
         for (a, entry) in self.albums.iter().enumerate() {
             for &t in &entry.tracks {
@@ -1305,7 +1356,6 @@ impl App {
                 self.lastfm.stopped();
             }
         }
-        self.cover = self.images.as_ref().and_then(|cache| library::read_cover(&path).map(|bytes| cache.load(bytes)));
     }
 
     pub fn stop(&mut self) {
@@ -1319,7 +1369,6 @@ impl App {
         self.queue = None;
         self.ended = false;
         self.position = 0.0;
-        self.cover = None;
     }
 
     /// Play/pause; with nothing loaded, plays the selected row, else the first visible one.
