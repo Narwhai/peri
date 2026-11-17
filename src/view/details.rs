@@ -86,7 +86,11 @@ fn body(s: &App, i: usize, open: &DetailsDialog, p: &Palette) -> El {
     }
 
     match &open.details {
-        Ok(d) => {
+        None => {
+            b = b.child(file_section(t, &Details::default(), p));
+            b = b.child(text("Reading the file…").key("details-reading").font(SMALL).color(p.tx3));
+        }
+        Some(Ok(d)) => {
             b = b.child(file_section(t, d, p));
             if !d.ids.is_empty() {
                 let mut ids = section("Identifiers", p).key("details-ids");
@@ -100,7 +104,7 @@ fn body(s: &App, i: usize, open: &DetailsDialog, p: &Palette) -> El {
             }
             b = b.child(raw_section(d, open.raw_open, p));
         }
-        Err(e) => {
+        Some(Err(e)) => {
             b = b.child(file_section(t, &Details::default(), p));
             b = b.child(text(e.clone()).key("details-error").font(SMALL).color(p.red).wrap().w_full());
         }

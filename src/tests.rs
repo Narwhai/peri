@@ -821,3 +821,30 @@ fn copies_of_a_song_in_two_albums_both_update_their_plays() {
     assert_eq!(app.albums[second].plays, 1, "the copy's album counts the shared play");
     assert_eq!(app.albums[second].last_played, Some(1_000), "the copy's album shows the shared last played");
 }
+
+#[test]
+fn a_window_reads_the_details_file_in_the_background_and_poll_delivers_it() {
+    let mut app = App::new(Output::Closed, crate::query::store::Store::memory());
+    app.set_waker(std::sync::Arc::new(|| {}));
+    let missing = std::path::PathBuf::from("/nonexistent/x.flac");
+    let track = crate::library::Track { path: missing.clone(), title: "x".into(), ..Default::default() };
+    app.set_library(vec![track], false);
+    let mut rt = Runtime::new(app, view, (980.0, 640.0), Env::new(true, 1.0));
+    rt.poll = Some(crate::app::poll);
+    rt.update(|s, tx| s.show_details(0, tx));
+    let open = rt.state.details.as_ref().expect("the dialog opened");
+    assert!(open.details.is_none(), "the dialog starts out reading");
+    for _ in 0..400 {
+        rt.frame(0.0);
+        if rt.state.details.as_ref().is_some_and(|d| d.details.is_some()) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    settle(&mut rt);
+    let open = rt.state.details.as_ref().expect("the dialog is still open");
+    assert!(matches!(&open.details, Some(Err(e)) if e.contains("/nonexistent/x.flac")), "the read error arrives through poll");
+    let keys: Vec<String> = rt.elements().into_iter().filter_map(|e| e.key).collect();
+    assert!(keys.iter().any(|k| k == "details-error"));
+    assert!(!keys.iter().any(|k| k == "details-reading"));
+}

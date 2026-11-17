@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use std::time::Duration;
 
 use rune::{FileDialogOptions, Key, KeyEvent, Live, TextEdit, Tx, Waker};
@@ -124,7 +124,10 @@ pub enum Tab {
 pub struct DetailsDialog {
     /// The song's file, so the dialog follows it across rescans.
     pub path: PathBuf,
-    pub details: Result<crate::details::Details, String>,
+    /// What the file says; `None` while the details thread is still reading it.
+    pub details: Option<Result<crate::details::Details, String>>,
+    /// The details thread's result, until it arrives.
+    reading: Option<Receiver<Result<crate::details::Details, String>>>,
     /// Whether "All tags" is expanded.
     pub raw_open: bool,
 }
@@ -530,6 +533,20 @@ impl App {
     #[cfg(test)]
     pub fn set_waker(&mut self, waker: Waker) {
         self.waker = Some(waker);
+    }
+
+    /// Takes the details thread's result when it has arrived; true when the view changes.
+    fn drain_details(&mut self) -> bool {
+        let Some(open) = &mut self.details else { return false };
+        let Some(rx) = &open.reading else { return false };
+        let result = match rx.try_recv() {
+            Ok(result) => result,
+            Err(TryRecvError::Empty) => return false,
+            Err(TryRecvError::Disconnected) => Err(format!("Couldn't read {}", open.path.display())),
+        };
+        open.details = Some(result);
+        open.reading = None;
+        true
     }
 
     /// Takes the scan thread's messages; true when the view changes.
@@ -1082,13 +1099,27 @@ impl App {
         self.searched(tx);
     }
 
-    /// Opens song `i`'s details, reading its file now.
+    /// Opens song `i`'s details. A window reads the file on a thread; headless runs read it now.
     pub fn show_details(&mut self, i: usize, _tx: &mut Tx) {
         let Some(path) = self.tracks.get(i).map(|t| t.path.clone()) else { return };
         self.close_panel();
         self.selected = Some(i);
+        let waker = if matches!(self.output, Output::Silent) { None } else { self.waker.clone() };
+        if let Some(waker) = waker {
+            let (tx, rx) = channel();
+            let thread_path = path.clone();
+            let spawned = std::thread::Builder::new().name("details".into()).spawn(move || {
+                // The dialog may have closed meanwhile; then nobody receives and the result is dropped.
+                let _ = tx.send(crate::details::read(&thread_path));
+                waker();
+            });
+            if spawned.is_ok() {
+                self.details = Some(DetailsDialog { path, details: None, reading: Some(rx), raw_open: false });
+                return;
+            }
+        }
         let details = crate::details::read(&path);
-        self.details = Some(DetailsDialog { path, details, raw_open: false });
+        self.details = Some(DetailsDialog { path, details: Some(details), reading: None, raw_open: false });
     }
 
     pub fn close_details(&mut self) {
@@ -1762,6 +1793,7 @@ fn file_uri(path: &Path) -> String {
 /// `AppSpec::poll`: take scan results, follow the playing track, and move on when it ends.
 pub fn poll(s: &mut App, now: f64, tx: &mut Tx) -> bool {
     let mut changed = s.drain_scan();
+    changed |= s.drain_details();
     if let Some(covers) = &s.covers {
         changed |= covers.drain();
     }
