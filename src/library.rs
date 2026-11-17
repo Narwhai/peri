@@ -90,6 +90,9 @@ impl Track {
 
     /// Whether every word of `query` (already lowercased) appears in the title, artist or album.
     pub fn matches(&self, query: &str) -> bool {
+        if query.split_whitespace().next().is_none() {
+            return true;
+        }
         let haystack = format!(
             "{} {} {}",
             self.title.to_lowercase(),

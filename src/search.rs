@@ -2,7 +2,7 @@
 //! songs, the songs they appear on and their credits), the other matching artists, then the
 //! albums and songs that match but aren't that artist's.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::album::Album;
 use crate::artist::{self, ArtistPage};
@@ -65,13 +65,15 @@ pub fn search(query: &str, tracks: &[Track], albums: &[Album], relations: &Relat
     let top = artist.as_ref().unwrap_or(&empty);
     let mut found: Vec<usize> = (0..albums.len()).filter(|&a| !top.albums.contains(&a) && albums[a].primary_match(&query)).collect();
     found.sort_by_key(|&a| std::cmp::Reverse(albums[a].year));
-    let listed = |i: &usize| {
-        top.songs.contains(i)
-            || top.appears_on.contains(i)
-            || top.credits.iter().any(|(c, _)| c == i)
-            || top.albums.iter().chain(&found).any(|&a| albums[a].tracks.contains(i))
-    };
-    let songs = (0..tracks.len()).filter(|i| tracks[*i].matches(&query) && !listed(i)).collect();
+    let listed: HashSet<usize> = top
+        .songs
+        .iter()
+        .chain(&top.appears_on)
+        .copied()
+        .chain(top.credits.iter().map(|(c, _)| *c))
+        .chain(top.albums.iter().chain(&found).flat_map(|&a| albums[a].tracks.iter().copied()))
+        .collect();
+    let songs = (0..tracks.len()).filter(|i| tracks[*i].matches(&query) && !listed.contains(i)).collect();
     SearchResults { artist, artists, albums: found, songs }
 }
 

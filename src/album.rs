@@ -110,6 +110,9 @@ impl Album {
     /// Whether every word of `query` (lowercased) appears in the title or the album's own
     /// artists, so not only in a featured artist's name or a song.
     pub fn primary_match(&self, query: &str) -> bool {
+        if query.split_whitespace().next().is_none() {
+            return true;
+        }
         let haystack = format!("{} {} {}", self.title, self.artist.as_deref().unwrap_or_default(), self.album_artists.join(" ")).to_lowercase();
         query.split_whitespace().all(|word| haystack.contains(word))
     }
@@ -177,6 +180,9 @@ impl Record for Album {
     }
 
     fn matches(&self, query: &str) -> bool {
+        if query.split_whitespace().next().is_none() {
+            return true;
+        }
         let haystack = format!("{} {} {}", self.title, self.artist.as_deref().unwrap_or_default(), self.artists.join(" ")).to_lowercase();
         query.split_whitespace().all(|word| haystack.contains(word))
     }

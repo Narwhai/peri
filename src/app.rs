@@ -1,6 +1,6 @@
 //! The player's state and everything that changes it: library scans, playback, the queue.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
@@ -136,6 +136,8 @@ pub struct App {
     pub tracks: Vec<Track>,
     /// The library gathered into albums, in library order.
     pub albums: Vec<Album>,
+    /// For each track, the index in `albums` of the album it is on; see `album_of`.
+    album_index: Vec<Option<usize>>,
     pub page: Page,
     /// The pages Back returns to, newest last; the library when empty.
     pub history: Vec<Page>,
@@ -297,6 +299,7 @@ impl App {
         let mut app = App {
             tracks: Vec::new(),
             albums: Vec::new(),
+            album_index: Vec::new(),
             page,
             history: Vec::new(),
             forward: Vec::new(),
@@ -548,7 +551,8 @@ impl App {
         let selected_path = self.selected.and_then(|i| self.tracks.get(i)).map(|t| t.path.clone());
         if append {
             let mut all = std::mem::take(&mut self.tracks);
-            all.retain(|t| !tracks.iter().any(|n| n.path == t.path));
+            let paths: HashSet<&Path> = tracks.iter().map(|t| t.path.as_path()).collect();
+            all.retain(|t| !paths.contains(t.path.as_path()));
             all.append(&mut tracks);
             library::sort(&mut all);
             tracks = all;
@@ -565,7 +569,7 @@ impl App {
         if self.page == Page::Graph {
             self.refresh_graph();
         }
-        self.albums = album::build(&self.tracks);
+        self.rebuild_albums();
         let find = |path: &Option<PathBuf>, tracks: &[Track]| path.as_ref().and_then(|p| tracks.iter().position(|t| &t.path == p));
         self.selected = find(&selected_path, &self.tracks);
         let current = find(&playing_path, &self.tracks);
@@ -1059,9 +1063,22 @@ impl App {
         self.load(i, tx);
     }
 
+    /// Rebuilds the albums from the tracks, and the index from each track to its album.
+    fn rebuild_albums(&mut self) {
+        self.albums = album::build(&self.tracks);
+        self.album_index = vec![None; self.tracks.len()];
+        for (a, entry) in self.albums.iter().enumerate() {
+            for &t in &entry.tracks {
+                if let Some(slot) = self.album_index.get_mut(t).filter(|s| s.is_none()) {
+                    *slot = Some(a);
+                }
+            }
+        }
+    }
+
     /// The album a song belongs to.
     pub fn album_of(&self, track: usize) -> Option<usize> {
-        self.albums.iter().position(|a| a.tracks.contains(&track))
+        self.album_index.get(track).copied().flatten()
     }
 
     /// Plays album `a` from its song `from` (else its first), queueing the albums after it
@@ -1475,7 +1492,7 @@ impl App {
         let Some(track) = self.tracks.get(i) else { return Ok(()) };
         let recorded = self.plays.record(track, at);
         self.plays.apply(&mut self.tracks);
-        self.albums = album::build(&self.tracks);
+        self.rebuild_albums();
         self.refilter();
         recorded
     }
@@ -1494,7 +1511,7 @@ impl App {
         }
         // Copies of the song share its plays, and views may sort or filter on them.
         self.plays.apply(&mut self.tracks);
-        self.albums = album::build(&self.tracks);
+        self.rebuild_albums();
         self.refilter();
         true
     }

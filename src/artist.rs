@@ -91,10 +91,11 @@ pub fn page(name: &str, tracks: &[Track], albums: &[Album], relations: &Relation
     let songs: Vec<usize> = (0..tracks.len()).filter(|&i| has(&tracks[i].artists, of)).collect();
     let featured_on = songs.iter().copied().filter(|&i| has(&tracks[i].featured, of)).collect();
     let mut own: Vec<usize> = (0..albums.len()).filter(|&a| has(&albums[a].album_artists, of)).collect();
-    let appears_on = songs.iter().copied().filter(|i| !own.iter().any(|&a| albums[a].tracks.contains(i))).collect();
+    let own_tracks: HashSet<usize> = own.iter().flat_map(|&a| albums[a].tracks.iter().copied()).collect();
+    let appears_on = songs.iter().copied().filter(|i| !own_tracks.contains(i)).collect();
     own.sort_by_key(|&a| std::cmp::Reverse(albums[a].year));
     let roles = |i: usize| Role::ALL.into_iter().filter(|&role| has(&tracks[i].credited(role), of)).collect::<Vec<Role>>();
-    let on_own = |i: usize| own.iter().any(|&a| albums[a].tracks.contains(&i));
+    let on_own = |i: usize| own_tracks.contains(&i);
     let credits = (0..tracks.len()).filter(|&i| !on_own(i)).map(|i| (i, roles(i))).filter(|(_, roles)| !roles.is_empty()).collect();
     let album_credits = own
         .iter()

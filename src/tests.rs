@@ -698,3 +698,20 @@ fn adding_a_folder_while_the_launch_scan_runs_keeps_both_folders() {
     assert_eq!(rt.state.library, vec![a.clone(), b.clone()]);
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn album_of_matches_the_albums_after_a_library_change_and_a_play() {
+    use crate::query::store::Store;
+    let mut app = App::new(Output::Silent, Store::memory());
+    let album_of_by_scan = |app: &App, i: usize| app.albums.iter().position(|a| a.tracks.contains(&i));
+    app.set_library(crate::demo_tracks(), false);
+    assert!(!app.albums.is_empty());
+    for i in 0..app.tracks.len() {
+        assert_eq!(app.album_of(i), album_of_by_scan(&app, i), "track {i} after set_library");
+    }
+    app.record_play(0, 1_000).expect("the play is recorded");
+    for i in 0..app.tracks.len() {
+        assert_eq!(app.album_of(i), album_of_by_scan(&app, i), "track {i} after record_play");
+    }
+    assert_eq!(app.album_of(app.tracks.len()), None, "out of range is no album");
+}

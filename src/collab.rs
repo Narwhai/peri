@@ -2,6 +2,8 @@
 //! Names match ignoring case, and each artist's merged names (see [`crate::relations`]) count
 //! as theirs.
 
+use std::collections::HashSet;
+
 use crate::album::Album;
 use crate::library::Track;
 use crate::relations::Relations;
@@ -59,7 +61,8 @@ pub fn page(names: &[String], tracks: &[Track], albums: &[Album], relations: &Re
     let artists: Vec<Vec<String>> = names.iter().map(|n| relations.merged(n)).collect();
     let mut own: Vec<usize> = (0..albums.len()).filter(|&a| all_in(&artists, &albums[a].album_artists)).collect();
     own.sort_by_key(|&a| (albums[a].year.is_none(), std::cmp::Reverse(albums[a].year)));
-    let appears_on = (0..tracks.len()).filter(|&i| all_in(&artists, &tracks[i].artists) && !own.iter().any(|&a| albums[a].tracks.contains(&i))).collect();
+    let own_tracks: HashSet<usize> = own.iter().flat_map(|&a| albums[a].tracks.iter().copied()).collect();
+    let appears_on = (0..tracks.len()).filter(|&i| all_in(&artists, &tracks[i].artists) && !own_tracks.contains(&i)).collect();
     CollabPage { names: names.to_vec(), albums: own, appears_on }
 }
 
