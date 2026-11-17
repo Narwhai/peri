@@ -742,3 +742,23 @@ fn cached_page_models_match_fresh_builds_and_follow_library_changes() {
     assert_eq!(*after, crate::search::search("nils", &app.tracks, &app.albums, &app.relations), "rebuilt search equals a fresh search");
     assert_eq!(app.recent_songs().first().copied(), Some(0), "the played song leads Recently Played after the change");
 }
+
+#[test]
+fn a_filter_edit_applies_now_and_saves_when_the_panel_closes() {
+    use crate::query::filter::{Condition, Node, Operator};
+    use crate::query::property::Property;
+    use crate::query::store::Store;
+    let dir = std::env::temp_dir().join(format!("peri-debounce-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let file = dir.join("prefs.json");
+    let mut app = App::new(Output::Silent, Store::at(&file));
+    crate::scene_library(&mut app);
+    let all = app.filtered.len();
+    app.views.active_mut().filter.children = vec![Node::Condition(Condition { property: Property::Title, op: Operator::Contains, value: "Dance".into() })];
+    app.views_changed_later();
+    assert!(app.filtered.len() < all, "the filter applies at once");
+    assert!(Store::at(&file).load().active().filter.children.is_empty(), "the save waits");
+    app.close_panel();
+    assert_eq!(Store::at(&file).load().active().filter.children.len(), 1, "closing the panel saves");
+    std::fs::remove_dir_all(&dir).unwrap();
+}

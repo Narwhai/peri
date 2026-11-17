@@ -143,7 +143,7 @@ fn value_input(s: &App, _p: &Palette, kit: &Kit, c: &Condition, path: &[usize], 
             if let Some(Node::Condition(c)) = s.views.active_mut().filter.node_mut(&change_path) {
                 c.value = text;
             }
-            s.views_changed();
+            s.views_changed_later();
         })
         .build(kit)
         .key(format!("cond{}-value", path_id(path)))

@@ -34,6 +34,8 @@ pub const ZOOM_MAX: f32 = 2.0;
 const ZOOM_STEP: f32 = 0.1;
 /// How long the zoom level shows after a keyboard zoom.
 const ZOOM_TOAST: Duration = Duration::from_millis(1200);
+/// How long filter edits wait for a pause before the views are saved.
+const SAVE_VIEWS_AFTER: Duration = Duration::from_millis(500);
 /// Arrow-key and slider-key seek step, in seconds.
 pub const SEEK_STEP: f64 = 5.0;
 /// Previous restarts the track instead when it has played longer than this.
@@ -196,6 +198,8 @@ pub struct App {
     pub zoom_preview: Option<f32>,
     /// When a keyboard zoom last changed the zoom, which shows the level for a moment.
     pub zoom_toast: Option<std::time::Instant>,
+    /// When a filter edit last changed the views without saving them; saved after a pause.
+    views_unsaved: Option<std::time::Instant>,
     /// Bumped whenever `filtered` or `sections` change, so the list knows its rows did.
     pub list_version: u64,
     /// The saved views; edits save at once.
@@ -332,6 +336,7 @@ impl App {
             zoom: store.load_zoom(),
             zoom_preview: None,
             zoom_toast: None,
+            views_unsaved: None,
             list_version: 0,
             views: store.load(),
             library: store.load_library(),
@@ -381,7 +386,6 @@ impl App {
 
     /// `AppSpec::setup`: keep the waker for the scan thread and cover decoding, then scan the
     /// folders or files named on the command line (for this run only), else the saved library.
-    /// Sets up with the folders and files given on the command line, if any.
     pub fn setup(&mut self, waker: Waker) {
         let args: Vec<PathBuf> = rune::extra_args().iter().map(PathBuf::from).collect();
         self.setup_with(waker, args);
@@ -1075,7 +1079,6 @@ impl App {
         self.searched(tx);
     }
 
-    /// Plays song `i` of `list`, queueing the rest of `list` (an artist's songs).
     /// Opens song `i`'s details, reading its file now.
     pub fn show_details(&mut self, i: usize, _tx: &mut Tx) {
         let Some(path) = self.tracks.get(i).map(|t| t.path.clone()) else { return };
@@ -1174,9 +1177,7 @@ impl App {
 
     /// Saves the views and re-evaluates the active one.
     pub fn views_changed(&mut self) {
-        if let Err(e) = self.store.save(&self.views) {
-            self.error = Some(e);
-        }
+        self.save_views();
         self.refilter();
     }
 
@@ -1261,7 +1262,14 @@ impl App {
         self.save_views();
     }
 
+    /// Re-evaluates the active view now, and saves the views after a pause.
+    pub fn views_changed_later(&mut self) {
+        self.refilter();
+        self.views_unsaved = Some(std::time::Instant::now());
+    }
+
     fn save_views(&mut self) {
+        self.views_unsaved = None;
         if let Err(e) = self.store.save(&self.views) {
             self.error = Some(e);
         }
@@ -1626,9 +1634,11 @@ pub enum Row {
     Grid { start: usize, section: Option<usize> },
 }
 
-/// A song row's key: unique per group, since a song can be in several.
 impl App {
     pub fn close_panel(&mut self) {
+        if self.views_unsaved.is_some() {
+            self.save_views();
+        }
         self.panel = None;
         self.open_select = None;
         self.renaming = None;
@@ -1644,6 +1654,7 @@ impl App {
     }
 }
 
+/// A song row's key: unique per group, since a song can be in several.
 pub fn row_key(i: usize, section: Option<usize>) -> String {
     match section {
         Some(n) => format!("g{n}t{i}"),
@@ -1670,7 +1681,6 @@ pub fn header_key(n: usize) -> String {
     format!("g{n}")
 }
 
-/// `AppSpec::poll`: take scan results, follow the playing track, and move on when it ends.
 /// Opens the folder holding `path` in the system's file manager, selecting the file where the
 /// platform can.
 fn reveal(path: &std::path::Path) -> Result<(), String> {
@@ -1764,6 +1774,11 @@ pub fn poll(s: &mut App, now: f64, tx: &mut Tx) -> bool {
     match s.graph.moved_at {
         Some(at) if at.elapsed() >= crate::graph::state::SAVE_AFTER => s.save_graph(),
         Some(at) => tx.wake_after(crate::graph::state::SAVE_AFTER.saturating_sub(at.elapsed())),
+        None => {}
+    }
+    match s.views_unsaved {
+        Some(at) if at.elapsed() >= SAVE_VIEWS_AFTER => s.save_views(),
+        Some(at) => tx.wake_after(SAVE_VIEWS_AFTER.saturating_sub(at.elapsed())),
         None => {}
     }
     changed |= s.poll_lastfm(now, tx);
