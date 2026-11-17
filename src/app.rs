@@ -1619,7 +1619,7 @@ fn reveal(path: &std::path::Path) -> Result<(), String> {
         c
     } else {
         // The file manager D-Bus interface selects the file; xdg-open only opens its folder.
-        let uri = format!("file://{}", path.display());
+        let uri = file_uri(path);
         let shown = std::process::Command::new("dbus-send")
             .args(["--session", "--dest=org.freedesktop.FileManager1", "--type=method_call", "/org/freedesktop/FileManager1", "org.freedesktop.FileManager1.ShowItems"])
             .arg(format!("array:string:{uri}"))
@@ -1634,6 +1634,25 @@ fn reveal(path: &std::path::Path) -> Result<(), String> {
         c
     };
     cmd.spawn().map(drop).map_err(|e| format!("Couldn't open {}: {e}", dir.display()))
+}
+
+/// A `file://` URI for `path`, with every byte outside unreserved characters and `/` percent-encoded.
+fn file_uri(path: &Path) -> String {
+    #[cfg(unix)]
+    let bytes = {
+        use std::os::unix::ffi::OsStrExt;
+        std::borrow::Cow::Borrowed(path.as_os_str().as_bytes())
+    };
+    #[cfg(not(unix))]
+    let bytes = std::borrow::Cow::<[u8]>::Owned(path.to_string_lossy().into_owned().into_bytes());
+    let mut uri = String::from("file://");
+    for &b in bytes.iter() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => uri.push(char::from(b)),
+            _ => uri.push_str(&format!("%{b:02X}")),
+        }
+    }
+    uri
 }
 
 /// `AppSpec::poll`: take scan results, follow the playing track, and move on when it ends.
@@ -1776,4 +1795,15 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         _ => return false,
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn file_uri_percent_encodes_reserved_and_non_ascii_bytes() {
+        assert_eq!(file_uri(Path::new("/m/A #1/50% ?.flac")), "file:///m/A%20%231/50%25%20%3F.flac");
+        assert_eq!(file_uri(Path::new("/m/Björk/a-b_c.~d")), "file:///m/Bj%C3%B6rk/a-b_c.~d");
+    }
 }

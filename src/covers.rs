@@ -2,7 +2,7 @@
 //! and cached by count so a library of thousands of albums holds only the covers in view.
 
 use std::cell::RefCell;
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
@@ -40,11 +40,11 @@ pub struct Covers {
     images: ImageCache,
 }
 
-#[derive(Default)]
 struct Inner {
-    slots: HashMap<PathBuf, Slot>,
-    /// Least recently used first.
-    order: VecDeque<PathBuf>,
+    /// Each slot with the generation it was last touched in.
+    slots: HashMap<PathBuf, (Slot, u64)>,
+    /// Most slots kept once they're no longer in view.
+    capacity: usize,
     /// Bumped when covers arrive, so memoized cards rebuild with them.
     generation: u64,
 }
@@ -68,13 +68,13 @@ impl Covers {
                 })
                 .expect("spawn a cover worker");
         }
-        Covers { inner: RefCell::new(Inner::default()), jobs: Some(jobs), done: Some(done), images: ImageCache::new(waker) }
+        Covers { inner: RefCell::new(Inner::new(CAPACITY)), jobs: Some(jobs), done: Some(done), images: ImageCache::new(waker) }
     }
 
     /// Reads and shrinks covers on the calling thread, for headless runs and tests, whose
     /// frames run on a virtual clock and must show what a settled window shows.
     pub fn synchronous(waker: Waker) -> Covers {
-        Covers { inner: RefCell::new(Inner::default()), jobs: None, done: None, images: ImageCache::new(waker) }
+        Covers { inner: RefCell::new(Inner::new(CAPACITY)), jobs: None, done: None, images: ImageCache::new(waker) }
     }
 
     /// The cover for `song`, asking for it when it isn't known yet. `None` while it loads or
@@ -82,14 +82,14 @@ impl Covers {
     pub fn get(&self, song: &PathBuf) -> Option<Image> {
         let known = self.inner.borrow().slots.get(song).cloned();
         match known {
-            Some(Slot::Ready(image)) => {
+            Some((Slot::Ready(image), _)) => {
                 self.inner.borrow_mut().touch(song);
                 Some(image)
             }
-            Some(Slot::Pending | Slot::Missing) => None,
+            Some((Slot::Pending | Slot::Missing, _)) => None,
             None => match &self.jobs {
                 Some(jobs) => {
-                    self.inner.borrow_mut().slots.insert(song.clone(), Slot::Pending);
+                    self.inner.borrow_mut().slots.insert(song.clone(), (Slot::Pending, 0));
                     let _ = jobs.send(Job { path: song.clone() });
                     None
                 }
@@ -110,14 +110,20 @@ impl Covers {
     /// Takes finished covers; true when any arrived.
     pub fn drain(&self) -> bool {
         let Some(done) = &self.done else { return false };
-        let mut any = false;
-        while let Ok((path, thumb)) = done.try_recv() {
-            any = true;
-            let slot = match thumb {
-                Some((w, h, rgba)) => Slot::Ready(self.images.rgba(w, h, rgba)),
-                None => Slot::Missing,
-            };
-            self.inner.borrow_mut().arrive(path, slot);
+        let arrived: Vec<(PathBuf, Slot)> = done
+            .try_iter()
+            .map(|(path, thumb)| {
+                let slot = match thumb {
+                    Some((w, h, rgba)) => Slot::Ready(self.images.rgba(w, h, rgba)),
+                    None => Slot::Missing,
+                };
+                (path, slot)
+            })
+            .collect();
+        let any = !arrived.is_empty();
+        if any {
+            // One generation for the batch, so covers in view stay protected for all of it.
+            self.inner.borrow_mut().arrive_all(arrived);
         }
         any
     }
@@ -128,22 +134,41 @@ impl Covers {
 }
 
 impl Inner {
+    fn new(capacity: usize) -> Inner {
+        Inner { slots: HashMap::new(), capacity, generation: 0 }
+    }
+
+    /// Stores a cover that arrived.
     fn arrive(&mut self, path: PathBuf, slot: Slot) {
-        self.slots.insert(path.clone(), slot);
-        self.touch(&path);
+        self.arrive_all(vec![(path, slot)]);
+    }
+
+    /// Stores covers that arrived together. Evicts the least recently touched slots beyond
+    /// capacity, but never one touched since the previous arrival, nor a pending read.
+    fn arrive_all(&mut self, arrived: Vec<(PathBuf, Slot)>) {
+        let frame = self.generation;
         self.generation += 1;
-        while self.order.len() > CAPACITY {
-            if let Some(old) = self.order.pop_front() {
-                self.slots.remove(&old);
-            }
+        for (path, slot) in arrived {
+            self.slots.insert(path, (slot, frame));
+        }
+        while self.slots.len() > self.capacity {
+            let victim = self
+                .slots
+                .iter()
+                .filter(|(_, (slot, stamp))| *stamp < frame && !matches!(slot, Slot::Pending))
+                .min_by_key(|(_, (_, stamp))| *stamp)
+                .map(|(path, _)| path.clone());
+            let Some(victim) = victim else { break };
+            self.slots.remove(&victim);
         }
     }
 
+    /// Marks a slot as used in the current generation.
     fn touch(&mut self, path: &PathBuf) {
-        if let Some(at) = self.order.iter().position(|p| p == path) {
-            self.order.remove(at);
+        let generation = self.generation;
+        if let Some((_, stamp)) = self.slots.get_mut(path) {
+            *stamp = generation;
         }
-        self.order.push_back(path.clone());
     }
 }
 
@@ -159,6 +184,62 @@ pub fn shrink(bytes: &[u8], px: u32) -> Option<(u32, u32, Vec<u8>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An `Inner` whose slots are all `Missing`, to test eviction without decoding images.
+    fn missing_slots(capacity: usize, paths: &[&str]) -> Inner {
+        let mut inner = Inner::new(capacity);
+        for p in paths {
+            inner.arrive(PathBuf::from(p), Slot::Missing);
+        }
+        inner
+    }
+
+    fn kept(inner: &Inner) -> Vec<String> {
+        let mut names: Vec<String> = inner.slots.keys().map(|p| p.display().to_string()).collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn covers_touched_since_the_last_arrival_survive_eviction() {
+        let mut inner = missing_slots(3, &["a", "b", "c"]);
+        // a, b, c are all in view: touched, so a new arrival may go over capacity but evicts none.
+        for p in ["a", "b", "c"] {
+            inner.touch(&PathBuf::from(p));
+        }
+        inner.arrive(PathBuf::from("d"), Slot::Missing);
+        assert_eq!(kept(&inner), ["a", "b", "c", "d"]);
+    }
+
+    #[test]
+    fn least_recently_touched_covers_are_evicted_first() {
+        let mut inner = missing_slots(3, &["a", "b", "c"]);
+        // Nothing touched: the oldest, "a", makes room for "d".
+        inner.arrive(PathBuf::from("d"), Slot::Missing);
+        assert_eq!(kept(&inner), ["b", "c", "d"]);
+        // "c" is in view, so "b" goes instead of it.
+        inner.touch(&PathBuf::from("c"));
+        inner.arrive(PathBuf::from("e"), Slot::Missing);
+        assert_eq!(kept(&inner), ["c", "d", "e"]);
+    }
+
+    #[test]
+    fn covers_arriving_together_never_evict_the_ones_in_view() {
+        let mut inner = missing_slots(2, &["a", "b"]);
+        inner.touch(&PathBuf::from("a"));
+        inner.touch(&PathBuf::from("b"));
+        inner.arrive_all(vec![(PathBuf::from("c"), Slot::Missing), (PathBuf::from("d"), Slot::Missing)]);
+        assert_eq!(kept(&inner), ["a", "b", "c", "d"]);
+    }
+
+    #[test]
+    fn pending_covers_are_never_evicted() {
+        let mut inner = missing_slots(1, &[]);
+        inner.slots.insert(PathBuf::from("p"), (Slot::Pending, 0));
+        inner.arrive(PathBuf::from("a"), Slot::Missing);
+        inner.arrive(PathBuf::from("b"), Slot::Missing);
+        assert_eq!(kept(&inner), ["b", "p"]);
+    }
 
     fn png(w: u32, h: u32) -> Vec<u8> {
         let img = image::RgbaImage::from_pixel(w, h, image::Rgba([200, 30, 60, 255]));
