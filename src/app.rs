@@ -1133,6 +1133,26 @@ impl App {
         }
     }
 
+    /// Refreshes the play counts after a play counts: updates the tracks, then only the albums
+    /// whose songs' counts changed, so the albums keep their order and indices.
+    fn refresh_play_stats(&mut self) {
+        let before: Vec<(u32, Option<i64>)> = self.tracks.iter().map(|t| (t.plays, t.last_played)).collect();
+        self.plays.apply(&mut self.tracks);
+        let changed: HashSet<usize> = self
+            .tracks
+            .iter()
+            .enumerate()
+            .filter(|(i, t)| before.get(*i).is_some_and(|b| *b != (t.plays, t.last_played)))
+            .filter_map(|(i, _)| self.album_of(i))
+            .collect();
+        for a in changed {
+            let Some(album) = self.albums.get_mut(a) else { continue };
+            album.plays = album.tracks.iter().filter_map(|&t| self.tracks.get(t)).map(|t| t.plays).sum();
+            album.last_played = album.tracks.iter().filter_map(|&t| self.tracks.get(t)).fold(None, |acc, t| acc.max(t.last_played));
+        }
+        self.data_version = self.data_version.wrapping_add(1);
+    }
+
     /// The album a song belongs to.
     pub fn album_of(&self, track: usize) -> Option<usize> {
         self.album_index.get(track).copied().flatten()
@@ -1558,8 +1578,7 @@ impl App {
     pub fn record_play(&mut self, i: usize, at: i64) -> Result<(), String> {
         let Some(track) = self.tracks.get(i) else { return Ok(()) };
         let recorded = self.plays.record(track, at);
-        self.plays.apply(&mut self.tracks);
-        self.rebuild_albums();
+        self.refresh_play_stats();
         self.refilter();
         recorded
     }
@@ -1577,8 +1596,7 @@ impl App {
             self.error = Some(e);
         }
         // Copies of the song share its plays, and views may sort or filter on them.
-        self.plays.apply(&mut self.tracks);
-        self.rebuild_albums();
+        self.refresh_play_stats();
         self.refilter();
         true
     }

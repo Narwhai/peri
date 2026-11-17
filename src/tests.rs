@@ -782,3 +782,42 @@ fn a_filter_edit_applies_now_and_saves_when_the_panel_closes() {
     assert_eq!(Store::at(&file).load().active().filter.children.len(), 1, "closing the panel saves");
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn a_play_updates_its_album_in_place_like_a_rebuild() {
+    use crate::query::store::Store;
+    let mut app = App::new(Output::Silent, Store::memory());
+    app.set_library(crate::demo_tracks(), false);
+    let before = app.albums.clone();
+    let i = 0;
+    let a = app.album_of(i).expect("the first song is in an album");
+    app.record_play(i, 1_000).expect("the play is recorded");
+    assert_eq!(app.albums, crate::album::build(&app.tracks), "the in-place update equals a full rebuild");
+    assert_eq!(app.albums.len(), before.len(), "albums keep their count");
+    assert_eq!(app.albums[a].plays, before[a].plays + 1, "the album's plays went up by one");
+    assert_eq!(app.albums[a].last_played, Some(1_000), "the album's last played is the play");
+    assert_eq!(app.album_of(i), Some(a), "the song is still in its album");
+}
+
+#[test]
+fn copies_of_a_song_in_two_albums_both_update_their_plays() {
+    use crate::query::store::Store;
+    let mut app = App::new(Output::Silent, Store::memory());
+    app.set_library(crate::demo_tracks(), false);
+    let mut tracks = app.tracks.clone();
+    let mut copy = tracks[0].clone();
+    copy.path = "/elsewhere/copy.flac".into();
+    copy.album_artist = Some("Someone Else".into());
+    tracks.push(copy);
+    app.set_library(tracks, false);
+    let played = app.tracks.iter().position(|t| t.path == std::path::Path::new("/demo/Big Thief;Laraaji/Live Sessions/00 Mary.flac")).expect("the first song is in the library");
+    let other = app.tracks.iter().position(|t| t.path == std::path::Path::new("/elsewhere/copy.flac")).expect("the copy is in the library");
+    let first = app.album_of(played).expect("the song is in an album");
+    let second = app.album_of(other).expect("the copy is in an album");
+    assert_ne!(first, second, "the copies land in different albums");
+    app.record_play(played, 1_000).expect("the play is recorded");
+    assert_eq!(app.albums, crate::album::build(&app.tracks), "the in-place update equals a full rebuild");
+    assert_eq!(app.albums[first].plays, 1, "the played album counts the play");
+    assert_eq!(app.albums[second].plays, 1, "the copy's album counts the shared play");
+    assert_eq!(app.albums[second].last_played, Some(1_000), "the copy's album shows the shared last played");
+}
