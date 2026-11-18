@@ -123,7 +123,7 @@ fn song_line(s: &App, i: usize, list: &[usize], stripe: bool, columns: table::Co
     };
     let look = table::RowLook { lead, cover: None, selected: s.selected == Some(i), current, stripe, height: SONG_ROW_H, px: 8.0, pills: Vec::new() };
     let list = list.to_vec();
-    table::song_row(t, i, columns, look, p)
+    table::song_row(t, i, columns, look, &[], p)
         .key(format!("recent-songs-t{i}"))
         .label(format!("{} by {}", t.title, t.artist().unwrap_or_else(|| "unknown artist".into())))
         .cursor(Cursor::Pointer)

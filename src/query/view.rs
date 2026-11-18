@@ -150,7 +150,34 @@ pub struct Evaluated {
 /// Applies `view` and the search `query` (lowercased) to `tracks` (songs or albums), which
 /// are in library order.
 pub fn evaluate<R: Record>(view: &View, tracks: &[R], query: &str) -> Evaluated {
-    let mut matching: Vec<usize> = (0..tracks.len()).filter(|&i| tracks[i].matches(query) && view.filter.matches(&tracks[i])).collect();
+    evaluate_matching(view, tracks, |r| r.matches(query))
+}
+
+/// Applies `view` and the view search `words` (lowercased) to `tracks`, which are in library
+/// order. The search matches the title and `view`'s columns, see [`matches_fields`].
+pub fn evaluate_search<R: Record>(view: &View, tracks: &[R], words: &[String]) -> Evaluated {
+    evaluate_matching(view, tracks, |r| matches_fields(r, &view.columns, words))
+}
+
+/// Whether every word (lowercased) appears in the title or in the text one of `props` shows
+/// for `r`. A missing value shows no text, so it matches nothing.
+pub fn matches_fields<R: Record>(r: &R, props: &[Property], words: &[String]) -> bool {
+    if words.is_empty() {
+        return true;
+    }
+    let fields: Vec<String> = std::iter::once(Property::Title)
+        .chain(props.iter().copied())
+        .filter_map(|p| {
+            let value = r.value(p);
+            (!value.is_none()).then(|| p.display(&value).to_lowercase())
+        })
+        .collect();
+    words.iter().all(|word| fields.iter().any(|f| f.contains(word.as_str())))
+}
+
+/// Applies `view` and the record test `search` to `tracks`, which are in library order.
+pub fn evaluate_matching<R: Record>(view: &View, tracks: &[R], search: impl Fn(&R) -> bool) -> Evaluated {
+    let mut matching: Vec<usize> = (0..tracks.len()).filter(|&i| search(&tracks[i]) && view.filter.matches(&tracks[i])).collect();
     if !view.sorts.is_empty() {
         let keys: Vec<Vec<Value>> = matching.iter().map(|&i| view.sorts.iter().map(|s| s.property.value(&tracks[i])).collect()).collect();
         let mut order: Vec<usize> = (0..matching.len()).collect();

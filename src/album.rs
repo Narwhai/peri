@@ -127,9 +127,9 @@ impl Album {
     }
 
     /// Discs the album spans, when more than one.
-    pub fn discs(&self, tracks: &[Track]) -> Vec<Option<u32>> {
+    pub fn discs(&self, tracks: &[Track], keep: impl Fn(usize) -> bool) -> Vec<Option<u32>> {
         let mut discs: Vec<Option<u32>> = Vec::new();
-        for &i in &self.tracks {
+        for &i in self.tracks.iter().filter(|&&i| keep(i)) {
             let d = tracks[i].disc;
             if !discs.contains(&d) {
                 discs.push(d);
@@ -381,7 +381,7 @@ mod tests {
         let albums = build(&tracks);
         assert_eq!(albums.len(), 1);
         assert_eq!(albums[0].tracks.iter().map(|&i| tracks[i].title.as_str()).collect::<Vec<_>>(), ["d1t1", "d1t2", "d2t1"]);
-        assert_eq!(albums[0].discs(&tracks), [Some(1), Some(2)]);
+        assert_eq!(albums[0].discs(&tracks, |_| true), [Some(1), Some(2)]);
     }
 
     #[test]

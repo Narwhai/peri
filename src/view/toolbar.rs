@@ -64,6 +64,7 @@ pub(super) fn toolbar(s: &App, width: Option<f32>, p: &Palette, kit: &Kit, layer
             let mode = if v == "albums" { Mode::Albums } else { Mode::Songs };
             if s.views.active().mode != mode {
                 s.views.active_mut().set_mode(mode);
+                s.clear_view_search();
                 s.collapsed.clear();
                 s.filter_edits.clear();
                 s.show_library();
@@ -87,11 +88,43 @@ pub(super) fn toolbar(s: &App, width: Option<f32>, p: &Palette, kit: &Kit, layer
     // Album grids show no song tables, unless an album page is open.
     let tables = !(albums && view.layout == Layout::Grid) || s.page != crate::app::Page::Library;
     bar.child(el().grow(1.0))
+        .children((s.page == crate::app::Page::Library).then(|| view_search(s, compact, kit)))
         .children((s.page == crate::app::Page::Library).then(|| play_view_button(s, albums, p)))
         .children(tables.then_some(columns))
         .child(sort)
         .child(group)
         .child(filter)
+}
+
+/// The view search box: filters the active view by the title and its columns. Narrower when
+/// `compact`, and shrinks rather than push the other controls out.
+fn view_search(s: &App, compact: bool, kit: &Kit) -> El {
+    TextInput::new(&s.view_search)
+        .placeholder("Search view")
+        .label("Search view")
+        .leading_icon(&rune_kit::glyphs::SEARCH)
+        .width(Some(if compact { 140.0 } else { 180.0 }))
+        .clear_button()
+        .on_edit(|s: &mut App| &mut s.view_search)
+        .on_change(|s: &mut App, _tx| s.refilter())
+        .on_action(|s: &mut App, _tx| {
+            s.clear_view_search();
+            s.refilter();
+        })
+        .on_key(|s: &mut App, ev, tx| match ev.key {
+            rune::Key::Escape => {
+                s.clear_view_search();
+                s.refilter();
+                tx.blur();
+                true
+            }
+            _ => false,
+        })
+        .build(kit)
+        .key("view-search")
+        .radius(2.0)
+        .shrink()
+        .min_w(80.0)
 }
 
 /// How many songs, or albums in an album view, the active view shows, as a button that
@@ -356,6 +389,7 @@ fn views_body(s: &App, p: &Palette, kit: &Kit) -> El {
 fn switch_view(s: &mut App, i: usize, tx: &mut Tx) {
     if s.views.active != i {
         s.views.active = i;
+        s.clear_view_search();
         s.collapsed.clear();
         s.filter_edits.clear();
         s.views_changed();
@@ -399,9 +433,13 @@ fn delete_view(s: &mut App, i: usize) {
     if s.views.list.len() <= 1 {
         return;
     }
+    let deleted_active = s.views.active == i;
     s.views.list.remove(i);
     if s.views.active > i || s.views.active == s.views.list.len() {
         s.views.active = s.views.active.saturating_sub(1);
+    }
+    if deleted_active {
+        s.clear_view_search();
     }
     s.renaming = None;
     s.collapsed.clear();

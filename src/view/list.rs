@@ -93,7 +93,7 @@ pub(super) fn list(s: &App, p: &Palette, cx: &mut Cx<App>) -> El {
                     let covers = if view.covers { s.covers.as_ref().map_or(0, |c| c.generation()) } else { 0 };
                     memo(row_key(track, section), (s.list_version, number, selected, current, playing, p.dark, columns.version(), covers), || {
                         let cover = view.covers.then(|| song_cover(s, format!("cover{track}"), track, table::COVER_W, &p));
-                        track_row(&s.tracks()[track], track, section, number, selected, current, playing, cover, columns, &p)
+                        track_row(&s.tracks()[track], track, section, number, selected, current, playing, cover, columns, &s.search_words, &p)
                     })
                 }
             },
@@ -189,14 +189,14 @@ fn group_header(section: &Section, g: usize, open: bool, p: &Palette) -> El {
 
 #[allow(clippy::too_many_arguments)]
 /// A song row; with a `cover`, the cover shows the playing icon and the lead keeps the number.
-fn track_row(t: &Track, i: usize, section: Option<usize>, number: usize, selected: bool, current: bool, playing: bool, cover: Option<El>, columns: table::Columns, p: &Palette) -> El {
+fn track_row(t: &Track, i: usize, section: Option<usize>, number: usize, selected: bool, current: bool, playing: bool, cover: Option<El>, columns: table::Columns, words: &[String], p: &Palette) -> El {
     let lead: El = if current && cover.is_none() {
         icon(if playing { &icons::BARS } else { &icons::PAUSE }, 14.0).color(p.accent)
     } else {
         text(format!("{number}")).font(NUM).color(p.tx3).align(Align::End).w(28.0)
     };
     let look = table::RowLook { lead, cover, selected, current, stripe: number.is_multiple_of(2), height: ROW_H, px: 10.0, pills: Vec::new() };
-    table::song_row(t, i, columns, look, p)
+    table::song_row(t, i, columns, look, words, p)
         .key(row_key(i, section))
         .press(p.ui.alpha(0.5))
         .label(format!("{} by {}", t.title, t.artist().as_deref().unwrap_or("unknown artist")))

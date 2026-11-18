@@ -205,8 +205,9 @@ pub struct RowLook {
 
 /// A song row: lead, title with "feat." links, the columns, and the details button. The caller
 /// adds its key, presses and label.
-pub fn song_row(t: &Track, i: usize, columns: Columns, look: RowLook, p: &Palette) -> El {
-    let title = song_title(t, if look.current { p.accent } else { p.tx }).key("title").font(BODY).truncate();
+/// `words` are the view search's words, highlighted in the title and cells (none for no highlights).
+pub fn song_row(t: &Track, i: usize, columns: Columns, look: RowLook, words: &[String], p: &Palette) -> El {
+    let title = marked(song_title(t, if look.current { p.accent } else { p.tx }), &t.title, words, p).key("title").font(BODY).truncate();
     let mut r = row()
         .w_full()
         .h(look.height)
@@ -241,7 +242,7 @@ pub fn song_row(t: &Track, i: usize, columns: Columns, look: RowLook, p: &Palett
         r = r.child(slots);
     }
     for &c in columns.shown {
-        r = r.child(sized(cell(t, i, c, p), c, columns.widths).key(column_key(c)));
+        r = r.child(sized(cell(t, i, c, words, p), c, columns.widths).key(column_key(c)));
     }
     r.child(details_button(i, p))
 }
@@ -273,27 +274,38 @@ pub(super) fn pill_el(pill: Pill) -> El {
         .child(text(pill.label).font(SMALL).color(pill.color))
 }
 
-/// One column's value: names link to their pages, numbers align right.
-fn cell(t: &Track, i: usize, c: Property, p: &Palette) -> El {
+/// One column's value: names link to their pages, numbers align right. `words` are highlighted
+/// in the text shown.
+fn cell(t: &Track, i: usize, c: Property, words: &[String], p: &Palette) -> El {
     let color = p.tx2;
     let shown = match c {
         // The artist line as tagged ("A & B feat. C"), each name a link.
-        Property::Artist => return song_artist(t, color).unwrap_or_else(|| text("")).font(BODY).truncate(),
+        Property::Artist => {
+            let line = t.artist().unwrap_or_default();
+            return marked(song_artist(t, color).unwrap_or_else(|| text("")), &line, words, p).font(BODY).truncate();
+        }
         Property::AlbumArtist if t.album_artist.is_some() => {
             let line = t.album_artist.clone().unwrap_or_default();
             let links = artist_links(&line, &t.album_artists);
-            return linked(line, links, color).font(BODY).truncate();
+            return marked(linked(line.clone(), links, color), &line, words, p).font(BODY).truncate();
         }
-        Property::Label => return t.label.as_deref().map_or_else(|| text(""), |l| label_link(l, color)).font(BODY).truncate(),
-        Property::Album => return t.album.as_deref().map_or_else(|| text(""), |a| album_link(a, i, color)).font(BODY).truncate(),
+        Property::Label => return t.label.as_deref().map_or_else(|| text(""), |l| marked(label_link(l, color), l, words, p)).font(BODY).truncate(),
+        Property::Album => return t.album.as_deref().map_or_else(|| text(""), |a| marked(album_link(a, i, color), a, words, p)).font(BODY).truncate(),
         _ => c.value(t),
     };
     match shown {
-        Value::List(names) if names_link(c) => name_list(&names.into_iter().map(|n| (n, Vec::new())).collect::<Vec<_>>(), color).font(BODY).truncate(),
+        Value::List(names) if names_link(c) => {
+            let line = names.join(", ");
+            marked(name_list(&names.into_iter().map(|n| (n, Vec::new())).collect::<Vec<_>>(), color), &line, words, p).font(BODY).truncate()
+        }
         Value::None => text(""),
-        Value::Text(f) if c == Property::Format => text(f.to_uppercase()).font(SMALL).color(p.tx3),
+        Value::Text(f) if c == Property::Format => {
+            let upper = f.to_uppercase();
+            marked(text(upper.clone()), &upper, words, p).font(SMALL).color(p.tx3)
+        }
         v => {
-            let label = text(c.display(&v)).font(if numeric(c) { NUM } else { BODY }).color(if numeric(c) { p.tx3 } else { color }).truncate();
+            let shown = c.display(&v);
+            let label = marked(text(shown.clone()), &shown, words, p).font(if numeric(c) { NUM } else { BODY }).color(if numeric(c) { p.tx3 } else { color }).truncate();
             if numeric(c) { label.align(Align::End) } else { label }
         }
     }

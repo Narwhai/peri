@@ -328,7 +328,7 @@ fn the_top_row_follows_the_current_track_while_the_panel_is_open() {
     rt.update(move |s, tx| s.play_list(all, 0, tx));
     click(&mut rt, "queue");
     // Scroll away from the top, then move on: the panel follows the new current track.
-    rt.wheel(700.0, 300.0, 200.0);
+    rt.wheel(700.0, 300.0, -200.0);
     settle(&mut rt);
     rt.update(|s, tx| s.next(tx));
     rt.update(|s, tx| s.next(tx));
@@ -466,4 +466,81 @@ fn escape_closes_an_open_popover_before_the_floating_queue() {
     assert!(rt.state.queue_shown, "the queue stays open");
     press_key(&mut rt, Key::Escape);
     assert!(!rt.state.queue_shown, "a second Escape closes the queue");
+}
+
+#[test]
+fn a_short_queue_that_fits_never_scrolls_as_tracks_change() {
+    let mut rt = runtime(Store::memory());
+    let first: Vec<usize> = (0..4).collect();
+    rt.update(move |s, tx| s.play_list(first, 0, tx));
+    click(&mut rt, "queue");
+    let rows = |rt: &Runtime<App>| (0..4).map(|n| rect(rt, &format!("queue-row{n}"))).collect::<Vec<_>>();
+    let still = rows(&rt);
+    for _ in 0..4 {
+        rt.update(|s, tx| s.next(tx));
+        for _ in 0..30 {
+            rt.frame(1.0 / 60.0);
+            assert_eq!(rows(&rt), still, "no row moves while the queue fits");
+        }
+    }
+}
+
+#[test]
+fn a_track_change_with_both_rows_in_view_leaves_a_long_queue_still() {
+    let mut rt = runtime(Store::memory());
+    let all: Vec<usize> = (0..rt.state.tracks().len()).collect();
+    rt.update(move |s, tx| s.play_list(all, 0, tx));
+    click(&mut rt, "queue");
+    let list = rect(&rt, crate::app::QUEUE_LIST_KEY);
+    rt.update(|s, tx| s.next(tx));
+    settle(&mut rt);
+    assert_eq!(rt.state.queue.as_ref().map(|q| q.pos()), Some(1));
+    let top = rect(&rt, "queue-row0");
+    assert!((top[1] - list[1]).abs() < 1.0, "row 0 stays at the top: {top:?} in {list:?}");
+}
+
+#[test]
+fn a_track_change_with_the_current_row_out_of_view_glides_to_the_entry_before_it() {
+    let mut rt = runtime(Store::memory());
+    let all: Vec<usize> = (0..rt.state.tracks().len()).collect();
+    rt.update(move |s, tx| s.play_list(all, 0, tx));
+    click(&mut rt, "queue");
+    rt.wheel(700.0, 300.0, -600.0);
+    settle(&mut rt);
+    let start = rt.state.queue_scroll.get()[0];
+    assert!(start > 0.0, "the list scrolled away from the top");
+    rt.update(|s, tx| s.next(tx));
+    rt.frame(1.0 / 60.0);
+    let mid = rt.state.queue_scroll.get()[0];
+    assert!(mid < start && mid > 0.0, "the first frame of the glide is between: {mid} of {start}");
+    settle(&mut rt);
+    assert!(rt.state.queue_scroll.get()[0] < 1.0, "the glide ends with row 0 at the top");
+    let list = rect(&rt, crate::app::QUEUE_LIST_KEY);
+    let top = rect(&rt, "queue-row0");
+    assert!((top[1] - list[1]).abs() < 1.0, "row 0 is the top row: {top:?} in {list:?}");
+}
+
+
+#[test]
+fn a_row_that_becomes_current_keeps_its_contents_in_place() {
+    let mut rt = runtime(Store::memory());
+    let ids: Vec<usize> = (0..6).collect();
+    rt.update(move |s, tx| s.play_list(ids, 0, tx));
+    click(&mut rt, "queue");
+    // Row 3 loses its grip and remove button as it becomes current; row 0 gets them back.
+    let keys = ["queue-row3-cover", "queue-row0-cover"];
+    let before: Vec<[f32; 4]> = keys.iter().map(|k| rect(&rt, k)).collect();
+    let (x, y) = rt.find("queue-row3").expect("row 3 shows");
+    for _ in 0..2 {
+        rt.pointer_down(x, y);
+        rt.frame(1.0 / 60.0);
+        rt.pointer_up(x, y);
+    }
+    rt.frame(1.0 / 60.0);
+    assert_eq!(rt.state.queue.as_ref().map(|q| q.pos()), Some(3), "the double-click jumped");
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+        let now: Vec<[f32; 4]> = keys.iter().map(|k| rect(&rt, k)).collect();
+        assert_eq!(now, before, "the covers don't move as the current row changes");
+    }
 }

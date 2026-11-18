@@ -18,7 +18,7 @@ use crate::search::SearchResults;
 use crate::collab::CollabPage;
 use crate::label::LabelPage;
 use crate::query::store::{SavedEntry, SavedQueue, Store, QUEUE_VERSION, Views};
-use crate::query::view::{Evaluated, Layout, Section, Widths, evaluate};
+use crate::query::view::{Evaluated, Layout, Section, Widths, evaluate, evaluate_matching, evaluate_search, matches_fields};
 use crate::lastfm::{self, scrobbling::{Effect, Scrobbling}};
 use crate::library::{self, ScanMsg, Track};
 use crate::listen::{Listen, unix_now};
@@ -46,6 +46,8 @@ pub const RECENT_COUNT: usize = 20;
 /// scroll offset is computable).
 pub const QUEUE_LIST_KEY: &str = "queue-list";
 pub const QUEUE_ROW_H: f32 = 52.0;
+/// How far a queue row may poke past the list's edge and still count as in view, in points.
+const QUEUE_VISIBLE_SLACK: f32 = 0.5;
 
 /// Where sound goes.
 pub enum Output {
@@ -261,6 +263,13 @@ pub struct App {
     /// One editor per filter condition with a typed value, by path.
     pub filter_edits: std::collections::HashMap<Vec<usize>, TextEdit>,
     pub search: TextEdit,
+    /// The view search box's text, shared by every view. Not saved; cleared when the view or mode changes.
+    pub view_search: TextEdit,
+    /// `view_search`'s words, lowercased, as last evaluated. The rows highlight them.
+    pub search_words: Vec<String>,
+    /// Album list views with a view search: the songs matching it, which the album cards show.
+    /// `None` otherwise. Set by `refilter`.
+    pub view_matches: Option<HashSet<usize>>,
     /// Each column's width as last laid out on screen, where a resize drag starts from.
     pub laid_out_widths: std::collections::HashMap<Property, f32>,
     /// Index into `tracks` of the highlighted row.
@@ -277,6 +286,8 @@ pub struct App {
     pub queue_shown: bool,
     /// The replace prompt's "Don't ask again" checkbox, while the prompt is open.
     pub queue_dont_ask: bool,
+    /// Where the queue list is scrolled, as `[offset y, viewport height]`, kept current while it shows.
+    pub queue_scroll: Live<[f32; 2]>,
     /// A restored queue's panel scrolls to its place once it's on screen: the next `poll`.
     queue_scroll_due: bool,
     /// A list waiting on the user's answer, when the queue was edited and the policy is to ask.
@@ -418,6 +429,9 @@ impl App {
             rename: TextEdit::new(""),
             filter_edits: Default::default(),
             search: TextEdit::new(""),
+            view_search: TextEdit::new(""),
+            search_words: Vec::new(),
+            view_matches: None,
             laid_out_widths: Default::default(),
             selected: None,
             current: None,
@@ -426,6 +440,7 @@ impl App {
             queue_pinned,
             queue_shown: queue_pinned,
             queue_dont_ask: false,
+            queue_scroll: Live::new([0.0, 0.0]),
             queue_scroll_due: false,
             pending_play: None,
             queue_restore,
@@ -693,23 +708,41 @@ impl App {
         }
     }
 
+    /// Clears the view search box. The caller re-evaluates the view.
+    pub fn clear_view_search(&mut self) {
+        self.view_search.clear();
+    }
+
     /// Re-evaluates the active view over the library.
     pub fn refilter(&mut self) {
+        self.search_words = self.view_search.text.split_whitespace().map(str::to_lowercase).collect();
+        let words = &self.search_words;
         let view = self.views.active();
+        let mut matches = None;
         match view.mode {
             Mode::Songs => {
-                let Evaluated { order, sections } = evaluate(view, &self.tracks, "");
+                let Evaluated { order, sections } = evaluate_search(view, &self.tracks, words);
                 self.filtered = order;
                 self.sections = sections;
                 self.shown_albums.clear();
             }
+            // An album list shows the albums with a matching song, and only those songs.
+            Mode::Albums if view.layout == Layout::List && !words.is_empty() => {
+                let songs: HashSet<usize> = (0..self.tracks.len()).filter(|&i| matches_fields(&self.tracks[i], &view.columns, words)).collect();
+                let searched = evaluate_matching(view, &self.albums, |album| album.tracks.iter().any(|t| songs.contains(t)));
+                self.filtered = searched.order.iter().flat_map(|&a| self.albums[a].tracks.iter().copied().filter(|t| songs.contains(t))).collect();
+                self.shown_albums = searched.order;
+                self.sections = searched.sections;
+                matches = Some(songs);
+            }
             Mode::Albums => {
-                let unsearched = evaluate(view, &self.albums, "");
-                self.filtered = unsearched.order.iter().flat_map(|&a| self.albums[a].tracks.iter().copied()).collect();
-                self.shown_albums = unsearched.order;
-                self.sections = unsearched.sections;
+                let searched = evaluate_search(view, &self.albums, words);
+                self.filtered = searched.order.iter().flat_map(|&a| self.albums[a].tracks.iter().copied()).collect();
+                self.shown_albums = searched.order;
+                self.sections = searched.sections;
             }
         }
+        self.view_matches = matches;
         // Views size their grid cards differently.
         if let Some(width) = self.grid_width {
             self.columns = crate::view::columns_for(width, self.card_size());
@@ -1291,7 +1324,8 @@ impl App {
     pub fn play_album(&mut self, a: usize, from: Option<usize>, tx: &mut Tx) {
         let Some(album) = self.albums.get(a) else { return };
         let Some(&first) = from.or(album.tracks.first().copied()).as_ref() else { return };
-        let list = if self.shown_albums.contains(&a) { self.filtered.clone() } else { album.tracks.clone() };
+        // The whole album, then the shown albums after it, even when a search hides some of their songs.
+        let list = if self.shown_albums.contains(&a) { self.shown_albums.iter().flat_map(|&s| self.albums[s].tracks.iter().copied()).collect() } else { album.tracks.clone() };
         self.start_list(list, first, false, Some(false), tx);
     }
 
@@ -1606,6 +1640,23 @@ impl App {
         tx.scroll_to_instant(QUEUE_LIST_KEY, 0.0, top as f32 * QUEUE_ROW_H);
     }
 
+    /// Follows a track change while the panel shows. When the entry before the current one and
+    /// the current one are both in view, the list stays put; otherwise it glides to `scroll_queue`'s place.
+    pub fn follow_queue(&self, tx: &mut Tx) {
+        let Some(queue) = self.queue.as_ref() else { return };
+        let pos = queue.pos();
+        let top = pos.saturating_sub(1);
+        let [offset, viewport] = self.queue_scroll.get();
+        let in_view = |n: usize| {
+            let at = n as f32 * QUEUE_ROW_H;
+            at >= offset - QUEUE_VISIBLE_SLACK && at + QUEUE_ROW_H <= offset + viewport + QUEUE_VISIBLE_SLACK
+        };
+        if in_view(top) && in_view(pos) {
+            return;
+        }
+        tx.scroll_to(QUEUE_LIST_KEY, 0.0, top as f32 * QUEUE_ROW_H);
+    }
+
     /// Saves the queue and where playback is in it. Nothing is saved before the first library
     /// load, so a queue saved at the last exit isn't lost before it's restored.
     fn save_queue(&mut self) {
@@ -1709,7 +1760,7 @@ impl App {
                 tx.wake_after(TICK);
                 self.listen = self.tracks.get(i).map(|t| Listen::new(t.duration));
                 if self.queue_shown {
-                    self.scroll_queue(tx);
+                    self.follow_queue(tx);
                 }
                 if let Some(track) = self.tracks.get(i)
                     && let Err(e) = self.lastfm.started(track)
@@ -1810,7 +1861,7 @@ impl App {
             tx.set_title(title);
         }
         if self.queue_shown {
-            self.scroll_queue(tx);
+            self.follow_queue(tx);
         }
         self.save_queue();
     }

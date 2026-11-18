@@ -6,7 +6,7 @@ use crate::app::{App, Output, Row, header_key, row_key};
 use crate::query::filter::{Conjunction, Node, Operator};
 use crate::query::property::Property;
 use crate::query::store::Store;
-use crate::query::view::Direction;
+use crate::query::view::{Direction, View};
 use crate::view::view;
 
 fn runtime() -> Runtime<App> {
@@ -329,4 +329,183 @@ fn slash_focuses_search_and_then_types_in_it() {
     assert_eq!(rt.state.search.text, "", "the / that focused it isn't typed");
     type_text(&mut rt, "a/b");
     assert_eq!(rt.state.search.text, "a/b", "in the field, / types");
+}
+
+/// Types `query` into the view search box, focusing it first.
+fn search_view(rt: &mut Runtime<App>, query: &str) {
+    click(rt, "view-search");
+    type_text(rt, query);
+}
+
+fn sorted(mut titles: Vec<String>) -> Vec<String> {
+    titles.sort();
+    titles
+}
+
+#[test]
+fn the_view_search_narrows_songs_by_title_and_shown_columns_and_play_plays_them() {
+    let mut rt = runtime();
+    search_view(&mut rt, "laraaji");
+    assert_eq!(sorted(titles(&rt)), ["Change", "Mary", "Meditation #1", "The Dance #1", "The Dance #2"], "artist is a shown column");
+    assert_eq!(result_count(&rt), "5 songs");
+    let expected = rt.state.filtered.clone();
+    click(&mut rt, "play-view");
+    let mut played = vec![rt.state.current.expect("playing")];
+    for _ in 1..expected.len() {
+        click(&mut rt, "next");
+        played.push(rt.state.current.expect("playing"));
+    }
+    assert_eq!(played, expected, "Play plays only the matching songs");
+}
+
+#[test]
+fn the_view_search_ignores_properties_not_in_the_columns_until_they_are_shown() {
+    let mut rt = runtime();
+    search_view(&mut rt, "ambient");
+    assert!(rt.state.filtered.is_empty(), "Genre isn't a shown column");
+    assert_eq!(result_count(&rt), "0 songs");
+    rt.update(|s, _| {
+        s.views.active_mut().columns.push(Property::Genre);
+        s.refilter();
+    });
+    assert_eq!(rt.state.filtered.len(), 7, "Laraaji and Nils Frahm are ambient");
+}
+
+#[test]
+fn the_view_search_ands_words_across_fields_and_ignores_case() {
+    let mut rt = runtime();
+    search_view(&mut rt, "DANCE   laraaji");
+    assert_eq!(titles(&rt), ["The Dance #1", "The Dance #2"], "title and artist");
+    rt.key(KeyEvent { key: Key::Escape, mods: Mods::default() });
+    settle(&mut rt);
+    search_view(&mut rt, "dance nils");
+    assert!(rt.state.filtered.is_empty(), "no song is a Dance by Nils Frahm");
+}
+
+#[test]
+fn the_view_search_filters_albums_in_the_album_grid() {
+    let mut rt = runtime();
+    click(&mut rt, "albums");
+    search_view(&mut rt, "laraaji");
+    let album = |rt: &Runtime<App>, title: &str| rt.state.albums().iter().position(|a| a.title == title).expect("the album");
+    let mut shown = rt.state.shown_albums.clone();
+    shown.sort();
+    let mut expected = vec![album(&rt, "Day of Radiance"), album(&rt, "Live Sessions")];
+    expected.sort();
+    assert_eq!(shown, expected, "albums by Laraaji, or with him in their artists");
+    rt.key(KeyEvent { key: Key::Escape, mods: Mods::default() });
+    settle(&mut rt);
+    search_view(&mut rt, "live");
+    assert_eq!(rt.state.shown_albums, [album(&rt, "Live Sessions")]);
+}
+
+#[test]
+fn switching_views_or_modes_clears_the_view_search() {
+    let mut rt = runtime();
+    rt.update(|s, _| s.views.list.push(View::new("Other")));
+    search_view(&mut rt, "laraaji");
+    click(&mut rt, "views");
+    click(&mut rt, "view1");
+    assert_eq!(rt.state.view_search.text, "", "a new view starts unsearched");
+    assert_eq!(rt.state.filtered.len(), 13);
+
+    search_view(&mut rt, "laraaji");
+    click(&mut rt, "albums");
+    assert_eq!(rt.state.view_search.text, "", "switching modes clears it");
+    assert_eq!(rt.state.shown_albums.len(), rt.state.albums().len());
+}
+
+#[test]
+fn the_view_search_is_absent_off_the_library_page() {
+    let mut rt = runtime();
+    assert!(rt.find("view-search").is_some());
+    rt.update(|s, tx| s.show_album(0, tx));
+    settle(&mut rt);
+    assert!(rt.find("view-search").is_none(), "an album page has no view search");
+    assert!(rt.find("play-view").is_none());
+}
+
+/// The keys of the song rows in the album card for album `title`, in order.
+fn card_track_keys(rt: &Runtime<App>, title: &str) -> Vec<String> {
+    let album = rt.state.albums().iter().position(|a| a.title == title).expect("the album");
+    let card = rt.elements().into_iter().find(|e| e.key.as_deref() == Some(&crate::app::album_key(album, None))).expect("the album's card");
+    let mut keys: Vec<(f32, String)> = rt
+        .elements()
+        .into_iter()
+        .filter(|e| e.key.as_deref().is_some_and(|k| k.starts_with('t') && k[1..].parse::<usize>().is_ok()) && e.path.starts_with(&card.path))
+        .map(|e| (e.rect[1], e.key.unwrap_or_default()))
+        .collect();
+    keys.sort_by(|a, b| a.0.total_cmp(&b.0));
+    keys.into_iter().map(|(_, k)| k).collect()
+}
+
+#[test]
+fn the_view_search_in_an_album_list_shows_only_albums_with_matching_songs_and_their_matching_songs() {
+    let mut rt = runtime();
+    click(&mut rt, "albums");
+    click(&mut rt, "list");
+    search_view(&mut rt, "dance");
+    let dance = rt.state.albums().iter().position(|a| a.title == "Day of Radiance").expect("the album");
+    assert_eq!(rt.state.shown_albums, [dance], "only the album with the Dance songs");
+    assert_eq!(sorted(titles(&rt)), ["The Dance #1", "The Dance #2"], "filtered holds the matching songs only");
+    assert_eq!(card_track_keys(&rt, "Day of Radiance"), [format!("t{}", rt.state.filtered[0]), format!("t{}", rt.state.filtered[1])]);
+    assert_eq!(result_count(&rt), "1 album");
+    assert!(rt.find(&format!("t{}", rt.state.tracks().iter().position(|t| t.title == "Meditation #1").expect("a song"))).is_none(), "the other songs are unlisted");
+}
+
+#[test]
+fn an_album_title_matches_nothing_in_an_album_list_until_album_is_a_column() {
+    let mut rt = runtime();
+    click(&mut rt, "albums");
+    click(&mut rt, "list");
+    // Album is a default column, so take it out first.
+    rt.update(|s, _| {
+        s.views.active_mut().columns.retain(|&c| c != Property::Album);
+        s.refilter();
+    });
+    search_view(&mut rt, "radiance");
+    assert!(rt.state.shown_albums.is_empty(), "Album isn't a column, so no song matches");
+    assert!(rt.state.filtered.is_empty());
+    rt.key(KeyEvent { key: Key::Escape, mods: Mods::default() });
+    settle(&mut rt);
+    rt.update(|s, _| {
+        s.views.active_mut().columns.push(Property::Album);
+        s.refilter();
+    });
+    search_view(&mut rt, "radiance");
+    assert_eq!(rt.state.shown_albums.len(), 1, "Day of Radiance");
+    assert_eq!(card_track_keys(&rt, "Day of Radiance").len(), 3, "all of its songs match");
+}
+
+#[test]
+fn clearing_the_view_search_restores_every_song_in_an_album_list() {
+    let mut rt = runtime();
+    click(&mut rt, "albums");
+    click(&mut rt, "list");
+    search_view(&mut rt, "dance");
+    assert_eq!(card_track_keys(&rt, "Day of Radiance").len(), 2);
+    click(&mut rt, "view-search");
+    rt.key(KeyEvent { key: Key::Escape, mods: Mods::default() });
+    settle(&mut rt);
+    assert!(rt.state.view_matches.is_none());
+    assert_eq!(card_track_keys(&rt, "Day of Radiance").len(), 3);
+    assert_eq!(rt.state.shown_albums.len(), rt.state.albums().len());
+}
+
+#[test]
+fn a_searched_album_cards_play_button_still_plays_the_whole_album() {
+    let mut rt = runtime();
+    click(&mut rt, "albums");
+    click(&mut rt, "list");
+    search_view(&mut rt, "dance");
+    let album = rt.state.albums().iter().position(|a| a.title == "Day of Radiance").expect("the album");
+    let whole = rt.state.albums()[album].tracks.clone();
+    click(&mut rt, "play-album");
+    assert_eq!(rt.state.current, whole.first().copied());
+    let mut played = vec![rt.state.current.expect("playing")];
+    for _ in 1..whole.len() {
+        click(&mut rt, "next");
+        played.push(rt.state.current.expect("playing"));
+    }
+    assert_eq!(played, whole, "all three songs, though only two match");
 }

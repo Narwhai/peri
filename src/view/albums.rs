@@ -10,6 +10,7 @@ use crate::app::{App, SongMenuTarget, album_key, grid_key};
 use crate::icons;
 use crate::library::Track;
 use crate::palette::Palette;
+use std::collections::HashSet;
 
 pub(super) const CARD_GAP: f32 = 18.0;
 /// Card height below the cover: title, meta and artist lines.
@@ -153,9 +154,9 @@ fn grid_card(s: &App, a: usize, section: Option<usize>, w: f32, p: &Palette) -> 
         .on_secondary_press(move |s: &mut App, at, _tx| s.song_menu = Some((SongMenuTarget::Album(a), at)))
         .child(art)
         .child(el().h(6.0))
-        .child(text(album.title.clone()).font(TITLE).color(title_color).truncate())
+        .child(marked(text(album.title.clone()), &album.title, &s.search_words, p).font(TITLE).color(title_color).truncate())
         .child(text(meta(album, false)).font(SMALL).color(p.tx3).truncate())
-        .child(album_artist(album, p.tx2).key("artist").font(SMALL).truncate())
+        .child(marked(album_artist(album, p.tx2), album.artist_name(), &s.search_words, p).key("artist").font(SMALL).truncate())
 }
 
 // List
@@ -169,8 +170,8 @@ pub(super) fn list_card(s: &App, a: usize, section: Option<usize>, p: &Palette) 
         .gap(4.0)
         .grow(1.0)
         .shrink()
-        .child(album_artist(album, p.tx2).key("artist").font(BODY).truncate())
-        .child(text(album.title.clone()).key("title").font(ALBUM_TITLE).color(p.tx).truncate().cursor(Cursor::Pointer).on_press_tx(open))
+        .child(marked(album_artist(album, p.tx2), album.artist_name(), &s.search_words, p).key("artist").font(BODY).truncate())
+        .child(marked(text(album.title.clone()), &album.title, &s.search_words, p).key("title").font(ALBUM_TITLE).color(p.tx).truncate().cursor(Cursor::Pointer).on_press_tx(open))
         .child(text(meta(album, true)).font(BODY).color(p.tx3))
         .child(el().h(10.0))
         .child(row().gap(8.0).child(play_button("play-album", "Play album", p).on_press_tx(move |s: &mut App, tx| s.play_album(a, None, tx))));
@@ -183,26 +184,28 @@ pub(super) fn list_card(s: &App, a: usize, section: Option<usize>, p: &Palette) 
         .fill(p.bg2)
         .gap(14.0)
         .child(row().gap(18.0).items_start().child(art).child(head))
-        .child(track_table(s, a, table::Columns { shown: &s.views.active().columns, widths: &s.views.active().widths, pills: &[], covers: false }, p));
+        .child(track_table(s, a, table::Columns { shown: &s.views.active().columns, widths: &s.views.active().widths, pills: &[], covers: false }, s.view_matches.as_ref(), &s.search_words, p));
     // Padding, not margin: virtual rows size each row by its box, so the gap sits inside it.
     col().w_full().pb(16.0).child(card)
 }
 
 /// The album's songs as a table with the page columns. Double-click plays the album from
-/// that song. Album cards in list views use the view's columns instead.
-fn track_table(s: &App, a: usize, columns: table::Columns, p: &Palette) -> El {
+/// that song. Album cards in list views use the view's columns instead, and list only the
+/// songs in `matches` when it's given, with `words` highlighted.
+fn track_table(s: &App, a: usize, columns: table::Columns, matches: Option<&HashSet<usize>>, words: &[String], p: &Palette) -> El {
     let album = &s.albums()[a];
-    let discs = album.discs(s.tracks());
+    let keep = |i: usize| matches.is_none_or(|m| m.contains(&i));
+    let discs = album.discs(s.tracks(), keep);
     let mut rows = col().w_full();
     let mut disc = None;
-    for (n, &i) in album.tracks.iter().enumerate() {
+    for (n, &i) in album.tracks.iter().enumerate().filter(|&(_, &i)| keep(i)) {
         let t = &s.tracks()[i];
         if discs.len() > 1 && t.disc != disc {
             disc = t.disc;
             let label = disc.map_or("No disc".to_string(), |d| format!("Disc {d}"));
             rows = rows.child(row().key(format!("disc{}", disc.unwrap_or(0))).h(30.0).px(8.0).center_y().child(text(label).font(GROUP).color(p.tx2)));
         }
-        rows = rows.child(track_line(s, t, i, n, a, columns, p));
+        rows = rows.child(track_line(s, t, i, n, a, columns, words, p));
     }
     let body = col()
         .child(table::header("tracks-header", "#", columns, 8.0, p))
@@ -211,7 +214,8 @@ fn track_table(s: &App, a: usize, columns: table::Columns, p: &Palette) -> El {
     table::scrolling("tracks".into(), columns, 8.0, body, p)
 }
 
-fn track_line(s: &App, t: &Track, i: usize, n: usize, a: usize, columns: table::Columns, p: &Palette) -> El {
+#[allow(clippy::too_many_arguments)]
+fn track_line(s: &App, t: &Track, i: usize, n: usize, a: usize, columns: table::Columns, words: &[String], p: &Palette) -> El {
     let current = s.current == Some(i);
     let lead: El = if current {
         icon(if s.playing { &icons::BARS } else { &icons::PAUSE }, 13.0).color(p.accent)
@@ -219,7 +223,7 @@ fn track_line(s: &App, t: &Track, i: usize, n: usize, a: usize, columns: table::
         text(t.number.map_or_else(|| format!("{}", n + 1), |x| x.to_string())).font(NUM).color(p.tx3).w(28.0).align(Align::End)
     };
     let look = table::RowLook { lead, cover: None, selected: s.selected == Some(i), current, stripe: !n.is_multiple_of(2), height: TRACK_ROW_H, px: 8.0, pills: Vec::new() };
-    table::song_row(t, i, columns, look, p)
+    table::song_row(t, i, columns, look, words, p)
         .key(format!("t{i}"))
         .label(format!("{} by {}", t.title, t.artist().as_deref().unwrap_or(s.albums()[a].artist_name())))
         .on_press(move |s: &mut App| s.selected = Some(i))
@@ -398,7 +402,7 @@ pub(super) fn album_page(s: &App, a: usize, p: &Palette) -> El {
         .gap(22.0)
         .child(back)
         .child(top)
-        .child(track_table(s, a, table::Columns { shown: &s.views.page_columns, widths: &s.views.page_widths, pills: &[], covers: false }, p))
+        .child(track_table(s, a, table::Columns { shown: &s.views.page_columns, widths: &s.views.page_widths, pills: &[], covers: false }, None, &[], p))
         .children(album.label.as_deref().map(|label| release_line(album.year, label, p)));
     let more = more_by(s, a, p);
     if let Some(more) = more {

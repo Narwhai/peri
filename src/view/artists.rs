@@ -567,7 +567,7 @@ fn song_line(s: &App, key: &str, i: usize, list: &[usize], pills: Vec<Option<tab
     let lead = song_cover(s, format!("{key}-cover{i}"), i, COVER_W, p);
     let list = list.to_vec();
     let look = table::RowLook { lead, cover: None, selected: s.selected == Some(i), current, stripe, height: SONG_ROW_H, px: 8.0, pills };
-    table::song_row(t, i, columns, look, p)
+    table::song_row(t, i, columns, look, &[], p)
         .key(format!("{key}-t{i}"))
         .label(format!("{} by {}", t.title, t.artist().unwrap_or_else(|| "unknown artist".into())))
         .on_press(move |s: &mut App| s.selected = Some(i))

@@ -505,6 +505,53 @@ fn name_list(people: &[(String, Vec<String>)], color: Color) -> El {
     linked(content, links, color)
 }
 
+/// The byte ranges of `content` where any of `words` (lowercased) occurs, ignoring case, with
+/// overlapping and touching ranges merged. Matching runs over lowercased chars, each mapped
+/// back to the bytes of the char it came from, so ranges stay valid in `content` even where
+/// lowercasing changes the byte length.
+fn search_ranges(content: &str, words: &[String]) -> Vec<Range<usize>> {
+    let folded: Vec<(char, Range<usize>)> = content
+        .char_indices()
+        .flat_map(|(at, c)| {
+            let span = at..at + c.len_utf8();
+            c.to_lowercase().map(move |l| (l, span.clone()))
+        })
+        .collect();
+    let mut found: Vec<Range<usize>> = Vec::new();
+    for word in words {
+        let needle: Vec<char> = word.chars().flat_map(char::to_lowercase).collect();
+        if needle.is_empty() {
+            continue;
+        }
+        for start in 0..folded.len() {
+            let Some(window) = folded.get(start..start + needle.len()) else { break };
+            let same = window.iter().map(|(c, _)| *c).eq(needle.iter().copied());
+            if let (true, Some((_, first)), Some((_, last))) = (same, window.first(), window.last()) {
+                found.push(first.start..last.end);
+            }
+        }
+    }
+    found.sort_by_key(|r| r.start);
+    let mut merged: Vec<Range<usize>> = Vec::new();
+    for r in found {
+        match merged.last_mut() {
+            Some(last) if r.start <= last.end => last.end = last.end.max(r.end),
+            _ => merged.push(r),
+        }
+    }
+    merged
+}
+
+/// Paint-only highlights of every occurrence of the view search's `words` in `content`.
+fn search_marks(content: &str, words: &[String], p: &Palette) -> Vec<rune::TextHighlight> {
+    search_ranges(content, words).into_iter().map(|r| rune::TextHighlight::new(r, p.accent.alpha(0.28))).collect()
+}
+
+/// `e` with the view search's matches in `content` highlighted.
+fn marked(e: El, content: &str, words: &[String], p: &Palette) -> El {
+    e.text_highlights(search_marks(content, words, p))
+}
+
 trait Borders {
     fn border_top(self, p: &Palette) -> El;
     fn border_bottom(self, p: &Palette) -> El;
@@ -544,5 +591,34 @@ mod tests {
         assert_eq!(clock(61.9), "1:01");
         assert_eq!(clock(3725.0), "1:02:05");
         assert_eq!(clock(-3.0), "0:00");
+    }
+
+    #[test]
+    fn search_ranges_find_every_case_insensitive_occurrence() {
+        let words = |w: &[&str]| w.iter().map(|s| s.to_string()).collect::<Vec<String>>();
+        assert_eq!(search_ranges("The Dance, the DANCE", &words(&["dance", "the"])), [0..3, 4..9, 11..14, 15..20]);
+        assert_eq!(search_ranges("Mixed CASE", &words(&["mixed"])), vec![0..5]);
+        assert_eq!(search_ranges("no match", &words(&["zebra"])), Vec::<Range<usize>>::new());
+        assert_eq!(search_ranges("anything", &[]), Vec::<Range<usize>>::new());
+        assert_eq!(search_ranges("anything", &words(&[""])), Vec::<Range<usize>>::new());
+    }
+
+    #[test]
+    fn search_ranges_merge_overlapping_words() {
+        assert_eq!(search_ranges("Dancer", &["dance".to_string(), "cer".to_string()]), vec![0..6]);
+        assert_eq!(search_ranges("aaaa", &["aa".to_string()]), vec![0..4], "every start is tried");
+    }
+
+    #[test]
+    fn search_ranges_stay_on_char_boundaries_for_non_ascii() {
+        // "Ä" is two bytes; the match must cover it whole.
+        assert_eq!(search_ranges("Großer Ärger", &["ärger".to_string()]), vec![8..14]);
+        assert_eq!(search_ranges("Ärger", &["ÄRGER".to_string()]), vec![0..6], "a word is lowercased too");
+        // "İ" lowercases to two chars, "i" and a combining dot; "i" finds the whole letter.
+        assert_eq!(search_ranges("İstanbul", &["i".to_string()]), vec![0..2]);
+        let text = "Straße İ";
+        for r in search_ranges(text, &["ß".to_string(), "i̇".to_string(), "e".to_string()]) {
+            assert!(text.is_char_boundary(r.start) && text.is_char_boundary(r.end), "{r:?}");
+        }
     }
 }

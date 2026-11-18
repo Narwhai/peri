@@ -1,7 +1,7 @@
 //! The play queue: the panel that lists it (floating over the page, or docked beside it), the
 //! question an edited queue asks before a new list replaces it, and the Settings choice.
 
-use rune::{Align, Color, Cursor, El, GrowthSpec, ScrollSpec, col, el, icon, row, text};
+use rune::{Align, Color, Cursor, El, GrowthSpec, ScrollPos, ScrollSpec, col, el, icon, row, text};
 use rune_kit::{Checkbox, Dialog, Kit};
 
 use super::toolbar::{GRIP_W, is_dragged, reorder_handle, reorder_shift, segmented, small_icon_button};
@@ -95,7 +95,17 @@ fn body(s: &App, p: &Palette) -> El {
             },
         )
         .virtual_rows_version(s.list_version);
-    col().key(QUEUE_LIST_KEY).w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: false }).child(rows)
+    let at = s.queue_scroll.clone();
+    col()
+        .key(QUEUE_LIST_KEY)
+        .w_full()
+        .grow(1.0)
+        .min_h(0.0)
+        .scroll(ScrollSpec { stick_bottom: false })
+        .on_scroll_offset(move |pos: ScrollPos| {
+            at.set([pos.offset[1], pos.viewport[1]]);
+        })
+        .child(rows)
 }
 
 /// The last row when the queue repeats: it sits where the next song would, but says so.
@@ -129,7 +139,7 @@ fn queue_row(s: &App, n: usize, p: &Palette) -> El {
     let grip = if upcoming {
         reorder_handle(format!("queue-row{n}-handle"), ReorderList::Queue, n, p)
     } else {
-        el().w(GRIP_W)
+        el().size(GRIP_W, 24.0)
     };
     let shift = reorder_shift(s, ReorderList::Queue, n);
     let mut info = col().grow(1.0).shrink().min_w(0.0).gap(2.0).child(
@@ -154,7 +164,7 @@ fn queue_row(s: &App, n: usize, p: &Palette) -> El {
         .label(format!("{} by {}", t.title, t.artist().as_deref().unwrap_or("unknown artist")))
         .cursor(Cursor::Pointer)
         .on_double_press_tx(move |s: &mut App, tx| s.queue_jump(n, tx))
-        .child(el().w(GRIP_W).center().child(grip))
+        .child(el().size(GRIP_W, 24.0).center().child(grip))
         .child(art)
         .child(info);
     // Fixed slots, so the durations and remove buttons line up down the list.
@@ -164,7 +174,7 @@ fn queue_row(s: &App, n: usize, p: &Palette) -> El {
     let remove = (!current).then(|| {
         small_icon_button(format!("queue-row{n}-remove"), &rune_kit::glyphs::CLOSE, "Remove from the queue", p).on_press(move |s: &mut App| s.queue_remove(n))
     });
-    r = r.child(el().w(REMOVE_W).center().children(remove));
+    r = r.child(el().size(REMOVE_W, 24.0).center().children(remove));
     if is_dragged(s, ReorderList::Queue, n) {
         r = r.fill(p.ui.alpha(0.5));
     }
