@@ -87,8 +87,8 @@ pub(super) fn toolbar(s: &App, width: Option<f32>, p: &Palette, kit: &Kit, layer
     }
     // Album grids show no song tables, unless an album page is open.
     let tables = !(albums && view.layout == Layout::Grid) || s.page != crate::app::Page::Library;
-    bar.child(el().grow(1.0))
-        .children((s.page == crate::app::Page::Library).then(|| view_search(s, compact, kit)))
+    bar.children((s.page == crate::app::Page::Library).then(|| view_search(s, compact, kit)))
+        .child(el().grow(1.0))
         .children((s.page == crate::app::Page::Library).then(|| play_view_button(s, albums, p)))
         .children(tables.then_some(columns))
         .child(sort)

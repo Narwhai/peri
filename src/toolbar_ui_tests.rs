@@ -383,6 +383,23 @@ fn the_view_search_ands_words_across_fields_and_ignores_case() {
 }
 
 #[test]
+fn the_album_grid_groups_view_search_with_the_left_hand_controls() {
+    let mut rt = runtime();
+    rt.set_viewport((1440.0, 640.0), 1.0);
+    settle(&mut rt);
+    click(&mut rt, "albums");
+
+    let elements = rt.elements();
+    let rect = |key| elements.iter().find(|e| e.key.as_deref() == Some(key)).expect(key).rect;
+    let [size_x, _, size_w, _] = rect("card-size-control");
+    let [search_x, _, search_w, _] = rect("view-search");
+    let [play_x, _, _, _] = rect("play-view");
+    let gap_after_slider = search_x - (size_x + size_w);
+    let gap_before_play = play_x - (search_x + search_w);
+    assert!(gap_after_slider >= 0.0 && gap_after_slider < gap_before_play, "Search sits next to the card size slider, not Play");
+}
+
+#[test]
 fn the_view_search_filters_albums_in_the_album_grid() {
     let mut rt = runtime();
     click(&mut rt, "albums");

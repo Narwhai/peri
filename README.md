@@ -1,6 +1,27 @@
 # Peri
 
-A desktop music player built with [Rune](https://github.com/Narwhai/rune). Rune draws the UI on the GPU, and [rodio](https://github.com/RustAudio/rodio) (cpal + symphonia) plays the audio. Tags and cover art come from [lofty](https://github.com/Serial-ATA/lofty-rs). It draws the Bolis theme (built from the Tone palette, `../gray-color-scheme/color-palette.json`) or the Peridot theme (greens inspired by the gemstone), in light or dark, following the system setting unless changed.
+A cross-platform desktop music player written in Rust and built with 
+[Rune](https://github.com/anomalyco/rune). Inspired by Obsidian's "file over app"
+philosophy, scanning tags from your music library directly. I've also borrowed 
+their Bases design for building dynamic views, with different modes. The graph 
+view reveals connections between artists and their collaborators.
+
+My goal with this project was to make a music player that would make it easy to
+see all the people credited on songs. [MusicBrainz Picard](https://picard.musicbrainz.org/)
+makes it easy to add the appropriate credit tags to your library, so this builds 
+on that and lets you make the most of this information. 
+
+Other Rust libraries in use include [rodio](https://github.com/RustAudio/rodio) for 
+audio playback, and [lofty](https://github.com/Serial-ATA/lofty-rs) for parsing 
+tags/album art. 
+
+## Screenshots
+
+![Peri's Home tab, showing recently added albums and recently played songs, with the queue open on the right](docs/images/home.webp)
+
+
+The following text is purely AI generated. I intend on writing proper documentation
+myself once this is further along, but the information below is accurate at least.
 
 ## Run
 
@@ -36,7 +57,6 @@ On Linux, building needs `libxkbcommon`, `wayland` and `alsa-lib` (PipeWire work
   PERI_LASTFM_API_KEY=… PERI_LASTFM_SECRET=… cargo build --release
   ```
 
-  Set both or neither; one alone fails the build. Anything shipped in a binary can be extracted, so the worst a leak allows is someone sending requests as this app (and Last.fm suspending the key). It can't reach anyone's account, which needs their own session key.
 - **Builds without a key** (built from source without the variables) ask for the user's own instead: create an API account at <https://www.last.fm/api/account/create> and paste its API key and shared secret before connecting.
 - **Changing keys:** a session belongs to the API key it was granted to. When the key in use changes (a new built-in key, or a user's key replaced by a built-in one), the saved session is dropped and Settings asks to connect again.
 - **What's sent:** "now playing" when a song starts, and a scrobble once it has played for half its length or four minutes, whichever comes first. Songs of 30 seconds or less, and songs without an artist tag, aren't scrobbled. Seeking ahead doesn't count as listening.
@@ -103,11 +123,11 @@ Each view lists either **Songs** or **Albums**; switch with the toggle in the to
 - **Saved settings:** the mode and layout save with each view. Views saved before this change load as song views.
 
 ## Keys
-## Labels
+### Labels
 
 A label name opens the label's page wherever it's shown: the album page's facts, the Label column of song tables, and song details. The page lists every album released under the label (newest first, grouped into Albums, EPs, Singles and Compilations) with counts and a Play button that plays them all newest first. Names match ignoring case, and the label comes from the first song of each album that has a `LABEL` (else `PUBLISHER`) tag.
 
-## Artists
+### Artists
 
 Every artist name is a link: in song rows, titles ("Calypso Gene (feat. Silka & Cleo Reed)"), the now-playing bar, album cards and album pages. It opens the artist's page: their albums, albums they appear on, songs crediting them (composer, lyricist, producer, performer…), then their own songs. When they have credits, their songs start collapsed under a Songs heading; click it to open. Song rows there lead with the album cover. Back and Esc retrace the pages visited, and returning to the library puts the list back where it was scrolled (Home opens it at the top).
 
@@ -128,7 +148,7 @@ They're saved under `artists` in `prefs.json`, which can also be edited by hand 
   "merges": [["Earl Sweatshirt", "Thebe Kgositsile"]],
   "links": [
     { "from": "MF DOOM", "kind": "alias", "to": "Viktor Vaughn" },
-    { "from": "Thom Yorke", "kind": "member_of", "to": "Radiohead" }
+    { "from": "billy woods", "kind": "member_of", "to": "Armand Hammer" }
   ]
 }
 ```
