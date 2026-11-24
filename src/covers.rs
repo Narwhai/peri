@@ -16,7 +16,7 @@ const CAPACITY: usize = 160;
 const WORKERS: usize = 3;
 
 #[derive(Clone)]
-enum Slot {
+pub(crate) enum Slot {
     /// Being read and shrunk.
     Pending,
     /// The song has no cover.
@@ -34,15 +34,16 @@ type Done = (PathBuf, Option<(u32, u32, Vec<u8>)>);
 /// Covers keyed by the song they're read from (an album's first song). Views ask for covers
 /// as they build cards, so the cache is behind a `RefCell`.
 pub struct Covers {
-    inner: RefCell<Inner>,
+    inner: RefCell<Inner<PathBuf>>,
     jobs: Option<Sender<Job>>,
     done: Option<Receiver<Done>>,
     images: ImageCache,
 }
 
-struct Inner {
+/// Decoded images by key, evicted least recently used first. Artist pictures share it.
+pub(crate) struct Inner<K> {
     /// Each slot with the generation it was last touched in.
-    slots: HashMap<PathBuf, (Slot, u64)>,
+    pub(crate) slots: HashMap<K, (Slot, u64)>,
     /// Most slots kept once they're no longer in view.
     capacity: usize,
     /// Bumped when covers arrive, so memoized cards rebuild with them.
@@ -133,19 +134,19 @@ impl Covers {
     }
 }
 
-impl Inner {
-    fn new(capacity: usize) -> Inner {
+impl<K: Clone + Eq + std::hash::Hash> Inner<K> {
+    pub(crate) fn new(capacity: usize) -> Inner<K> {
         Inner { slots: HashMap::new(), capacity, generation: 0 }
     }
 
     /// Stores a cover that arrived.
-    fn arrive(&mut self, path: PathBuf, slot: Slot) {
+    pub(crate) fn arrive(&mut self, path: K, slot: Slot) {
         self.arrive_all(vec![(path, slot)]);
     }
 
     /// Stores covers that arrived together. Evicts the least recently touched slots beyond
     /// capacity, but never one touched since the previous arrival, nor a pending read.
-    fn arrive_all(&mut self, arrived: Vec<(PathBuf, Slot)>) {
+    pub(crate) fn arrive_all(&mut self, arrived: Vec<(K, Slot)>) {
         let frame = self.generation;
         self.generation += 1;
         for (path, slot) in arrived {
@@ -164,7 +165,7 @@ impl Inner {
     }
 
     /// Marks a slot as used in the current generation.
-    fn touch(&mut self, path: &PathBuf) {
+    pub(crate) fn touch(&mut self, path: &K) {
         let generation = self.generation;
         if let Some((_, stamp)) = self.slots.get_mut(path) {
             *stamp = generation;
@@ -186,7 +187,7 @@ mod tests {
     use super::*;
 
     /// An `Inner` whose slots are all `Missing`, to test eviction without decoding images.
-    fn missing_slots(capacity: usize, paths: &[&str]) -> Inner {
+    fn missing_slots(capacity: usize, paths: &[&str]) -> Inner<PathBuf> {
         let mut inner = Inner::new(capacity);
         for p in paths {
             inner.arrive(PathBuf::from(p), Slot::Missing);
@@ -194,7 +195,7 @@ mod tests {
         inner
     }
 
-    fn kept(inner: &Inner) -> Vec<String> {
+    fn kept(inner: &Inner<PathBuf>) -> Vec<String> {
         let mut names: Vec<String> = inner.slots.keys().map(|p| p.display().to_string()).collect();
         names.sort();
         names
