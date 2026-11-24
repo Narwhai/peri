@@ -49,4 +49,6 @@ pub struct Pages {
     pub label: Memo<(String, u64), LabelPage>,
     pub recent_albums: Memo<u64, Vec<usize>>,
     pub recent_songs: Memo<u64, Vec<usize>>,
+    /// Keyed by the library's data version, the order and the Random seed.
+    pub unlistened: Memo<(u64, crate::app::UnlistenedOrder, u64), Vec<usize>>,
 }

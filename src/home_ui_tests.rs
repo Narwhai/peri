@@ -3,7 +3,7 @@
 
 use rune::{Env, Key, KeyEvent, Mods, Runtime};
 
-use crate::app::{App, Output, Page, RECENT_COUNT};
+use crate::app::{App, Output, Page, RECENT_ALBUMS_COUNT, RECENT_SONGS_COUNT, UNLISTENED_COUNT, UnlistenedOrder};
 use crate::query::store::Store;
 use crate::library::Track;
 use crate::view::view;
@@ -234,7 +234,7 @@ fn recently_added_takes_at_most_recent_count_and_leaves_out_undated_albums() {
     let mut rt = runtime();
     let mut tracks: Vec<Track> = rt.state.tracks().to_vec();
     // More dated albums than the page lists, plus one song with no date at all.
-    for n in 0..RECENT_COUNT + 2 {
+    for n in 0..RECENT_ALBUMS_COUNT + 2 {
         tracks.push(Track {
             path: format!("/extra/{n:02}.flac").into(),
             title: format!("Extra {n}"),
@@ -248,7 +248,7 @@ fn recently_added_takes_at_most_recent_count_and_leaves_out_undated_albums() {
     rt.update(|s, _| s.set_library(tracks, false));
     settle(&mut rt);
     let newest = rt.state.recently_added();
-    assert_eq!(newest.len(), RECENT_COUNT);
+    assert_eq!(newest.len(), RECENT_ALBUMS_COUNT);
     let added: Vec<Option<i64>> = newest.iter().map(|&a| rt.state.albums()[a].added).collect();
     let mut sorted = added.clone();
     sorted.sort_by_key(|&d| std::cmp::Reverse(d));
@@ -276,7 +276,7 @@ fn recently_played_ties_break_by_library_order_and_never_played_songs_are_left_o
     // More songs than the page lists, to be played at one moment.
     let mut tracks = app.tracks().to_vec();
     let demo = tracks.len();
-    for n in 0..RECENT_COUNT + 1 {
+    for n in 0..RECENT_SONGS_COUNT + 1 {
         tracks.push(Track { path: format!("/extra/{n:02}.flac").into(), title: format!("Extra {n}"), ..Track::default() });
     }
     app.set_library(tracks, false);
@@ -287,16 +287,16 @@ fn recently_played_ties_break_by_library_order_and_never_played_songs_are_left_o
     settle(&mut rt);
     // Every extra song played at one moment: the list keeps the first, in library order.
     let at = 1_800_000_000;
-    for i in demo..demo + RECENT_COUNT + 1 {
+    for i in demo..demo + RECENT_SONGS_COUNT + 1 {
         rt.update(|s, _| {
             let _ = s.record_play(i, at);
         });
     }
     let played = rt.state.recently_played();
-    assert_eq!(played.len(), RECENT_COUNT, "RECENT_COUNT at most");
+    assert_eq!(played.len(), RECENT_SONGS_COUNT, "RECENT_SONGS_COUNT at most");
     assert!(played.iter().all(|&i| rt.state.tracks()[i].last_played == Some(at)), "all tied");
     assert!(played.windows(2).all(|w| w[0] < w[1]), "ties by library order, ascending");
-    assert_eq!(played, (demo..demo + RECENT_COUNT).collect::<Vec<_>>(), "never-played songs are left out; ties keep library order");
+    assert_eq!(played, (demo..demo + RECENT_SONGS_COUNT).collect::<Vec<_>>(), "never-played songs are left out; ties keep library order");
 }
 
 #[test]
@@ -407,4 +407,131 @@ fn an_unreadable_saved_tab_opens_the_library_and_says_so() {
 #[test]
 fn an_unset_tab_loads_as_none() {
     assert_eq!(Store::memory().load_tab(), Ok(None));
+}
+
+/// One unplayed song on its own album `title`, added at `added`.
+fn album_track(title: &str, added: Option<i64>) -> Track {
+    Track { path: format!("/unlistened/{title}.flac").into(), title: title.into(), album: Some(title.into()), album_artist: Some("Tester".into()), added, ..Track::default() }
+}
+
+/// Titles of the albums `list` names.
+fn album_titles(rt: &Runtime<App>, list: &[usize]) -> Vec<String> {
+    list.iter().map(|&a| rt.state.albums()[a].title.clone()).collect()
+}
+
+#[test]
+fn recently_played_shows_at_most_recent_songs_rows_each_with_a_cover() {
+    let mut rt = runtime();
+    let count = rt.state.tracks().len();
+    rt.update(|s, _| {
+        for i in 0..count {
+            let _ = s.record_play(i, 1_800_000_100 + i as i64);
+        }
+    });
+    settle(&mut rt);
+    let rows = rt.state.recently_played();
+    assert_eq!(rows.len(), RECENT_SONGS_COUNT);
+    for i in 0..count {
+        assert_eq!(has(&rt, &format!("recent-songs-t{i}")), rows.contains(&i), "song {i} has a row only when listed");
+    }
+    for &i in &rows {
+        assert!(has(&rt, &format!("recent-cover{i}")), "row {i} shows its album cover");
+    }
+}
+
+#[test]
+fn unlistened_lists_only_albums_whose_songs_all_have_no_plays() {
+    let rt = runtime();
+    // Spaces, Get Up and Live Sessions each have a played song, so only Day of Radiance is left.
+    let unlistened = rt.state.unlistened_albums();
+    assert_eq!(album_titles(&rt, &unlistened), ["Day of Radiance"]);
+    assert!(has(&rt, &format!("unlistened-albums{}", unlistened[0])), "its card shows");
+}
+
+#[test]
+fn unlistened_newest_and_oldest_put_undated_albums_last() {
+    let mut rt = runtime();
+    let tracks = vec![album_track("Mid", Some(2005)), album_track("Undated", None), album_track("Late", Some(2010)), album_track("Early", Some(1990))];
+    rt.update(|s, _| s.set_library(tracks, false));
+    settle(&mut rt);
+    let newest = rt.state.unlistened(UnlistenedOrder::Newest, 0);
+    assert_eq!(album_titles(&rt, &newest), ["Late", "Mid", "Early", "Undated"]);
+    let oldest = rt.state.unlistened(UnlistenedOrder::Oldest, 0);
+    assert_eq!(album_titles(&rt, &oldest), ["Early", "Mid", "Late", "Undated"]);
+}
+
+#[test]
+fn unlistened_lists_at_most_unlistened_count_albums() {
+    let mut rt = runtime();
+    let tracks: Vec<Track> = (0..UNLISTENED_COUNT + 5).map(|n| album_track(&format!("Album {n:02}"), Some(1_000 + n as i64))).collect();
+    rt.update(|s, _| s.set_library(tracks, false));
+    settle(&mut rt);
+    let newest = rt.state.unlistened_albums();
+    assert_eq!(newest.len(), UNLISTENED_COUNT);
+    assert_eq!(rt.state.albums()[newest[0]].title, format!("Album {:02}", UNLISTENED_COUNT + 4), "newest first");
+    assert!(has(&rt, &format!("unlistened-albums{}", newest[UNLISTENED_COUNT - 1])), "the last card shows");
+}
+
+#[test]
+fn unlistened_order_is_chosen_from_the_segmented_control_and_saved() {
+    let dir = std::env::temp_dir().join(format!("peri-unlistened-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let file = dir.join("prefs.json");
+    let mut app = App::new(Output::Silent, Store::at(&file));
+    app.set_library(vec![album_track("Mid", Some(2005)), album_track("Late", Some(2010)), album_track("Early", Some(1990))], false);
+    app.show_home();
+    let mut rt = Runtime::new(app, view, (1200.0, 900.0), Env::new(true, 1.0));
+    rt.frame(0.0);
+    settle(&mut rt);
+    assert_eq!(rt.state.unlistened_order, UnlistenedOrder::Newest, "Newest unless chosen");
+    click(&mut rt, "oldest");
+    assert_eq!(rt.state.unlistened_order, UnlistenedOrder::Oldest);
+    assert_eq!(album_titles(&rt, &rt.state.unlistened_albums()), ["Early", "Mid", "Late"]);
+    let next = App::new(Output::Silent, Store::at(&file));
+    assert_eq!(next.unlistened_order, UnlistenedOrder::Oldest, "the order is saved");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_shuffle_button_shows_only_in_random_and_rerolls_the_seed() {
+    let mut rt = runtime();
+    assert!(!has(&rt, "unlistened-reroll"), "no shuffle in Newest");
+    click(&mut rt, "random");
+    assert_eq!(rt.state.unlistened_order, UnlistenedOrder::Random);
+    assert!(has(&rt, "unlistened-reroll"), "shuffle shows in Random");
+    let seed = rt.state.unlistened_seed;
+    click(&mut rt, "unlistened-reroll");
+    assert_ne!(rt.state.unlistened_seed, seed, "a re-roll sets a new seed");
+    click(&mut rt, "newest");
+    assert!(!has(&rt, "unlistened-reroll"), "no shuffle once Newest is back");
+}
+
+#[test]
+fn random_order_is_deterministic_for_a_seed_and_capped() {
+    let mut rt = runtime();
+    let tracks: Vec<Track> = (0..UNLISTENED_COUNT + 5).map(|n| album_track(&format!("Album {n:02}"), Some(1_000 + n as i64))).collect();
+    rt.update(|s, _| s.set_library(tracks, false));
+    settle(&mut rt);
+    let first = rt.state.unlistened(UnlistenedOrder::Random, 7);
+    assert_eq!(first, rt.state.unlistened(UnlistenedOrder::Random, 7), "the same seed gives the same order");
+    assert_eq!(first.len(), UNLISTENED_COUNT);
+    let mut distinct = first.clone();
+    distinct.sort_unstable();
+    distinct.dedup();
+    assert_eq!(distinct.len(), UNLISTENED_COUNT, "no album twice");
+    assert_ne!(first, rt.state.unlistened(UnlistenedOrder::Random, 8), "another seed shuffles differently");
+}
+
+#[test]
+fn unlistened_says_so_once_every_album_has_been_played() {
+    let mut rt = runtime();
+    let count = rt.state.tracks().len();
+    rt.update(|s, _| {
+        for i in 0..count {
+            let _ = s.record_play(i, 1_800_000_100 + i as i64);
+        }
+    });
+    settle(&mut rt);
+    assert_eq!(text_of(&rt, "unlistened-albums-empty"), "Every album has been played.");
+    assert!(!has(&rt, "unlistened-albums-wall"));
 }

@@ -1,11 +1,13 @@
-//! The home page: the newest albums as one strip of cards, and the songs played last as a table.
+//! The home page: the newest albums as one strip of cards, the songs played last as a table, and
+//! the albums nobody has played as a grid.
 
 use rune::{Cursor, El, ScrollPos, ScrollSpec, Tx, col, el, icon, row, text};
 
-use super::albums::{CARD_GAP, small_card};
+use super::albums::{CARD_GAP, small_card, song_cover};
 use super::table;
+use super::toolbar::segmented;
 use super::*;
-use crate::app::SongMenuTarget;
+use crate::app::{SongMenuTarget, UnlistenedOrder};
 use crate::query::property::Property;
 use crate::palette::Palette;
 
@@ -26,7 +28,8 @@ pub(super) fn home_page(s: &App, p: &Palette) -> El {
         .py(16.0)
         .gap(28.0)
         .child(recent_albums(s, p))
-        .child(recent_songs(s, p));
+        .child(recent_songs(s, p))
+        .child(unlistened_albums(s, p));
     col().key("home-page").w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: false }).child(body)
 }
 
@@ -71,7 +74,7 @@ fn page_strip(s: &mut App, tx: &mut Tx, dir: f32) {
     tx.scroll_to(STRIP_KEY, (at + dir * cards * pitch).clamp(0.0, max), 0.0);
 }
 
-/// A small round button with an icon, at the ends of the Home strip.
+/// A small round icon button, at the ends of the Home strip or beside Unlistened Releases.
 fn arrow_button(key: &'static str, glyph: &'static Icon, help: &str, p: &Palette) -> El {
     el()
         .key(key)
@@ -93,13 +96,39 @@ fn recent_songs(s: &App, p: &Palette) -> El {
     if list.is_empty() {
         return section_empty("recent-songs", "Recently Played", "Nothing played yet.", p);
     }
-    let columns = table::Columns { shown: &RECENT_COLUMNS, widths: &s.views.page_widths, pills: &[], covers: false };
+    let columns = table::Columns { shown: &RECENT_COLUMNS, widths: &s.views.page_widths, pills: &[], covers: true };
     let mut body = col().child(table::header("recent-songs-header", "", columns, 8.0, p));
     for (n, &i) in list.iter().enumerate() {
         body = body.child(song_line(s, i, &list, !n.is_multiple_of(2), columns, p));
     }
     let table = table::scrolling("recent-songs-table".into(), columns, 8.0, body, p);
     col().key("recent-songs").w_full().gap(8.0).child(text("Recently Played").font(HEADING).color(p.tx)).child(table)
+}
+
+/// Unlistened Releases: the albums with no plays, as a wrapping grid of cards, in the chosen
+/// order. Random has a button to re-roll its selection.
+fn unlistened_albums(s: &App, p: &Palette) -> El {
+    let albums = s.unlistened_albums();
+    let order = segmented("unlistened-order", &UnlistenedOrder::ALL.map(|o| (o.id(), o.label())), s.unlistened_order.id(), p, |s: &mut App, id: &str| {
+        if let Some(order) = UnlistenedOrder::ALL.into_iter().find(|o| o.id() == id) {
+            s.set_unlistened_order(order);
+        }
+    });
+    let mut controls = row().gap(8.0).center_y().child(order);
+    if s.unlistened_order == UnlistenedOrder::Random {
+        controls = controls.child(arrow_button("unlistened-reroll", &icons::SHUFFLE, "Shuffle", p).on_press(|s: &mut App| s.reroll_unlistened()));
+    }
+    let head = row().w_full().items_center().gap(12.0).child(text("Unlistened Releases").font(HEADING).color(p.tx).grow(1.0).truncate()).child(controls);
+    let body: El = if albums.is_empty() {
+        text("Every album has been played.").key("unlistened-albums-empty").font(BODY).color(p.tx3)
+    } else {
+        let mut wall = row().key("unlistened-albums-wall").w_full().gap(CARD_GAP).flex_wrap();
+        for &o in albums.iter() {
+            wall = wall.child(small_card(s, "unlistened-albums", o, true, CARD_W, p));
+        }
+        wall
+    };
+    col().key("unlistened-albums").w_full().gap(10.0).child(head).child(body)
 }
 
 /// A section's title over a muted line saying why it's empty.
@@ -112,16 +141,13 @@ fn section_empty(key: &str, title: &str, line: &str, p: &Palette) -> El {
         .child(text(line.to_string()).key(format!("{key}-empty")).font(BODY).color(p.tx3))
 }
 
-/// A song row: a click selects it, a double-click plays the list from it.
+/// A song row: a click selects it, a double-click plays the list from it. Its album's cover
+/// leads, with the playing or paused icon over it when it's the current song.
 fn song_line(s: &App, i: usize, list: &[usize], stripe: bool, columns: table::Columns, p: &Palette) -> El {
     let t = &s.tracks()[i];
     let current = s.current == Some(i);
-    let lead = if current {
-        icon(if s.playing { &icons::BARS } else { &icons::PAUSE }, 13.0).color(p.accent)
-    } else {
-        el()
-    };
-    let look = table::RowLook { lead, cover: None, selected: s.selected == Some(i), current, stripe, height: SONG_ROW_H, px: 8.0, pills: Vec::new() };
+    let cover = song_cover(s, format!("recent-cover{i}"), i, table::COVER_W, p);
+    let look = table::RowLook { lead: el(), cover: Some(cover), selected: s.selected == Some(i), current, stripe, height: SONG_ROW_H, px: 8.0, pills: Vec::new() };
     let list = list.to_vec();
     table::song_row(t, i, columns, look, &[], p)
         .key(format!("recent-songs-t{i}"))

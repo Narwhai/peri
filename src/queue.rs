@@ -62,8 +62,13 @@ impl Rng {
         self.next() % n.max(1)
     }
 
+    /// A fresh seed for another generator, drawn from this one.
+    pub fn seed(&mut self) -> u64 {
+        self.next()
+    }
+
     /// Fisher–Yates.
-    fn shuffle<T>(&mut self, v: &mut [T]) {
+    pub fn shuffle<T>(&mut self, v: &mut [T]) {
         for i in (1..v.len()).rev() {
             let j = (self.next() % (i as u64 + 1)) as usize;
             v.swap(i, j);

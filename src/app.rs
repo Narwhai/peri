@@ -40,8 +40,12 @@ const SAVE_VIEWS_AFTER: Duration = Duration::from_millis(500);
 pub const SEEK_STEP: f64 = 5.0;
 /// Previous restarts the track instead when it has played longer than this.
 const RESTART_AFTER: f64 = 3.0;
-/// How many songs and albums the home page lists.
-pub const RECENT_COUNT: usize = 20;
+/// How many albums Recently Added lists on the home page.
+pub const RECENT_ALBUMS_COUNT: usize = 20;
+/// How many songs Recently Played lists on the home page.
+pub const RECENT_SONGS_COUNT: usize = 10;
+/// How many albums Unlistened Releases lists on the home page.
+pub const UNLISTENED_COUNT: usize = 20;
 /// The queue panel's scroll view, and one row's height in it (its rows are a fixed height so the
 /// scroll offset is computable).
 pub const QUEUE_LIST_KEY: &str = "queue-list";
@@ -144,6 +148,39 @@ pub enum Tab {
     Graph,
 }
 
+/// The order of the home page's Unlistened Releases, which the preferences keep.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UnlistenedOrder {
+    /// Newest added first. The default when unset.
+    #[default]
+    Newest,
+    Oldest,
+    /// A random selection, re-rolled from the home page.
+    Random,
+}
+
+impl UnlistenedOrder {
+    pub const ALL: [UnlistenedOrder; 3] = [UnlistenedOrder::Newest, UnlistenedOrder::Oldest, UnlistenedOrder::Random];
+
+    /// The value saved in the preferences.
+    pub fn id(self) -> &'static str {
+        match self {
+            UnlistenedOrder::Newest => "newest",
+            UnlistenedOrder::Oldest => "oldest",
+            UnlistenedOrder::Random => "random",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            UnlistenedOrder::Newest => "Newest",
+            UnlistenedOrder::Oldest => "Oldest",
+            UnlistenedOrder::Random => "Random",
+        }
+    }
+}
+
 /// The song details dialog: which song, and what was read from its file when it opened.
 pub struct DetailsDialog {
     /// The song's file, so the dialog follows it across rescans.
@@ -206,6 +243,10 @@ pub struct App {
     pub home_strip: Live<[f32; 2]>,
     /// The Home strip's viewport width, kept current while it shows.
     pub home_viewport: Live<f32>,
+    /// The order of Unlistened Releases, kept in the preferences.
+    pub unlistened_order: UnlistenedOrder,
+    /// The seed of Unlistened Releases' Random order; a re-roll sets a new one.
+    pub unlistened_seed: u64,
     /// Album covers for cards and lists; `None` until setup has a waker.
     pub covers: Option<Covers>,
     /// Indices into `tracks` the active view shows, in play order. In an album view,
@@ -365,6 +406,10 @@ impl App {
             Ok(appearance) => (appearance, None),
             Err(e) => (Appearance::default(), Some(e)),
         };
+        let (unlistened_order, unlistened_error) = match store.load_unlistened_order() {
+            Ok(order) => (order, None),
+            Err(e) => (UnlistenedOrder::default(), Some(e)),
+        };
         let (queue_restore, queue_error) = match store.load_queue() {
             Ok(saved) => (saved, None),
             Err(e) => (None, Some(e)),
@@ -383,6 +428,8 @@ impl App {
             Some(Tab::Library) | None => Page::Library,
         };
         let lastfm = Scrobbling::new(lastfm, built_in);
+        let mut rng = Rng::from_time();
+        let unlistened_seed = rng.seed();
         let mut app = App {
             tracks: Vec::new(),
             albums: Vec::new(),
@@ -400,6 +447,8 @@ impl App {
             library_scroll_saved: [0.0, 0.0],
             home_strip: Live::new([0.0; 2]),
             home_viewport: Live::new(0.0),
+            unlistened_order,
+            unlistened_seed,
             covers: None,
             filtered: Vec::new(),
             shown_albums: Vec::new(),
@@ -454,13 +503,13 @@ impl App {
             volume_before_drag: None,
             shuffle: false,
             repeat: Repeat::Off,
-            error: relations_error.clone().or(lastfm_error).or(plays_error).or(graph_error).or(tab_error).or(theme_error).or(appearance_error).or(queue_error).or(queue_replace_error).or(queue_pinned_error),
+            error: relations_error.clone().or(lastfm_error).or(plays_error).or(graph_error).or(tab_error).or(theme_error).or(appearance_error).or(unlistened_error).or(queue_error).or(queue_replace_error).or(queue_pinned_error),
             scan: None,
             drop_hover: false,
             details: None,
             song_menu: None,
             output,
-            rng: Rng::from_time(),
+            rng,
             waker: None,
             lastfm,
             plays,
@@ -767,14 +816,38 @@ impl App {
     pub fn recently_added(&self) -> Vec<usize> {
         let mut added: Vec<(i64, usize)> = self.albums.iter().enumerate().filter_map(|(a, album)| album.added.map(|at| (at, a))).collect();
         added.sort_by_key(|&(at, a)| (std::cmp::Reverse(at), a));
-        added.into_iter().take(RECENT_COUNT).map(|(_, a)| a).collect()
+        added.into_iter().take(RECENT_ALBUMS_COUNT).map(|(_, a)| a).collect()
     }
 
     /// The songs on the home page: the ones played last, most recent first, ties by library order.
     pub fn recently_played(&self) -> Vec<usize> {
         let mut played: Vec<(i64, usize)> = self.tracks.iter().enumerate().filter_map(|(i, t)| t.last_played.map(|at| (at, i))).collect();
         played.sort_by_key(|&(at, i)| (std::cmp::Reverse(at), i));
-        played.into_iter().take(RECENT_COUNT).map(|(_, i)| i).collect()
+        played.into_iter().take(RECENT_SONGS_COUNT).map(|(_, i)| i).collect()
+    }
+
+    /// The albums nobody has played: no plays and no song played, in `order`, at most
+    /// `UNLISTENED_COUNT`. Random shuffles them with `seed`; the others sort by when they were
+    /// added, undated albums last.
+    pub fn unlistened(&self, order: UnlistenedOrder, seed: u64) -> Vec<usize> {
+        let mut list: Vec<(Option<i64>, usize)> = self
+            .albums
+            .iter()
+            .enumerate()
+            .filter(|(_, album)| album.plays == 0 && !album.tracks.iter().any(|&t| self.tracks.get(t).is_some_and(|t| t.last_played.is_some())))
+            .map(|(a, album)| (album.added, a))
+            .collect();
+        match order {
+            UnlistenedOrder::Newest => list.sort_by_key(|&(added, a)| (added.is_none(), std::cmp::Reverse(added), a)),
+            UnlistenedOrder::Oldest => list.sort_by_key(|&(added, a)| (added.is_none(), added, a)),
+            UnlistenedOrder::Random => Rng::new(seed).shuffle(&mut list),
+        }
+        list.into_iter().take(UNLISTENED_COUNT).map(|(_, a)| a).collect()
+    }
+
+    /// `unlistened` for the current order and seed, kept until the library or either changes.
+    pub fn unlistened_albums(&self) -> Rc<Vec<usize>> {
+        self.pages.unlistened.get((self.data_version, self.unlistened_order, self.unlistened_seed), || self.unlistened(self.unlistened_order, self.unlistened_seed))
     }
 
     /// The search page's results for `query`, built once per library version and query.
@@ -1089,6 +1162,19 @@ impl App {
         if let Err(e) = self.store.save_appearance(appearance) {
             self.error = Some(e);
         }
+    }
+
+    /// Chooses the order of Unlistened Releases and saves it. A failed save shows as an error.
+    pub fn set_unlistened_order(&mut self, order: UnlistenedOrder) {
+        self.unlistened_order = order;
+        if let Err(e) = self.store.save_unlistened_order(order) {
+            self.error = Some(e);
+        }
+    }
+
+    /// Picks a new random selection for Unlistened Releases.
+    pub fn reroll_unlistened(&mut self) {
+        self.unlistened_seed = self.rng.seed();
     }
 
     /// Saves the open tab, so the next launch opens it. A failed save shows as an error.

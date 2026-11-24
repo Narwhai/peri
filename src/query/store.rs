@@ -20,6 +20,7 @@ const GRAPH_KEY: &str = "graph";
 const TAB_KEY: &str = "tab";
 const APPEARANCE_KEY: &str = "appearance";
 const THEME_KEY: &str = "theme";
+const UNLISTENED_ORDER_KEY: &str = "unlistened_order";
 const QUEUE_REPLACE_KEY: &str = "queue_replace";
 const QUEUE_PINNED_KEY: &str = "queue_pinned";
 /// The play queue's file, beside the preferences.
@@ -272,6 +273,18 @@ impl Store {
 
     pub fn save_appearance(&mut self, appearance: Appearance) -> Result<(), String> {
         self.prefs.set(APPEARANCE_KEY, &appearance).map_err(|e| format!("Couldn't save the appearance: {e}"))
+    }
+
+    /// The Unlistened Releases order; Newest when unset, an error when unreadable.
+    pub fn load_unlistened_order(&self) -> Result<crate::app::UnlistenedOrder, String> {
+        if !self.prefs.contains(UNLISTENED_ORDER_KEY) {
+            return Ok(crate::app::UnlistenedOrder::default());
+        }
+        self.prefs.get(UNLISTENED_ORDER_KEY).ok_or_else(|| format!("Couldn't read \"{UNLISTENED_ORDER_KEY}\" in the preferences"))
+    }
+
+    pub fn save_unlistened_order(&mut self, order: crate::app::UnlistenedOrder) -> Result<(), String> {
+        self.prefs.set(UNLISTENED_ORDER_KEY, &order).map_err(|e| format!("Couldn't save the Unlistened Releases order: {e}"))
     }
 
     /// The theme; Bolis when unset, an error when unreadable.
