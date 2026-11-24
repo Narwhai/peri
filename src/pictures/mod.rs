@@ -12,6 +12,11 @@
 //!
 //! A picture belongs to a page's names (merged names share one), matched ignoring case like
 //! the relations; aliases and band members keep their own.
+//!
+//! Without one of the user's, a page shows an `artist.jpg` from its music folders
+//! ([`folder`]), then, when the user turned online lookups on, a picture from Wikimedia
+//! Commons ([`online`]) with its attribution. That one is only shown until the user keeps it,
+//! which copies it in as theirs; nothing replaces a picture the user has.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -52,6 +57,8 @@ pub enum Source {
     Local,
     /// An image or link the user pasted.
     User,
+    /// A Wikimedia Commons picture a lookup found, which the user kept.
+    Wikimedia,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -65,9 +72,12 @@ pub struct Entry {
     /// The picture, relative to the data folder.
     pub file: String,
     pub source: Source,
-    /// The link it was downloaded from, when pasted as one.
+    /// The link it was downloaded from, when pasted as one or kept from a lookup.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    /// Who made it and its license, for a picture kept from Wikimedia Commons.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attribution: Option<online::Attribution>,
     /// When the artist first got a picture, and when it last changed (Unix seconds).
     pub added: u64,
     pub updated: u64,
@@ -75,7 +85,7 @@ pub struct Entry {
 
 impl Entry {
     fn matches(&self, names: &[String]) -> bool {
-        self.names.iter().any(|n| names.iter().any(|m| n.trim().eq_ignore_ascii_case(m.trim())))
+        same(&self.names, names)
     }
 }
 
@@ -85,6 +95,24 @@ struct Index {
     version: u32,
     #[serde(default)]
     artists: Vec<Entry>,
+    /// Pages whose looked-up picture the user removed: they aren't looked up again.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    declined: Vec<Vec<String>>,
+}
+
+impl Index {
+    fn empty() -> Index {
+        Index { version: VERSION, artists: Vec::new(), declined: Vec::new() }
+    }
+
+    fn declined(&self, names: &[String]) -> bool {
+        self.declined.iter().any(|d| same(d, names))
+    }
+}
+
+/// Whether two lists of names share one, ignoring case.
+fn same(a: &[String], b: &[String]) -> bool {
+    a.iter().any(|n| b.iter().any(|m| n.trim().eq_ignore_ascii_case(m.trim())))
 }
 
 /// Whose picture: a page's names, and their MusicBrainz ID when known.
@@ -111,10 +139,67 @@ impl Input {
         }
     }
 
-    fn url(&self) -> Option<String> {
-        match self {
+    fn origin(&self) -> Origin {
+        let url = match self {
             Input::Url(url) => Some(url.clone()),
             _ => None,
+        };
+        Origin { source: self.source(), url, attribution: None }
+    }
+}
+
+/// Where a stored picture came from, for its entry.
+#[derive(Clone, Debug)]
+struct Origin {
+    source: Source,
+    url: Option<String>,
+    attribution: Option<online::Attribution>,
+}
+
+/// What an artist page's picture is.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Shown {
+    /// One the user gave, with its attribution when it was kept from Wikimedia Commons.
+    User(Option<online::Attribution>),
+    /// An `artist.jpg` in their music folder.
+    Folder(PathBuf),
+    /// One a lookup found, shown until the user keeps or removes it.
+    Online(online::Attribution),
+    /// None: their first album's cover shows.
+    Cover,
+}
+
+/// A lookup's state for a page, by its first name in lowercase.
+#[derive(Clone)]
+enum Lookup {
+    Pending,
+    /// Nothing found, or the lookup failed: tried again next launch or when asked.
+    Nothing,
+    Found(Arc<Looked>),
+}
+
+/// A picture a lookup found, ready to show and to keep.
+struct Looked {
+    jpeg: Arc<[u8]>,
+    url: String,
+    attribution: online::Attribution,
+}
+
+/// A lookup's answer: the page's key, and the prepared picture if one was found.
+type LookupDone = (String, Option<Looked>);
+type LookupJob = (String, Vec<String>, Option<String>);
+
+/// What the reader shrinks: a file, or bytes already in memory.
+enum ReadFrom {
+    Path(PathBuf),
+    Bytes(Arc<[u8]>),
+}
+
+impl ReadFrom {
+    fn thumb(&self) -> Option<(u32, u32, Vec<u8>)> {
+        match self {
+            ReadFrom::Path(path) => read_limited(path).ok().and_then(|bytes| shrink(&bytes, THUMB_PX)),
+            ReadFrom::Bytes(bytes) => shrink(bytes, THUMB_PX),
         }
     }
 }
@@ -124,9 +209,9 @@ impl Input {
 pub type Fetch = Arc<dyn Fn(&str) -> Result<Vec<u8>, String> + Send + Sync>;
 
 /// A finished import: whose, from what, and the JPEG to store or why there's none.
-type Done = (Target, Source, Option<String>, Result<Vec<u8>, String>);
-/// The reader's jobs (index file, path) and answers (file, shrunk RGBA if it decoded).
-type Reads = (Sender<(String, PathBuf)>, Receiver<(String, Option<(u32, u32, Vec<u8>)>)>);
+type Done = (Target, Origin, Result<Vec<u8>, String>);
+/// The reader's jobs (cache key, what to read) and answers (key, shrunk RGBA if it decoded).
+type Reads = (Sender<(String, ReadFrom)>, Receiver<(String, Option<(u32, u32, Vec<u8>)>)>);
 
 pub struct ArtistPictures {
     /// The data folder; `None` keeps pictures in memory (tests, headless runs).
@@ -146,6 +231,12 @@ pub struct ArtistPictures {
     /// Pages whose picture is being imported, by their first name.
     pending: Vec<String>,
     fetch: Fetch,
+    /// Lookups by the page's first name in lowercase, this session.
+    lookups: RefCell<HashMap<String, Lookup>>,
+    /// The lookup worker, once started: one at a time, so the sites are asked gently.
+    lookup_worker: Option<(Sender<LookupJob>, Receiver<LookupDone>)>,
+    /// Each page's music-folder picture, found once per library version.
+    folders: RefCell<(u64, HashMap<String, Option<PathBuf>>)>,
 }
 
 impl ArtistPictures {
@@ -155,9 +246,9 @@ impl ArtistPictures {
         let (index, error) = match &dir {
             Some(dir) => match load_index(&dir.join(INDEX_FILE)) {
                 Ok(index) => (index, None),
-                Err(e) => (Index { version: VERSION, artists: Vec::new() }, Some(e)),
+                Err(e) => (Index::empty(), Some(e)),
             },
-            None => (Index { version: VERSION, artists: Vec::new() }, None),
+            None => (Index::empty(), None),
         };
         let pictures = ArtistPictures {
             dir,
@@ -171,19 +262,21 @@ impl ArtistPictures {
             imports: channel(),
             pending: Vec::new(),
             fetch,
+            lookups: RefCell::new(HashMap::new()),
+            lookup_worker: None,
+            folders: RefCell::new((0, HashMap::new())),
         };
         (pictures, error)
     }
 
     /// Reads and imports pictures on worker threads from now on, waking the window with each.
     pub fn start(&mut self, waker: Waker) {
-        let (jobs, inbox) = channel::<(String, PathBuf)>();
+        let (jobs, inbox) = channel::<(String, ReadFrom)>();
         let (outbox, done) = channel();
         let wake = waker.clone();
         let spawned = std::thread::Builder::new().name("artist-pictures".into()).spawn(move || {
-            for (file, path) in inbox {
-                let thumb = read_limited(&path).ok().and_then(|bytes| shrink(&bytes, THUMB_PX));
-                if outbox.send((file, thumb)).is_err() {
+            for (key, from) in inbox {
+                if outbox.send((key, from.thumb())).is_err() {
                     return;
                 }
                 wake();
@@ -191,6 +284,20 @@ impl ArtistPictures {
         });
         if spawned.is_ok() {
             self.reads = Some((jobs, done));
+        }
+        let (jobs, inbox) = channel::<LookupJob>();
+        let (outbox, done) = channel();
+        let (wake, fetch) = (waker.clone(), self.fetch.clone());
+        let spawned = std::thread::Builder::new().name("artist-picture-lookups".into()).spawn(move || {
+            for (key, names, mbid) in inbox {
+                if outbox.send((key, look_up(&names, mbid.as_deref(), &fetch))).is_err() {
+                    return;
+                }
+                wake();
+            }
+        });
+        if spawned.is_ok() {
+            self.lookup_worker = Some((jobs, done));
         }
         self.images = ImageCache::new(waker.clone());
         self.waker = Some(waker);
@@ -226,39 +333,147 @@ impl ArtistPictures {
     /// `None` while it loads or when there is none.
     pub fn get(&self, names: &[String]) -> Option<Image> {
         let file = self.entry(names)?.file.clone();
-        let known = self.cache.borrow().slots.get(&file).cloned();
+        let from = match (self.memory.get(&file), &self.dir) {
+            (Some(bytes), _) => ReadFrom::Bytes(bytes.clone()),
+            (None, Some(dir)) => ReadFrom::Path(dir.join(&file)),
+            (None, None) => return None,
+        };
+        self.cached(file, from)
+    }
+
+    /// The image cached under `key`, read from `from` when it isn't yet: on the reader once
+    /// started, else now.
+    fn cached(&self, key: String, from: ReadFrom) -> Option<Image> {
+        let known = self.cache.borrow().slots.get(&key).cloned();
         match known {
             Some((Slot::Ready(image), _)) => {
-                self.cache.borrow_mut().touch(&file);
+                self.cache.borrow_mut().touch(&key);
                 Some(image).filter(|i| i.error().is_none())
             }
             Some((Slot::Pending | Slot::Missing, _)) => None,
-            None => match (&self.reads, &self.dir) {
-                (Some((jobs, _)), Some(dir)) if !self.memory.contains_key(&file) => {
-                    self.cache.borrow_mut().slots.insert(file.clone(), (Slot::Pending, 0));
-                    let _ = jobs.send((file.clone(), dir.join(&file)));
+            None => match &self.reads {
+                Some((jobs, _)) => {
+                    self.cache.borrow_mut().slots.insert(key.clone(), (Slot::Pending, 0));
+                    let _ = jobs.send((key, from));
                     None
                 }
-                _ => {
-                    let bytes = match self.memory.get(&file) {
-                        Some(bytes) => Some(bytes.to_vec()),
-                        None => self.dir.as_ref().and_then(|dir| read_limited(&dir.join(&file)).ok()),
-                    };
-                    let image = bytes.and_then(|b| shrink(&b, THUMB_PX)).map(|(w, h, rgba)| self.images.rgba(w, h, rgba));
+                None => {
+                    let image = from.thumb().map(|(w, h, rgba)| self.images.rgba(w, h, rgba));
                     if let Some(image) = &image {
                         // A snapshot shows the picture decoded.
                         let _ = image.wait();
                     }
-                    self.cache.borrow_mut().arrive(file, image.clone().map_or(Slot::Missing, Slot::Ready));
+                    self.cache.borrow_mut().arrive(key, image.clone().map_or(Slot::Missing, Slot::Ready));
                     image
                 }
             },
         }
     }
 
+    /// The page's `artist.jpg` from its music folders, looked for once per library `version`.
+    pub fn folder(&self, info: &crate::artist::ArtistPage, tracks: &[crate::library::Track], albums: &[crate::album::Album], version: u64) -> Option<PathBuf> {
+        let key = info.names.first()?.to_lowercase();
+        let mut folders = self.folders.borrow_mut();
+        if folders.0 != version {
+            *folders = (version, HashMap::new());
+        }
+        folders.1.entry(key).or_insert_with(|| folder::find(info, tracks, albums)).clone()
+    }
+
+    /// The image of a music-folder picture.
+    pub fn folder_image(&self, path: &Path) -> Option<Image> {
+        self.cached(format!("folder:{}", path.display()), ReadFrom::Path(path.to_path_buf()))
+    }
+
+    /// The picture a lookup found for the page with these names, and its attribution; asks
+    /// for a lookup when there's been none this session, with `mbid` naming them when their
+    /// tags do. None while it runs, when it found nothing, or when the user removed the one it found.
+    /// With `start` false (lookups off) it only shows what a lookup the user asked for found.
+    pub fn online(&self, names: &[String], start: bool, mbid: impl FnOnce() -> Option<String>) -> Option<(Option<Image>, online::Attribution)> {
+        let key = names.first()?.to_lowercase();
+        if self.index.declined(names) {
+            return None;
+        }
+        let known = self.lookups.borrow().get(&key).cloned();
+        let looked = match known {
+            Some(Lookup::Found(looked)) => looked,
+            Some(Lookup::Pending | Lookup::Nothing) => return None,
+            None if !start => return None,
+            None => {
+                self.start_lookup(key.clone(), names.to_vec(), mbid());
+                let Some(Lookup::Found(looked)) = self.lookups.borrow().get(&key).cloned() else { return None };
+                looked
+            }
+        };
+        Some((self.cached(format!("online:{key}"), ReadFrom::Bytes(looked.jpeg.clone())), looked.attribution.clone()))
+    }
+
+    /// Looks the page up again, as the user asked: even with lookups off, and after they
+    /// removed the picture a lookup found.
+    pub fn look_up(&mut self, names: &[String], mbid: Option<String>) {
+        let Some(key) = names.first().map(|n| n.to_lowercase()) else { return };
+        if self.index.declined(names) {
+            self.index.declined.retain(|d| !same(d, names));
+            let _ = self.save();
+        }
+        if matches!(self.lookups.borrow().get(&key), Some(Lookup::Pending)) {
+            return;
+        }
+        self.cache.borrow_mut().slots.remove(&format!("online:{key}"));
+        self.start_lookup(key, names.to_vec(), mbid);
+    }
+
+    fn start_lookup(&self, key: String, names: Vec<String>, mbid: Option<String>) {
+        match &self.lookup_worker {
+            Some((jobs, _)) => {
+                self.lookups.borrow_mut().insert(key.clone(), Lookup::Pending);
+                let _ = jobs.send((key, names, mbid));
+            }
+            None => {
+                let found = look_up(&names, mbid.as_deref(), &self.fetch);
+                self.lookups.borrow_mut().insert(key, found.map_or(Lookup::Nothing, |l| Lookup::Found(Arc::new(l))));
+            }
+        }
+    }
+
+    /// Whether a lookup for the page with these names is running.
+    pub fn looking_up(&self, names: &[String]) -> bool {
+        names.first().is_some_and(|n| matches!(self.lookups.borrow().get(&n.to_lowercase()), Some(Lookup::Pending)))
+    }
+
+    /// Keeps the picture a lookup found for `target` as theirs: copied in with its attribution,
+    /// and never replaced by a lookup again. An error when there's none to keep.
+    pub fn keep_online(&mut self, target: &Target) -> Result<(), String> {
+        let key = target.names.first().map(|n| n.to_lowercase()).unwrap_or_default();
+        let Some(Lookup::Found(looked)) = self.lookups.borrow().get(&key).cloned() else {
+            return Err("There's no looked-up picture to keep".into());
+        };
+        let origin = Origin { source: Source::Wikimedia, url: Some(looked.url.clone()), attribution: Some(looked.attribution.clone()) };
+        self.set(target, looked.jpeg.to_vec(), origin)
+    }
+
+    /// Stops showing the picture a lookup found for these names, now and in later sessions.
+    pub fn decline_online(&mut self, names: &[String]) -> Result<(), String> {
+        self.refuse_unreadable()?;
+        if let Some(key) = names.first().map(|n| n.to_lowercase()) {
+            self.lookups.borrow_mut().insert(key, Lookup::Nothing);
+        }
+        if !self.index.declined(names) {
+            self.index.declined.push(names.to_vec());
+        }
+        self.save()
+    }
+
     /// Takes pictures the reader finished; true when any arrived.
     pub fn drain(&self) -> bool {
-        let Some((_, done)) = &self.reads else { return false };
+        let mut looked = false;
+        if let Some((_, done)) = &self.lookup_worker {
+            for (key, found) in done.try_iter() {
+                looked = true;
+                self.lookups.borrow_mut().insert(key, found.map_or(Lookup::Nothing, |l| Lookup::Found(Arc::new(l))));
+            }
+        }
+        let Some((_, done)) = &self.reads else { return looked };
         let arrived: Vec<(String, Slot)> = done
             .try_iter()
             .map(|(file, thumb)| (file, thumb.map_or(Slot::Missing, |(w, h, rgba)| Slot::Ready(self.images.rgba(w, h, rgba)))))
@@ -267,7 +482,7 @@ impl ArtistPictures {
         if any {
             self.cache.borrow_mut().arrive_all(arrived);
         }
-        any
+        any || looked
     }
 
     /// Prepares `input` as the picture for `target`: on a worker once started, else now. Its
@@ -278,9 +493,9 @@ impl ArtistPictures {
         }
         let (outbox, fetch) = (self.imports.0.clone(), self.fetch.clone());
         let job = move || {
-            let (source, url) = (input.source(), input.url());
+            let origin = input.origin();
             let result = input_bytes(input, &fetch).and_then(|bytes| prepare(&bytes));
-            let _ = outbox.send((target, source, url, result));
+            let _ = outbox.send((target, origin, result));
         };
         match self.waker.clone() {
             Some(waker) => {
@@ -289,7 +504,8 @@ impl ArtistPictures {
                     waker();
                 });
                 if let Err(e) = spawned {
-                    let _ = self.imports.0.send((Target { names: Vec::new(), mbid: None }, Source::User, None, Err(format!("Couldn't start the import: {e}"))));
+                    let origin = Origin { source: Source::User, url: None, attribution: None };
+                    let _ = self.imports.0.send((Target { names: Vec::new(), mbid: None }, origin, Err(format!("Couldn't start the import: {e}"))));
                 }
             }
             None => job(),
@@ -300,11 +516,11 @@ impl ArtistPictures {
     pub fn finish(&mut self) -> (bool, Option<String>) {
         let done: Vec<Done> = self.imports.1.try_iter().collect();
         let mut error = None;
-        for (target, source, url, result) in &done {
+        for (target, origin, result) in &done {
             if let Some(i) = target.names.first().and_then(|first| self.pending.iter().position(|p| p.eq_ignore_ascii_case(first))) {
                 self.pending.remove(i);
             }
-            let stored = result.clone().and_then(|jpeg| self.set(target, jpeg, *source, url.clone()));
+            let stored = result.clone().and_then(|jpeg| self.set(target, jpeg, origin.clone()));
             if let Err(e) = stored {
                 error = Some(e);
             }
@@ -313,7 +529,7 @@ impl ArtistPictures {
     }
 
     /// Saves `jpeg` as the picture of `target`'s names, replacing the one they had.
-    fn set(&mut self, target: &Target, jpeg: Vec<u8>, source: Source, url: Option<String>) -> Result<(), String> {
+    fn set(&mut self, target: &Target, jpeg: Vec<u8>, origin: Origin) -> Result<(), String> {
         if target.names.is_empty() {
             return Err("Couldn't tell whose picture that is".into());
         }
@@ -336,7 +552,8 @@ impl ArtistPictures {
         let added = old.iter().map(|e| e.added).min().unwrap_or(now);
         let mbid = target.mbid.clone().or_else(|| old.iter().find_map(|e| e.mbid.clone()));
         self.index.artists.retain(|e| !e.matches(&target.names));
-        self.index.artists.push(Entry { names: target.names.clone(), mbid, file, source, url, added, updated: now });
+        let Origin { source, url, attribution } = origin;
+        self.index.artists.push(Entry { names: target.names.clone(), mbid, file, source, url, attribution, added, updated: now });
         self.save()?;
         for e in old {
             self.forget_file(&e.file);
@@ -352,11 +569,23 @@ impl ArtistPictures {
             return Ok(());
         }
         self.index.artists.retain(|e| !e.matches(names));
+        // A kept Wikimedia picture they removed isn't looked up and shown again.
+        if old.iter().any(|e| e.source == Source::Wikimedia) && !self.index.declined(names) {
+            self.index.declined.push(names.to_vec());
+            if let Some(key) = names.first().map(|n| n.to_lowercase()) {
+                self.lookups.borrow_mut().insert(key, Lookup::Nothing);
+            }
+        }
         self.save()?;
         for e in old {
             self.forget_file(&e.file);
         }
         Ok(())
+    }
+
+    /// Whose picture the page with these names has, kept from Wikimedia Commons.
+    pub fn attribution(&self, names: &[String]) -> Option<online::Attribution> {
+        self.entry(names)?.attribution.clone()
     }
 
     fn refuse_unreadable(&self) -> Result<(), String> {
@@ -393,7 +622,7 @@ impl ArtistPictures {
 fn load_index(path: &Path) -> Result<Index, String> {
     let text = match std::fs::read_to_string(path) {
         Ok(text) => text,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Index { version: VERSION, artists: Vec::new() }),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Index::empty()),
         Err(e) => return Err(format!("Couldn't read the artist pictures in {}: {e}", path.display())),
     };
     let index: Index = serde_json::from_str(&text).map_err(|e| format!("Couldn't read the artist pictures in {}: {e}", path.display()))?;
@@ -415,6 +644,14 @@ fn new_id(names: &[String]) -> String {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos()).hash(&mut hash);
     std::process::id().hash(&mut hash);
     format!("{:016x}", hash.finish())
+}
+
+/// Runs a lookup and prepares what it found to show and keep. Failures find nothing: lookups
+/// run unasked, so they don't interrupt with errors.
+fn look_up(names: &[String], mbid: Option<&str>, fetch: &Fetch) -> Option<Looked> {
+    let found = online::lookup(names, mbid, fetch).ok()??;
+    let jpeg = prepare(&found.bytes).ok()?;
+    Some(Looked { jpeg: jpeg.into(), url: found.url, attribution: found.attribution })
 }
 
 /// Whether `path` names an image the picker and drops take.
@@ -486,11 +723,12 @@ pub fn from_text(text: &str) -> Option<Input> {
     (path.is_absolute() && is_image(&path) && path.is_file()).then_some(Input::File(path))
 }
 
-/// Downloads a pasted link: at most [`MAX_BYTES`], within [`DOWNLOAD_TIMEOUT`].
+/// Downloads a pasted link or a lookup's request: at most [`MAX_BYTES`], within [`DOWNLOAD_TIMEOUT`].
 pub fn download(url: &str) -> Result<Vec<u8>, String> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(DOWNLOAD_TIMEOUT))
-        .user_agent(concat!("peri/", env!("CARGO_PKG_VERSION")))
+        // MusicBrainz and Wikimedia ask for a user agent that says who's asking.
+        .user_agent(concat!("peri/", env!("CARGO_PKG_VERSION"), " (https://github.com/Narwhai/peri)"))
         .build()
         .into();
     let mut response = agent.get(url).call().map_err(|e| format!("Couldn't download the picture: {e}"))?;

@@ -16,6 +16,7 @@ const LIBRARY_KEY: &str = "library";
 const ARTISTS_KEY: &str = "artists";
 const LASTFM_KEY: &str = "lastfm";
 const ZOOM_KEY: &str = "zoom";
+const PICTURE_LOOKUPS_KEY: &str = "artist_picture_lookups";
 const GRAPH_KEY: &str = "graph";
 const TAB_KEY: &str = "tab";
 const APPEARANCE_KEY: &str = "appearance";
@@ -305,6 +306,15 @@ impl Store {
     }
 
     /// The window's zoom, 1.0 when unset or unreadable.
+    /// Whether artist pictures are looked up online; off unless the user turned it on.
+    pub fn load_picture_lookups(&self) -> bool {
+        self.prefs.get::<bool>(PICTURE_LOOKUPS_KEY).unwrap_or(false)
+    }
+
+    pub fn save_picture_lookups(&mut self, on: bool) -> Result<(), String> {
+        self.prefs.set(PICTURE_LOOKUPS_KEY, &on).map_err(|e| format!("Couldn't save the picture lookup setting: {e}"))
+    }
+
     pub fn load_zoom(&self) -> f32 {
         self.prefs.get::<f32>(ZOOM_KEY).map_or(1.0, crate::app::clamp_zoom)
     }

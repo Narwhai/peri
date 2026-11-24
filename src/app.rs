@@ -374,6 +374,9 @@ pub struct App {
     pub picture_menu: bool,
     /// An image file is dragged over the artist picture.
     pub picture_drop_hover: bool,
+    /// Artist pages without a picture of the user's look one up on Wikimedia Commons. Off
+    /// unless the user turns it on.
+    pub picture_lookups: bool,
 }
 
 impl App {
@@ -400,6 +403,7 @@ impl App {
             _ => std::sync::Arc::new(crate::pictures::download),
         };
         let (pictures, pictures_error) = crate::pictures::ArtistPictures::open(store.data_dir(), fetch);
+        let picture_lookups = store.load_picture_lookups();
         let (graph, graph_error) = match store.load_graph().and_then(crate::graph::state::Graph::new) {
             Ok(g) => (g, None),
             Err(e) => (crate::graph::state::Graph::with(None, 0), Some(e)),
@@ -521,6 +525,7 @@ impl App {
             pictures,
             picture_menu: false,
             picture_drop_hover: false,
+            picture_lookups,
             details: None,
             song_menu: None,
             output,
@@ -1013,8 +1018,56 @@ impl App {
         let name = self.open_artist()?;
         let model = self.artist_model(name, self.artist_with_aliases);
         let names = model.0.names.clone();
-        let mbid = self.tracks.iter().flat_map(crate::credits::id_pairs).find(|(_, n)| names.iter().any(|m| m.eq_ignore_ascii_case(n))).map(|(id, _)| id.to_string());
+        let mbid = self.artist_mbid(&names);
         Some(crate::pictures::Target { names, mbid })
+    }
+
+    /// The MusicBrainz ID the library's tags pair with any of `names`.
+    pub fn artist_mbid(&self, names: &[String]) -> Option<String> {
+        self.tracks.iter().flat_map(crate::credits::id_pairs).find(|(_, n)| names.iter().any(|m| m.eq_ignore_ascii_case(n))).map(|(id, _)| id.to_string())
+    }
+
+    /// What the artist page with `info` shows for a picture, and its image: the user's own,
+    /// else an `artist.jpg` in their music folder, else (with lookups on, or one the user asked
+    /// for) a Wikimedia Commons picture; else their first album's cover.
+    pub fn artist_picture(&self, info: &crate::artist::ArtistPage) -> (Option<rune::Image>, crate::pictures::Shown) {
+        use crate::pictures::Shown;
+        if self.pictures.has(&info.names) {
+            return (self.pictures.get(&info.names), Shown::User(self.pictures.attribution(&info.names)));
+        }
+        if let Some(path) = self.pictures.folder(info, &self.tracks, &self.albums, self.data_version) {
+            return (self.pictures.folder_image(&path), Shown::Folder(path));
+        }
+        // Only their own page starts a lookup, not search results changing as the user types.
+        let start = self.picture_lookups && self.open_artist().is_some_and(|open| info.names.iter().any(|n| n.eq_ignore_ascii_case(open)));
+        if let Some((image, attribution)) = self.pictures.online(&info.names, start, || self.artist_mbid(&info.names)) {
+            return (image, Shown::Online(attribution));
+        }
+        (None, Shown::Cover)
+    }
+
+    /// Settings' switch for looking artist pictures up online, saved.
+    pub fn set_picture_lookups(&mut self, on: bool) {
+        self.picture_lookups = on;
+        if let Err(e) = self.store.save_picture_lookups(on) {
+            self.error = Some(e);
+        }
+    }
+
+    /// The ✎ menu's Keep this picture: the looked-up picture is copied in as theirs.
+    pub fn keep_artist_picture(&mut self) {
+        self.picture_menu = false;
+        let Some(target) = self.picture_target() else { return };
+        if let Err(e) = self.pictures.keep_online(&target) {
+            self.error = Some(e);
+        }
+    }
+
+    /// The ✎ menu's Look up on Wikimedia: asked for, so it runs even with lookups off.
+    pub fn look_up_artist_picture(&mut self) {
+        self.picture_menu = false;
+        let Some(target) = self.picture_target() else { return };
+        self.pictures.look_up(&target.names, target.mbid);
     }
 
     /// Uses `input` as the open artist's picture; it shows once it's copied in.
@@ -1057,11 +1110,16 @@ impl App {
         }
     }
 
-    /// The ✎ menu's Remove picture: the album cover shows again.
+    /// The ✎ menu's Remove picture: the user's own is deleted, and a looked-up one isn't shown
+    /// again; what's left (a folder picture, the album cover) shows.
     pub fn remove_artist_picture(&mut self) {
         self.picture_menu = false;
         let Some(target) = self.picture_target() else { return };
-        if let Err(e) = self.pictures.remove(&target.names) {
+        let result = match self.pictures.has(&target.names) {
+            true => self.pictures.remove(&target.names),
+            false => self.pictures.decline_online(&target.names),
+        };
+        if let Err(e) = result {
             self.error = Some(e);
         }
     }
