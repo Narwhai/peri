@@ -248,8 +248,8 @@ fn album_pill_rows(s: &App, info: &ArtistPage, p: &Palette) -> Vec<(usize, Vec<t
 fn involved_section(s: &App, relation: Relation, other: &ArtistPage, p: &Palette) -> Option<El> {
     let key = format!("related-{}", other.name);
     let title = match relation {
-        Relation::MemberOf => format!("With {}", other.name),
-        Relation::Member => format!("{} (solo)", other.name),
+        Relation::MemberOf | Relation::FormerMemberOf => format!("With {}", other.name),
+        Relation::Member | Relation::FormerMember => format!("{} (solo)", other.name),
         Relation::Alias => return None,
     };
     let count = other.all_songs(s.albums()).len();
@@ -382,13 +382,20 @@ fn link_artist(s: &App, info: &ArtistPage, p: &Palette, kit: &Kit, layer: &mut V
         })
         .build(kit)
         .key("artist-link-name");
-    let kinds = segmented("artist-link-kind", &LinkChoice::ALL.map(|c| (c.id(), c.label())), s.link_choice.id(), p, |s: &mut App, id: &str| {
+    // Three rows, as six don't fit one: names, current members, former members.
+    let choose = |s: &mut App, id: &str| {
         if let Some(c) = LinkChoice::ALL.into_iter().find(|c| c.id() == id) {
             s.link_choice = c;
         }
         // Back to the name, so picking a kind doesn't stop typing.
         s.link_name.focused = true;
-    });
+    };
+    let rows: [(&'static str, [LinkChoice; 2]); 3] = [
+        ("artist-link-kind", [LinkChoice::Merge, LinkChoice::Alias]),
+        ("artist-link-kind-member", [LinkChoice::MemberOf, LinkChoice::HasMember]),
+        ("artist-link-kind-former", [LinkChoice::FormerMemberOf, LinkChoice::HadMember]),
+    ];
+    let kinds = rows.into_iter().fold(col().gap(6.0), |kinds, (key, choices)| kinds.child(segmented(key, &choices.map(|c| (c.id(), c.label())), s.link_choice.id(), p, choose)));
     let mut list = col().key("artist-link-options").gap(2.0);
     for name in &found {
         let who = name.clone();

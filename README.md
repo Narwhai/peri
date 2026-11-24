@@ -139,7 +139,7 @@ Every artist name is a link: in song rows, titles ("Calypso Gene (feat. Silka & 
 
 ### Related artists
 
-On an artist's page, **Link artist** opens a popover: pick **Same artist** (merge), **Alias**, **Member of** or **Has member**, then type a name. Names the library knows are suggested; Enter or **Add "…"** links a name it doesn't have yet, which turns into a link once music under that name arrives. The ✕ on a related artist removes the link, and the ✕ on a name under "Also credited as" takes it out of the merge. Changes save at once.
+On an artist's page, **Link artist** opens a popover: pick **Same artist** (merge), **Alias**, **Member of**, **Former member of**, **Has member** or **Had member**, then type a name. Names the library knows are suggested; Enter or **Add "…"** links a name it doesn't have yet, which turns into a link once music under that name arrives. The ✕ on a related artist removes the link, and the ✕ on a name under "Also credited as" takes it out of the merge. Changes save at once. Choosing **Member of** or **Former member of** for a band already linked the other way replaces that link.
 
 They're saved under `artists` in `prefs.json`, which can also be edited by hand while the app is closed:
 
@@ -148,15 +148,16 @@ They're saved under `artists` in `prefs.json`, which can also be edited by hand 
   "merges": [["Earl Sweatshirt", "Thebe Kgositsile"]],
   "links": [
     { "from": "MF DOOM", "kind": "alias", "to": "Viktor Vaughn" },
-    { "from": "billy woods", "kind": "member_of", "to": "Armand Hammer" }
+    { "from": "billy woods", "kind": "member_of", "to": "Armand Hammer" },
+    { "from": "Ryan Walchonski", "kind": "former_member_of", "to": "feeble little horse" }
   ]
 }
 ```
 
 - **Merges:** names of one artist. Any of them opens one page gathering everything each is credited with. It's named after the most prominent name (album artist outweighs artist, then featured, then other credits), with "Also credited as" listing the rest. Merges only affect artist pages, not views, filters or grouping.
-- **Links:** artists that keep their own pages. Each page lists the other under **Related**: `alias` shows as "Also releases as" on both, and `member_of` as "Member of" on the person's page and "Members" on the band's. Names the library doesn't have show but don't open a page.
+- **Links:** artists that keep their own pages. Each page lists the other under **Related**: `alias` shows as "Also releases as" on both, `member_of` as "Member of" on the person's page and "Members" on the band's, and `former_member_of` (a band they used to be in) as "Former member of" and "Former members". Names the library doesn't have show but don't open a page.
 - **Include aliases:** a page with aliases has an **Include aliases** checkbox next to Play. It adds everything released or credited under their aliases (and aliases of those) to the page, with album cards naming each album's artist, and Play and Play Discography follow it. It stays on from page to page until unticked or the app restarts.
-- **Bands and members:** a `member_of` link also gets a collapsed section per band ("With …") or member ("… (solo)") on the page, with their releases, appearances and credits. **Play Everything** plays the page's music, then each of those sections' music once. Both follow **Include aliases**.
+- **Bands and members:** a `member_of` or `former_member_of` link also gets a collapsed section per band ("With …") or member ("… (solo)") on the page, with their releases, appearances and credits. **Play Everything** plays the page's music, then each of those sections' music once. Both follow **Include aliases**.
 - Names match ignoring case. If the `artists` entry can't be read (a typo in a key or kind), the app says so and ignores it.
 
 ## Graph
@@ -164,7 +165,7 @@ They're saved under `artists` in `prefs.json`, which can also be edited by hand 
 The **Graph** tab (next to **Library** at the top left) shows every artist in the library as a dot, joined by a line to each artist they've worked with. Dots grow with how many artists they're linked to.
 
 - **Links, colour-coded:**
-  - your artist relations: **Same artist** (merged names, each still its own dot), **Alias** and **Member of**;
+  - your artist relations: **Same artist** (merged names, each still its own dot), **Alias**, **Member of** and **Former member of**;
   - from the tags: **Featured** (a guest on another artist's song), **Together** (main artists of the same song) and one per credit role (**Producer**, **Composer**, **Performer**…: someone credited on another artist's song).
 - **Legend:** each kind in the graph has a chip; click it to hide or show those links.
 - **Moving around:** drag (or middle-drag) or scroll with a trackpad to pan; pinch, Ctrl + scroll or a mouse wheel to zoom about the pointer. **Fit** shows everything again.

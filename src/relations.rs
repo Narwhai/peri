@@ -7,7 +7,8 @@
 //!   "merges": [["Earl Sweatshirt", "Thebe Kgositsile"]],
 //!   "links": [
 //!     { "from": "MF DOOM", "kind": "alias", "to": "Viktor Vaughn" },
-//!     { "from": "Thom Yorke", "kind": "member_of", "to": "Radiohead" }
+//!     { "from": "Thom Yorke", "kind": "member_of", "to": "Radiohead" },
+//!     { "from": "Ryan Walchonski", "kind": "former_member_of", "to": "feeble little horse" }
 //!   ]
 //! }
 //! ```
@@ -40,6 +41,8 @@ pub enum LinkKind {
     Alias,
     /// `from` is a member of the band `to`.
     MemberOf,
+    /// `from` used to be a member of the band `to`.
+    FormerMemberOf,
 }
 
 /// What the Link artist popover adds between the open artist and another name.
@@ -51,19 +54,25 @@ pub enum LinkChoice {
     Alias,
     /// They're a member of the other name's band.
     MemberOf,
+    /// They used to be a member of the other name's band.
+    FormerMemberOf,
     /// The other name is a member of their band.
     HasMember,
+    /// The other name used to be a member of their band.
+    HadMember,
 }
 
 impl LinkChoice {
-    pub const ALL: [LinkChoice; 4] = [LinkChoice::Merge, LinkChoice::Alias, LinkChoice::MemberOf, LinkChoice::HasMember];
+    pub const ALL: [LinkChoice; 6] = [LinkChoice::Merge, LinkChoice::Alias, LinkChoice::MemberOf, LinkChoice::FormerMemberOf, LinkChoice::HasMember, LinkChoice::HadMember];
 
     pub fn label(self) -> &'static str {
         match self {
             LinkChoice::Merge => "Same artist",
             LinkChoice::Alias => "Alias",
             LinkChoice::MemberOf => "Member of",
+            LinkChoice::FormerMemberOf => "Former member of",
             LinkChoice::HasMember => "Has member",
+            LinkChoice::HadMember => "Had member",
         }
     }
 
@@ -73,7 +82,9 @@ impl LinkChoice {
             LinkChoice::Merge => "merge",
             LinkChoice::Alias => "alias",
             LinkChoice::MemberOf => "member-of",
+            LinkChoice::FormerMemberOf => "former-member-of",
             LinkChoice::HasMember => "has-member",
+            LinkChoice::HadMember => "had-member",
         }
     }
 
@@ -83,7 +94,9 @@ impl LinkChoice {
             LinkChoice::Merge => "One page for both names: everything credited to either shows together.",
             LinkChoice::Alias => "Another name they release as. Each keeps its own page and lists the other.",
             LinkChoice::MemberOf => "A band they're a member of.",
+            LinkChoice::FormerMemberOf => "A band they used to be in.",
             LinkChoice::HasMember => "A member of their band.",
+            LinkChoice::HadMember => "A former member of their band.",
         }
     }
 }
@@ -97,10 +110,14 @@ pub enum Relation {
     MemberOf,
     /// A member of their band.
     Member,
+    /// A band they used to be in.
+    FormerMemberOf,
+    /// A former member of their band.
+    FormerMember,
 }
 
 impl Relation {
-    pub const ALL: [Relation; 3] = [Relation::Alias, Relation::MemberOf, Relation::Member];
+    pub const ALL: [Relation; 5] = [Relation::Alias, Relation::MemberOf, Relation::FormerMemberOf, Relation::Member, Relation::FormerMember];
 
     /// A stable id, for keys.
     pub fn id(self) -> &'static str {
@@ -108,6 +125,8 @@ impl Relation {
             Relation::Alias => "alias",
             Relation::MemberOf => "member-of",
             Relation::Member => "member",
+            Relation::FormerMemberOf => "former-member-of",
+            Relation::FormerMember => "former-member",
         }
     }
 
@@ -117,6 +136,8 @@ impl Relation {
             Relation::Alias => "Also releases as",
             Relation::MemberOf => "Member of",
             Relation::Member => "Members",
+            Relation::FormerMemberOf => "Former member of",
+            Relation::FormerMember => "Former members",
         }
     }
 }
@@ -189,6 +210,8 @@ impl Relations {
                 (LinkKind::Alias, false, true) => Some((Relation::Alias, &link.from)),
                 (LinkKind::MemberOf, true, false) => Some((Relation::MemberOf, &link.to)),
                 (LinkKind::MemberOf, false, true) => Some((Relation::Member, &link.from)),
+                (LinkKind::FormerMemberOf, true, false) => Some((Relation::FormerMemberOf, &link.to)),
+                (LinkKind::FormerMemberOf, false, true) => Some((Relation::FormerMember, &link.from)),
             };
             if let Some((relation, name)) = found
                 && !out.iter().any(|(r, n)| *r == relation && same(n, name))
@@ -237,7 +260,9 @@ impl Relations {
             LinkChoice::Merge => None,
             LinkChoice::Alias => Some(Relation::Alias),
             LinkChoice::MemberOf => Some(Relation::MemberOf),
+            LinkChoice::FormerMemberOf => Some(Relation::FormerMemberOf),
             LinkChoice::HasMember => Some(Relation::Member),
+            LinkChoice::HadMember => Some(Relation::FormerMember),
         };
         if let Some(relation) = relation
             && self.related(&names).iter().any(|(r, n)| *r == relation && same(n, other))
@@ -252,10 +277,24 @@ impl Relations {
                 None => self.merges.push(vec![name, other]),
             },
             LinkChoice::Alias => self.links.push(Link { from: name, kind: LinkKind::Alias, to: other }),
-            LinkChoice::MemberOf => self.links.push(Link { from: name, kind: LinkKind::MemberOf, to: other }),
-            LinkChoice::HasMember => self.links.push(Link { from: other, kind: LinkKind::MemberOf, to: name }),
+            LinkChoice::MemberOf => self.add_membership(&names, name, other, true, true),
+            LinkChoice::FormerMemberOf => self.add_membership(&names, name, other, false, true),
+            LinkChoice::HasMember => self.add_membership(&names, name, other, true, false),
+            LinkChoice::HadMember => self.add_membership(&names, name, other, false, false),
         }
         Ok(())
+    }
+
+    /// Adds a current (`current`) or former membership between the artist and `other`, the artist
+    /// the member when `artist_is_member`, else the band. Replaces the other kind the same way round.
+    fn add_membership(&mut self, names: &[String], name: String, other: String, current: bool, artist_is_member: bool) {
+        let (kind, replaced) = if current { (LinkKind::MemberOf, LinkKind::FormerMemberOf) } else { (LinkKind::FormerMemberOf, LinkKind::MemberOf) };
+        self.links.retain(|l| {
+            let hit = if artist_is_member { among(names, &l.from) && same(&l.to, &other) } else { among(names, &l.to) && same(&l.from, &other) };
+            !(l.kind == replaced && hit)
+        });
+        let (from, to) = if artist_is_member { (name, other) } else { (other, name) };
+        self.links.push(Link { from, kind, to });
     }
 
     /// Removes every link that makes `other` related to the artist with these merged `names`
@@ -267,6 +306,8 @@ impl Relations {
                 (Relation::Alias, LinkKind::Alias) => ours(&l.from, &l.to) || ours(&l.to, &l.from),
                 (Relation::MemberOf, LinkKind::MemberOf) => ours(&l.from, &l.to),
                 (Relation::Member, LinkKind::MemberOf) => ours(&l.to, &l.from),
+                (Relation::FormerMemberOf, LinkKind::FormerMemberOf) => ours(&l.from, &l.to),
+                (Relation::FormerMember, LinkKind::FormerMemberOf) => ours(&l.to, &l.from),
                 _ => false,
             };
             !hit
@@ -408,5 +449,59 @@ mod tests {
         };
         assert_eq!(r.involved("MF DOOM", false), [(Relation::Member, "Viktor Vaughn".to_string())], "Viktor is a member of MF DOOM; X is only Viktor's band");
         assert_eq!(r.involved("MF DOOM", true), [(Relation::MemberOf, "X".to_string())], "with aliases, Viktor is one of their names, so their band is in and Viktor isn't");
+    }
+
+    #[test]
+    fn former_membership_reads_from_either_side_and_the_prefs_shape() {
+        let r: Relations = serde_json::from_str(r#"{ "links": [{ "from": "Ryan Walchonski", "kind": "former_member_of", "to": "feeble little horse" }] }"#).expect("valid");
+        assert_eq!(r.links, [link("Ryan Walchonski", LinkKind::FormerMemberOf, "feeble little horse")]);
+        assert_eq!(r.related(&r.merged("Ryan Walchonski")), [(Relation::FormerMemberOf, "feeble little horse".to_string())]);
+        assert_eq!(r.related(&r.merged("feeble little horse")), [(Relation::FormerMember, "Ryan Walchonski".to_string())]);
+    }
+
+    #[test]
+    fn adding_former_and_had_members_records_them_in_their_direction() {
+        let mut r = Relations::default();
+        r.add("Ryan Walchonski", LinkChoice::FormerMemberOf, "feeble little horse").expect("former band");
+        r.add("Aunt Katrina", LinkChoice::HadMember, "Someone").expect("former member");
+        assert_eq!(r.links, [link("Ryan Walchonski", LinkKind::FormerMemberOf, "feeble little horse"), link("Someone", LinkKind::FormerMemberOf, "Aunt Katrina")]);
+        assert!(r.add("ryan walchonski", LinkChoice::FormerMemberOf, "Feeble Little Horse").is_err(), "already linked that way");
+    }
+
+    #[test]
+    fn switching_between_current_and_former_membership_replaces_the_link_in_that_direction() {
+        let mut r = Relations::default();
+        r.add("Ryan Walchonski", LinkChoice::MemberOf, "feeble little horse").expect("member");
+        r.add("Ryan Walchonski", LinkChoice::FormerMemberOf, "feeble little horse").expect("switched to former");
+        assert_eq!(r.links, [link("Ryan Walchonski", LinkKind::FormerMemberOf, "feeble little horse")]);
+        r.add("Ryan Walchonski", LinkChoice::MemberOf, "feeble little horse").expect("switched back to current");
+        assert_eq!(r.links, [link("Ryan Walchonski", LinkKind::MemberOf, "feeble little horse")]);
+        r.add("feeble little horse", LinkChoice::HadMember, "Ryan Walchonski").expect("from the band's side");
+        assert_eq!(r.links, [link("Ryan Walchonski", LinkKind::FormerMemberOf, "feeble little horse")], "the same direction, so replaced");
+    }
+
+    #[test]
+    fn a_membership_the_other_way_round_is_not_replaced() {
+        let mut r = Relations { merges: Vec::new(), links: vec![link("feeble little horse", LinkKind::MemberOf, "Ryan Walchonski")] };
+        r.add("Ryan Walchonski", LinkChoice::FormerMemberOf, "feeble little horse").expect("the reverse direction is a different link");
+        assert_eq!(r.links, [link("feeble little horse", LinkKind::MemberOf, "Ryan Walchonski"), link("Ryan Walchonski", LinkKind::FormerMemberOf, "feeble little horse")]);
+    }
+
+    #[test]
+    fn unlinking_former_memberships_removes_them_from_either_side() {
+        let mut r = Relations { merges: Vec::new(), links: vec![link("Ryan Walchonski", LinkKind::FormerMemberOf, "feeble little horse"), link("Ryan Walchonski", LinkKind::MemberOf, "Aunt Katrina")] };
+        r.unlink(&r.merged("feeble little horse"), Relation::FormerMember, "ryan walchonski");
+        assert_eq!(r.links, [link("Ryan Walchonski", LinkKind::MemberOf, "Aunt Katrina")]);
+        r.unlink(&r.merged("Ryan Walchonski"), Relation::FormerMemberOf, "Aunt Katrina");
+        assert_eq!(r.links.len(), 1, "a current band isn't a former one");
+        r.unlink(&r.merged("Ryan Walchonski"), Relation::FormerMemberOf, "feeble little horse");
+        assert_eq!(r.links, [link("Ryan Walchonski", LinkKind::MemberOf, "Aunt Katrina")], "the band's member link stays");
+    }
+
+    #[test]
+    fn involved_includes_former_bands_and_former_members() {
+        let r = Relations { merges: Vec::new(), links: vec![link("Ryan Walchonski", LinkKind::FormerMemberOf, "feeble little horse")] };
+        assert_eq!(r.involved("Ryan Walchonski", false), [(Relation::FormerMemberOf, "feeble little horse".to_string())]);
+        assert_eq!(r.involved("feeble little horse", false), [(Relation::FormerMember, "Ryan Walchonski".to_string())]);
     }
 }

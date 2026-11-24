@@ -398,5 +398,8 @@ mod tests {
         assert_eq!(names(everything("Armand Hammer", &tracks, &albums, &relations, false)), ["Calypso Gene", "Laraaji", "Solo", "Wrote It"], "their own first, Calypso Gene once");
         assert!(involved("Cleo Reed", &tracks, &albums, &relations, false).iter().all(|(r, _)| *r == Relation::MemberOf), "Cleo Reed's band is Armand Hammer");
         assert!(involved("Somebody", &tracks, &albums, &Relations::default(), false).is_empty());
+        let former = Relations { merges: Vec::new(), links: vec![Link { from: "Cleo Reed".into(), kind: LinkKind::FormerMemberOf, to: "Somebody".into() }] };
+        assert_eq!(involved("Somebody", &tracks, &albums, &former, false).iter().map(|(r, p)| (*r, p.name.as_str())).collect::<Vec<_>>(), [(Relation::FormerMember, "Cleo Reed")], "a former member gets a section");
+        assert_eq!(names(everything("Somebody", &tracks, &albums, &former, false)).len(), everything("Somebody", &tracks, &albums, &Relations::default(), false).len() + 1, "and plays with Play Everything");
     }
 }

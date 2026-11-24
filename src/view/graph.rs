@@ -30,6 +30,7 @@ pub fn edge_color(kind: EdgeKind, p: &Palette) -> Color {
         EdgeKind::Merge => (0xf4f4f5, 0x18181b),
         EdgeKind::Alias => (0x22d3ee, 0x0891b2),
         EdgeKind::MemberOf => (0xfacc15, 0xca8a04),
+        EdgeKind::FormerMemberOf => (0xfef08a, 0xa16207),
         EdgeKind::Featured => (0x60a5fa, 0x2563eb),
         EdgeKind::With => (0x94a3b8, 0x64748b),
         EdgeKind::Credit(r) => return p.role(r).1,
@@ -46,7 +47,7 @@ fn rgb(hex: u32) -> Color {
 /// How wide a kind's lines draw: the relations the user records stand out.
 fn edge_width(kind: EdgeKind) -> f32 {
     match kind {
-        EdgeKind::Merge | EdgeKind::Alias | EdgeKind::MemberOf => 2.0,
+        EdgeKind::Merge | EdgeKind::Alias | EdgeKind::MemberOf | EdgeKind::FormerMemberOf => 2.0,
         EdgeKind::Featured | EdgeKind::With | EdgeKind::Credit(_) => 1.0,
     }
 }

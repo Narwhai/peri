@@ -24,6 +24,8 @@ pub enum EdgeKind {
     Alias,
     /// `from` is a member of the band `to`.
     MemberOf,
+    /// `from` used to be a member of the band `to`.
+    FormerMemberOf,
     /// `from` is featured on a song by `to`.
     Featured,
     /// Main artists of the same song ("A & B").
@@ -34,10 +36,11 @@ pub enum EdgeKind {
 
 impl EdgeKind {
     /// Every kind, in the order the legend lists them.
-    pub const ALL: [EdgeKind; 16] = [
+    pub const ALL: [EdgeKind; 17] = [
         EdgeKind::Merge,
         EdgeKind::Alias,
         EdgeKind::MemberOf,
+        EdgeKind::FormerMemberOf,
         EdgeKind::Featured,
         EdgeKind::With,
         EdgeKind::Credit(Role::Composer),
@@ -59,6 +62,7 @@ impl EdgeKind {
             EdgeKind::Merge => "merge",
             EdgeKind::Alias => "alias",
             EdgeKind::MemberOf => "member-of",
+            EdgeKind::FormerMemberOf => "former-member-of",
             EdgeKind::Featured => "featured",
             EdgeKind::With => "with",
             EdgeKind::Credit(Role::Composer) => "composer",
@@ -85,6 +89,7 @@ impl EdgeKind {
             EdgeKind::Merge => "Same artist",
             EdgeKind::Alias => "Alias",
             EdgeKind::MemberOf => "Member of",
+            EdgeKind::FormerMemberOf => "Former member of",
             EdgeKind::Featured => "Featured",
             EdgeKind::With => "Together",
             EdgeKind::Credit(r) => r.label(),
@@ -99,6 +104,7 @@ impl EdgeKind {
             EdgeKind::Merge => return format!("{from} and {to} are the same artist"),
             EdgeKind::Alias => return format!("{from} also releases as {to}"),
             EdgeKind::MemberOf => return format!("{from} is a member of {to}"),
+            EdgeKind::FormerMemberOf => return format!("{from} is a former member of {to}"),
             EdgeKind::Featured => return format!("{from} is featured on {songs} by {to}"),
             EdgeKind::With => return format!("{from} and {to} made {songs} together"),
             EdgeKind::Credit(Role::Composer) => "composed",
@@ -237,6 +243,7 @@ impl Model {
             let kind = match link.kind {
                 LinkKind::Alias => EdgeKind::Alias,
                 LinkKind::MemberOf => EdgeKind::MemberOf,
+                LinkKind::FormerMemberOf => EdgeKind::FormerMemberOf,
             };
             b.edge(&link.from, &link.to, kind);
         }

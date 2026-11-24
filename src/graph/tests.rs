@@ -53,6 +53,15 @@ fn merges_and_links_become_edges_between_separate_nodes() {
 }
 
 #[test]
+fn former_membership_is_its_own_one_way_edge() {
+    let relations = Relations { merges: Vec::new(), links: vec![Link { from: "Ryan Walchonski".into(), kind: LinkKind::FormerMemberOf, to: "feeble little horse".into() }] };
+    let m = Model::build(&[song(&["Aunt Katrina"], &[], Vec::new())], &relations);
+    assert_eq!(edge(&m, "Ryan Walchonski", "feeble little horse", EdgeKind::FormerMemberOf), Some(1));
+    assert_eq!(edge(&m, "feeble little horse", "Ryan Walchonski", EdgeKind::FormerMemberOf), None, "reads one way");
+    assert_eq!(edge(&m, "Ryan Walchonski", "feeble little horse", EdgeKind::MemberOf), None, "not a current membership");
+}
+
+#[test]
 fn the_fingerprint_follows_names_and_links_not_order_or_counts() {
     let a = song(&["A", "B"], &[], Vec::new());
     let c = song(&["C"], &[], vec![Credit::parse(Role::Producer, "A")]);
@@ -141,6 +150,7 @@ fn a_link_reads_as_a_sentence_in_its_direction() {
     assert_eq!(EdgeKind::Featured.sentence("Silka", "Armand Hammer", 1), "Silka is featured on 1 song by Armand Hammer");
     assert_eq!(EdgeKind::With.sentence("A", "B", 3), "A and B made 3 songs together");
     assert_eq!(EdgeKind::MemberOf.sentence("Thom Yorke", "Radiohead", 1), "Thom Yorke is a member of Radiohead");
+    assert_eq!(EdgeKind::FormerMemberOf.sentence("Ryan Walchonski", "feeble little horse", 1), "Ryan Walchonski is a former member of feeble little horse");
     assert_eq!(EdgeKind::Alias.sentence("MF DOOM", "Viktor Vaughn", 1), "MF DOOM also releases as Viktor Vaughn");
 }
 
