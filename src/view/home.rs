@@ -8,6 +8,7 @@ use super::table;
 use super::toolbar::segmented;
 use super::*;
 use crate::app::{SongMenuTarget, UnlistenedOrder};
+use crate::discover::Tab;
 use crate::query::property::Property;
 use crate::palette::Palette;
 
@@ -32,7 +33,7 @@ pub(super) fn home_page(s: &App, p: &Palette) -> El {
         .child(people_block(s, p))
         .child(recent_albums(s, p))
         .child(recent_songs(s, p))
-        .child(unlistened_albums(s, p));
+        .child(discovery_block(s, p));
     col().key("home-page").w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: false }).child(body)
 }
 
@@ -225,8 +226,24 @@ fn recent_songs(s: &App, p: &Palette) -> El {
     col().key("recent-songs").w_full().gap(8.0).child(text("Recently Played").font(HEADING).color(p.tx)).child(table)
 }
 
-/// Unlistened Releases: the albums with no plays, as a wrapping grid of cards, in the chosen
-/// order. Random has a button to re-roll its selection.
+/// The discovery block: one heading with a switch between its tabs, over the chosen tab's albums
+/// as a wrapping grid of cards. Unlistened is the albums with no plays, in the order chosen.
+fn discovery_block(s: &App, p: &Palette) -> El {
+    let switch = segmented("discover-tab", &Tab::ALL.map(|t| (t.id(), t.label())), s.discover.id(), p, |s: &mut App, id: &str| {
+        if let Some(tab) = Tab::ALL.into_iter().find(|t| t.id() == id) {
+            s.set_discover(tab);
+        }
+    });
+    let head = row().w_full().items_center().gap(12.0).child(text("Discover").font(HEADING).color(p.tx).grow(1.0).truncate()).child(switch);
+    let body = match s.discover {
+        Tab::Unlistened => unlistened_albums(s, p),
+        tab => discover_wall(s, tab, p),
+    };
+    col().key("discover").w_full().gap(10.0).child(head).child(body)
+}
+
+/// Unlistened Releases' controls and albums: the albums with no plays, as a wrapping grid of
+/// cards, in the chosen order. Random has a button to re-roll its selection.
 fn unlistened_albums(s: &App, p: &Palette) -> El {
     let albums = s.unlistened_albums();
     let order = segmented("unlistened-order", &UnlistenedOrder::ALL.map(|o| (o.id(), o.label())), s.unlistened_order.id(), p, |s: &mut App, id: &str| {
@@ -249,6 +266,31 @@ fn unlistened_albums(s: &App, p: &Palette) -> El {
         wall
     };
     col().key("unlistened-albums").w_full().gap(10.0).child(head).child(body)
+}
+
+/// The albums of a discovery tab other than Unlistened, as cards with a line of why each is
+/// listed. The tab's empty line says why there's nothing.
+fn discover_wall(s: &App, tab: Tab, p: &Palette) -> El {
+    let albums = s.discover_albums(tab);
+    let key = format!("discover-{}", tab.id());
+    if albums.is_empty() {
+        return text(discover_empty(tab)).key(format!("{key}-empty")).font(BODY).color(p.tx3);
+    }
+    let mut wall = row().key(format!("{key}-wall")).w_full().gap(CARD_GAP).flex_wrap();
+    for &o in albums.iter() {
+        wall = wall.child(small_card(s, &key, o, true, CARD_W, p));
+    }
+    wall
+}
+
+/// Why a discovery tab has no albums.
+fn discover_empty(tab: Tab) -> String {
+    match tab {
+        Tab::Unlistened => "Every album has been played.".into(),
+        Tab::Continue => "No album is part way through yet.".into(),
+        Tab::Rediscover => format!("No album has {} plays and was last played more than {} days ago.", crate::discover::REDISCOVER_PLAYS, crate::discover::REDISCOVER_DAYS),
+        Tab::New => format!("No album was added in the last {} days.", crate::discover::NEW_DAYS),
+    }
 }
 
 /// A section's title over a muted line saying why it's empty.

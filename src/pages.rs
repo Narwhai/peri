@@ -62,6 +62,8 @@ pub struct Pages {
     /// Keyed by the library's data version, the window and the day, which is what the windows
     /// count back from.
     pub top: Memo<(u64, crate::top::Window, i64), TopModel>,
+    /// Keyed like `top`: each discovery tab's albums.
+    pub discover: Memo<(u64, crate::discover::Tab, i64), Vec<usize>>,
     /// Keyed like `top`.
     pub people: Memo<(u64, crate::top::Window, i64), Vec<crate::people::RoleBoard>>,
     /// Keyed by the library's data version, the order and the Random seed.

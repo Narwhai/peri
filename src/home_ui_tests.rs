@@ -686,3 +686,65 @@ fn the_people_block_follows_the_window() {
     click(&mut rt, "all");
     assert!(has(&rt, "people"), "all time shows them");
 }
+
+#[test]
+fn the_discovery_block_opens_on_unlistened_with_its_order_control() {
+    let rt = runtime();
+    assert_eq!(rt.state.discover, crate::discover::Tab::Unlistened, "Unlistened unless chosen");
+    assert!(has(&rt, "discover"), "the block shows");
+    assert!(has(&rt, "unlistened-albums"), "the Unlistened tab keeps its albums");
+    assert!(has(&rt, "unlistened-order"), "and its order control");
+    assert!(has(&rt, "discover-tab"), "the tab switch shows");
+}
+
+#[test]
+fn each_discovery_tab_shows_its_albums_or_says_why_there_are_none() {
+    let mut rt = unplayed_home();
+    click(&mut rt, "continue");
+    assert_eq!(rt.state.discover, crate::discover::Tab::Continue);
+    assert_eq!(text_of(&rt, "discover-continue-empty"), "No album is part way through yet.", "nothing started yet");
+    click(&mut rt, "rediscover");
+    assert_eq!(text_of(&rt, "discover-rediscover-empty"), "No album has 5 plays and was last played more than 60 days ago.");
+    click(&mut rt, "new");
+    assert!(has(&rt, "discover-new-wall") || has(&rt, "discover-new-empty"), "the New tab shows one or the other");
+    click(&mut rt, "unlistened");
+    assert!(has(&rt, "unlistened-albums-wall"), "back on Unlistened, its albums are back");
+}
+
+#[test]
+fn a_discovery_tab_is_remembered_across_launches() {
+    let dir = std::env::temp_dir().join(format!("peri-discover-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let file = dir.join("prefs.json");
+    let mut app = App::new(Output::Silent, Store::at(&file));
+    app.set_library(crate::demo_tracks(), false);
+    app.show_home();
+    let mut rt = Runtime::new(app, view, (1200.0, 1600.0), Env::new(true, 1.0));
+    rt.frame(0.0);
+    settle(&mut rt);
+    click(&mut rt, "rediscover");
+    assert_eq!(App::new(Output::Silent, Store::at(&file)).discover, crate::discover::Tab::Rediscover, "the tab is saved");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_unlistened_album_moves_to_continue_once_part_of_it_plays() {
+    let mut rt = unplayed_home();
+    let album_songs: Vec<usize> = {
+        let albums = rt.state.albums();
+        let big = albums.iter().max_by_key(|a| a.tracks.len()).expect("albums");
+        big.tracks.clone()
+    };
+    assert!(album_songs.len() >= 2, "the demo has an album with several songs");
+    let first = album_songs[0];
+    let title = rt.state.albums()[rt.state.album_of(first).expect("its album")].title.clone();
+    let now = crate::listen::unix_now().expect("the clock");
+    rt.update(move |s, _| {
+        let _ = s.record_play(first, now - 60);
+    });
+    settle(&mut rt);
+    click(&mut rt, "continue");
+    let shown = rt.state.discover_albums(crate::discover::Tab::Continue);
+    let titles: Vec<String> = shown.iter().map(|&a| rt.state.albums()[a].title.clone()).collect();
+    assert!(titles.contains(&title), "a part-played album is in Continue: {titles:?}");
+}

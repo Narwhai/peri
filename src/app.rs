@@ -250,6 +250,8 @@ pub struct App {
     pub unlistened_seed: u64,
     /// The window the Home leaderboards show, kept in the preferences.
     pub top_window: crate::top::Window,
+    /// The tab of the home page's discovery block, kept in the preferences.
+    pub discover: crate::discover::Tab,
     /// Album covers for cards and lists; `None` until setup has a waker.
     pub covers: Option<Covers>,
     /// Indices into `tracks` the active view shows, in play order. In an album view,
@@ -413,6 +415,10 @@ impl App {
             Ok(order) => (order, None),
             Err(e) => (UnlistenedOrder::default(), Some(e)),
         };
+        let (discover, discover_error) = match store.load_discover() {
+            Ok(tab) => (tab, None),
+            Err(e) => (crate::discover::Tab::default(), Some(e)),
+        };
         let (top_window, top_window_error) = match store.load_top_window() {
             Ok(window) => (window, None),
             Err(e) => (crate::top::Window::default(), Some(e)),
@@ -457,6 +463,7 @@ impl App {
             unlistened_order,
             unlistened_seed,
             top_window,
+            discover,
             covers: None,
             filtered: Vec::new(),
             shown_albums: Vec::new(),
@@ -511,7 +518,7 @@ impl App {
             volume_before_drag: None,
             shuffle: false,
             repeat: Repeat::Off,
-            error: relations_error.clone().or(lastfm_error).or(plays_error).or(graph_error).or(tab_error).or(theme_error).or(appearance_error).or(unlistened_error).or(top_window_error).or(queue_error).or(queue_replace_error).or(queue_pinned_error),
+            error: relations_error.clone().or(lastfm_error).or(plays_error).or(graph_error).or(tab_error).or(theme_error).or(appearance_error).or(unlistened_error).or(top_window_error).or(discover_error).or(queue_error).or(queue_replace_error).or(queue_pinned_error),
             scan: None,
             drop_hover: false,
             details: None,
@@ -902,6 +909,18 @@ impl App {
         })
     }
 
+    /// A discovery tab's albums, kept like `top_model`. Unlistened is `unlistened_albums`.
+    pub fn discover_albums(&self, tab: crate::discover::Tab) -> Rc<Vec<usize>> {
+        let now = unix_now().unwrap_or(0);
+        let key = (self.data_version, tab, now / 86_400);
+        self.pages.discover.get(key, || match tab {
+            crate::discover::Tab::Unlistened => self.unlistened(self.unlistened_order, self.unlistened_seed),
+            crate::discover::Tab::Continue => crate::discover::continuing(&self.albums, &self.tracks),
+            crate::discover::Tab::Rediscover => crate::discover::rediscover(&self.albums, now),
+            crate::discover::Tab::New => crate::discover::new_this_month(&self.albums, now),
+        })
+    }
+
     /// The credits leaderboards for the chosen window, kept like `top_model`.
     pub fn people_model(&self) -> Rc<Vec<crate::people::RoleBoard>> {
         let now = unix_now().unwrap_or(0);
@@ -1200,6 +1219,14 @@ impl App {
     pub fn set_unlistened_order(&mut self, order: UnlistenedOrder) {
         self.unlistened_order = order;
         if let Err(e) = self.store.save_unlistened_order(order) {
+            self.error = Some(e);
+        }
+    }
+
+    /// Chooses the discovery tab and saves it. A failed save shows as an error.
+    pub fn set_discover(&mut self, tab: crate::discover::Tab) {
+        self.discover = tab;
+        if let Err(e) = self.store.save_discover(tab) {
             self.error = Some(e);
         }
     }

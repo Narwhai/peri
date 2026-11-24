@@ -22,6 +22,7 @@ const APPEARANCE_KEY: &str = "appearance";
 const THEME_KEY: &str = "theme";
 const UNLISTENED_ORDER_KEY: &str = "unlistened_order";
 const TOP_WINDOW_KEY: &str = "top_window";
+const DISCOVER_KEY: &str = "discover";
 const QUEUE_REPLACE_KEY: &str = "queue_replace";
 const QUEUE_PINNED_KEY: &str = "queue_pinned";
 /// The play queue's file, beside the preferences.
@@ -298,6 +299,18 @@ impl Store {
 
     pub fn save_top_window(&mut self, window: crate::top::Window) -> Result<(), String> {
         self.prefs.set(TOP_WINDOW_KEY, &window).map_err(|e| format!("Couldn't save the top window: {e}"))
+    }
+
+    /// The discovery tab; Unlistened when unset, an error when unreadable.
+    pub fn load_discover(&self) -> Result<crate::discover::Tab, String> {
+        if !self.prefs.contains(DISCOVER_KEY) {
+            return Ok(crate::discover::Tab::default());
+        }
+        self.prefs.get(DISCOVER_KEY).ok_or_else(|| format!("Couldn't read \"{DISCOVER_KEY}\" in the preferences"))
+    }
+
+    pub fn save_discover(&mut self, tab: crate::discover::Tab) -> Result<(), String> {
+        self.prefs.set(DISCOVER_KEY, &tab).map_err(|e| format!("Couldn't save the discovery tab: {e}"))
     }
 
     /// The theme; Bolis when unset, an error when unreadable.

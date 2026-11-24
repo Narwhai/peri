@@ -12,6 +12,7 @@ mod covers;
 mod pages;
 mod collab;
 mod credits;
+mod discover;
 mod details;
 mod graph;
 mod icons;
