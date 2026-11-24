@@ -921,6 +921,11 @@ impl App {
         })
     }
 
+    /// The genre and decade shares, kept until the library changes.
+    pub fn mix_model(&self) -> Rc<(crate::mix::Mix, crate::mix::Mix)> {
+        self.pages.mix.get(self.data_version, || (crate::mix::genres(&self.tracks), crate::mix::decades(&self.tracks)))
+    }
+
     /// The heatmap and streaks, from every play, in the local time zone. Kept by the library, the
     /// offset and the day.
     pub fn activity(&self) -> Rc<crate::activity::Activity> {

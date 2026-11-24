@@ -32,6 +32,7 @@ pub(super) fn home_page(s: &App, p: &Palette) -> El {
         .child(top_block(s, p))
         .child(people_block(s, p))
         .child(activity_block(s, p))
+        .child(mix_block(s, p))
         .child(recent_albums(s, p))
         .child(recent_songs(s, p))
         .child(discovery_block(s, p));
@@ -66,6 +67,42 @@ fn top_block(s: &App, p: &Palette) -> El {
     });
     let columns = row().key("top-columns").w_full().gap(24.0).flex_wrap().child(artists).child(albums).child(songs);
     col().key("top").w_full().gap(10.0).child(head).child(columns)
+}
+
+/// The mix block: the genres and the decades as two bar lists side by side, wrapping on narrow
+/// widths. Each says whether its shares are of the plays or of the library.
+fn mix_block(s: &App, p: &Palette) -> El {
+    let mixes = s.mix_model();
+    let genres = bar_list("mix-genres", "Genres", &mixes.0, p);
+    let decades = bar_list("mix-decades", "Decades", &mixes.1, p);
+    let body = row().key("mix-columns").w_full().gap(24.0).flex_wrap().child(genres).child(decades);
+    col().key("mix").w_full().gap(10.0).child(text("What it sounds like").font(HEADING).color(p.tx)).child(body)
+}
+
+/// One bar list: a heading that says whether its shares are of the plays or the library, then a
+/// bar per name, its width its share of the whole. A list with no songs says so.
+fn bar_list(key: &str, title: &str, mix: &crate::mix::Mix, p: &Palette) -> El {
+    let source = match mix.source {
+        crate::mix::Source::Plays => "of plays",
+        crate::mix::Source::Library => "of the library (nothing played yet)",
+    };
+    let mut list = col().key(key.to_string()).grow(1.0).min_w(260.0).gap(6.0).child(text(format!("{title}, {source}")).key(format!("{key}-title")).font(SMALL).color(p.tx3));
+    if mix.bars.is_empty() {
+        return list.child(text(format!("No {} yet.", title.to_lowercase())).key(format!("{key}-empty")).font(BODY).color(p.tx3));
+    }
+    for (n, bar) in mix.bars.iter().enumerate() {
+        let track = el().key(format!("{key}-track{n}")).w_full().h(8.0).radius(4.0).fill(p.ui.alpha(0.35)).child(el().key(format!("{key}-bar{n}")).w_frac(bar.share as f32).h(8.0).radius(4.0).fill(p.accent));
+        list = list.child(
+            row()
+                .w_full()
+                .gap(8.0)
+                .items_center()
+                .child(text(bar.name.clone()).font(SMALL).color(p.tx).min_w(90.0).truncate())
+                .child(track.grow(1.0).min_w(0.0))
+                .child(text(format!("{:.0}%", bar.share * 100.0)).font(SMALL).color(p.tx3)),
+        );
+    }
+    list
 }
 
 /// The activity block: the heatmap of plays per day over the last weeks, with the current and

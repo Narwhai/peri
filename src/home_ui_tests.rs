@@ -10,7 +10,8 @@ use crate::view::view;
 
 /// The demo library with `last_played` set on some songs, on the Home tab.
 fn runtime() -> Runtime<App> {
-    runtime_sized((1200.0, 900.0))
+    // Tall enough for the Home page's blocks, so the controls and cards a test clicks are on screen.
+    runtime_sized((1200.0, 1800.0))
 }
 
 /// `runtime` in a window `size` points big.
@@ -196,7 +197,7 @@ fn recently_added_cards_are_200_wide_and_the_strip_spans_the_page_body() {
 
 #[test]
 fn the_arrows_scroll_the_recently_added_strip_and_stop_at_its_ends() {
-    let mut rt = runtime_sized((640.0, 900.0));
+    let mut rt = runtime_sized((640.0, 1800.0));
     let first = rt.state.recently_added()[0];
     let card = format!("recent-albums{first}");
     let start = rect(&rt, &card)[0];
@@ -792,4 +793,42 @@ fn heatmap_cells_show_for_days_with_plays_and_are_keyed_by_day() {
     let today = crate::listen::unix_now().expect("the clock") / 86_400;
     assert!(has(&rt, &format!("activity-day-{today}")), "today has a cell");
     assert!(has(&rt, &format!("activity-day-{}", today - 2)), "a day with plays has a cell");
+}
+
+#[test]
+fn the_mix_shows_genres_and_decades_labelled_by_their_source() {
+    let mut rt = unplayed_home();
+    assert!(has(&rt, "mix"), "the block shows");
+    assert_eq!(text_of(&rt, "mix-genres-title"), "Genres, of the library (nothing played yet)", "the library's share with no plays");
+    assert!(has(&rt, "mix-genres-bar0"), "a bar per genre");
+    let now = crate::listen::unix_now().expect("the clock");
+    play_all_at(&mut rt, now - 60);
+    assert_eq!(text_of(&rt, "mix-genres-title"), "Genres, of plays", "plays once there are some");
+    assert_eq!(text_of(&rt, "mix-decades-title"), "Decades, of plays");
+}
+
+#[test]
+fn a_mix_with_no_songs_says_so() {
+    let mut rt = unplayed_home();
+    rt.update(|s, _| s.set_library(Vec::new(), false));
+    settle(&mut rt);
+    assert_eq!(text_of(&rt, "mix-genres-empty"), "No genres yet.");
+    assert_eq!(text_of(&rt, "mix-decades-empty"), "No decades yet.");
+    assert!(!has(&rt, "mix-genres-bar0"));
+}
+
+
+#[test]
+fn the_mix_follows_the_plays_and_its_bars_are_proportional() {
+    let mut rt = unplayed_home();
+    let now = crate::listen::unix_now().expect("the clock");
+    rt.update(move |s, _| {
+        let _ = s.record_play(0, now - 60);
+    });
+    settle(&mut rt);
+    let mix = rt.state.mix_model();
+    let top = mix.0.bars.first().expect("the played song has a genre");
+    assert_eq!(top.share, 1.0, "the only played song's genre has all the plays");
+    assert!(has(&rt, "mix-genres-bar0"));
+    assert!((rect(&rt, "mix-genres-bar0")[2] - rect(&rt, "mix-genres-track0")[2]).abs() < 1.0, "a full bar fills its track");
 }

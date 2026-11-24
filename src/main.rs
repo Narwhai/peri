@@ -21,6 +21,7 @@ mod label;
 mod lastfm;
 mod library;
 mod listen;
+mod mix;
 mod palette;
 mod people;
 mod plays;
