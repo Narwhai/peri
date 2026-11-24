@@ -368,6 +368,12 @@ pub struct App {
     listen: Option<Listen>,
     /// The artist graph, built when its tab first shows.
     pub graph: crate::graph::state::Graph,
+    /// Pictures the user gave artists; their pages show the first album's cover without one.
+    pub pictures: crate::pictures::ArtistPictures,
+    /// The artist picture's ✎ menu is open.
+    pub picture_menu: bool,
+    /// An image file is dragged over the artist picture.
+    pub picture_drop_hover: bool,
 }
 
 impl App {
@@ -388,6 +394,12 @@ impl App {
         };
         let stale_session = lastfm.as_ref().is_some_and(|s| s.session.is_some());
         let (plays, plays_error) = store.plays();
+        // Headless runs and tests never reach the network: a pasted link isn't downloaded.
+        let fetch: crate::pictures::Fetch = match output {
+            Output::Silent => std::sync::Arc::new(crate::pictures::no_downloads),
+            _ => std::sync::Arc::new(crate::pictures::download),
+        };
+        let (pictures, pictures_error) = crate::pictures::ArtistPictures::open(store.data_dir(), fetch);
         let (graph, graph_error) = match store.load_graph().and_then(crate::graph::state::Graph::new) {
             Ok(g) => (g, None),
             Err(e) => (crate::graph::state::Graph::with(None, 0), Some(e)),
@@ -503,9 +515,12 @@ impl App {
             volume_before_drag: None,
             shuffle: false,
             repeat: Repeat::Off,
-            error: relations_error.clone().or(lastfm_error).or(plays_error).or(graph_error).or(tab_error).or(theme_error).or(appearance_error).or(unlistened_error).or(queue_error).or(queue_replace_error).or(queue_pinned_error),
+            error: relations_error.clone().or(lastfm_error).or(plays_error).or(graph_error).or(tab_error).or(theme_error).or(appearance_error).or(unlistened_error).or(queue_error).or(queue_replace_error).or(queue_pinned_error).or(pictures_error),
             scan: None,
             drop_hover: false,
+            pictures,
+            picture_menu: false,
+            picture_drop_hover: false,
             details: None,
             song_menu: None,
             output,
@@ -535,6 +550,7 @@ impl App {
         self.covers = Some(if matches!(self.output, Output::Silent) { Covers::synchronous(waker.clone()) } else { Covers::new(waker.clone()) });
         // Headless runs and tests never reach the network.
         if !matches!(self.output, Output::Silent) {
+            self.pictures.start(waker.clone());
             let wake = waker.clone();
             self.lastfm.set_client(lastfm::Client::spawn(move || wake()));
         }
@@ -987,6 +1003,67 @@ impl App {
         edited?;
         self.graph.invalidate();
         self.store.save_relations(&self.relations)
+    }
+
+    // Artist pictures
+
+    /// Whose picture the open artist page shows: its names (merged names included) and the
+    /// MusicBrainz ID their tags pair with one of them.
+    pub fn picture_target(&self) -> Option<crate::pictures::Target> {
+        let name = self.open_artist()?;
+        let model = self.artist_model(name, self.artist_with_aliases);
+        let names = model.0.names.clone();
+        let mbid = self.tracks.iter().flat_map(crate::credits::id_pairs).find(|(_, n)| names.iter().any(|m| m.eq_ignore_ascii_case(n))).map(|(id, _)| id.to_string());
+        Some(crate::pictures::Target { names, mbid })
+    }
+
+    /// Uses `input` as the open artist's picture; it shows once it's copied in.
+    pub fn set_artist_picture(&mut self, input: crate::pictures::Input) {
+        self.picture_menu = false;
+        let Some(target) = self.picture_target() else { return };
+        self.pictures.import(target, input);
+        self.finish_pictures();
+    }
+
+    /// Stores pictures that finished importing; true when any did.
+    pub fn finish_pictures(&mut self) -> bool {
+        let (finished, error) = self.pictures.finish();
+        if let Some(e) = error {
+            self.error = Some(e);
+        } else if finished {
+            self.error = None;
+        }
+        finished
+    }
+
+    /// The ✎ menu's Choose image…: a file picker for an image file.
+    pub fn choose_artist_picture(&mut self, tx: &mut Tx) {
+        self.picture_menu = false;
+        let options = FileDialogOptions { title: "Choose a picture".into(), ..Default::default() }.filter("Images", &crate::pictures::EXTENSIONS);
+        tx.open_file(options, |s: &mut App, result, _tx| match result {
+            Ok(Some(path)) => s.set_artist_picture(crate::pictures::Input::File(path)),
+            Ok(None) => {}
+            Err(e) => s.error = Some(format!("Couldn't open the file dialog: {e}")),
+        });
+    }
+
+    /// Paste image or link, and Ctrl+V on an artist page: an image, a copied image file or a
+    /// link to one.
+    pub fn paste_artist_picture(&mut self, content: &rune::ClipboardContent) {
+        self.picture_menu = false;
+        match crate::pictures::from_clipboard(content) {
+            Some(input) => self.set_artist_picture(input),
+            None => self.error = Some("The clipboard holds no image, image file or link to paste as the picture".into()),
+        }
+    }
+
+    /// The ✎ menu's Remove picture: the album cover shows again.
+    pub fn remove_artist_picture(&mut self) {
+        self.picture_menu = false;
+        let Some(target) = self.picture_target() else { return };
+        if let Err(e) = self.pictures.remove(&target.names) {
+            self.error = Some(e);
+        }
     }
 
     /// Links the open artist to `other` as the popover's choice says, closing it on success.
@@ -2270,6 +2347,8 @@ pub fn poll(s: &mut App, now: f64, tx: &mut Tx) -> bool {
     if let Some(covers) = &s.covers {
         changed |= covers.drain();
     }
+    changed |= s.pictures.drain();
+    changed |= s.finish_pictures();
     if s.playing {
         let (finished, position) = s.engine().map_or((false, None), |e| (e.finished(), e.position()));
         if finished {

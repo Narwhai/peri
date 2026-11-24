@@ -20,6 +20,7 @@ mod lastfm;
 mod library;
 mod listen;
 mod palette;
+mod pictures;
 mod plays;
 mod queue;
 mod relations;

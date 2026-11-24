@@ -137,6 +137,11 @@ impl Store {
         }
     }
 
+    /// The folder the preferences are in, where Peri keeps its other data; none when they're in memory.
+    pub fn data_dir(&self) -> Option<std::path::PathBuf> {
+        self.prefs.path().and_then(|p| p.parent()).map(std::path::Path::to_path_buf)
+    }
+
     /// The play queue file, beside the preferences; none when they're in memory.
     fn queue_file(&self) -> Option<std::path::PathBuf> {
         self.prefs.path().and_then(|p| p.parent()).map(|dir| dir.join(QUEUE_FILE))
