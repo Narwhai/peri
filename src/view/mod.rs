@@ -103,7 +103,12 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     queue::replace_dialog(s, &p, &kit, &mut layer);
     song_menu::song_menu(s, &kit, zoom, &mut layer);
     layer.extend(zoom_toast(s, zoom, &p));
-    zoomed(window, zoom, &p, rune_kit::root(body, layer))
+    let root = zoomed(window, zoom, &p, rune_kit::root(body, layer));
+    // Ctrl+V on an artist page, outside a field, pastes their picture.
+    match s.open_artist() {
+        Some(_) => root.on_paste_content(|s: &mut App, content, _tx| s.paste_artist_picture(content)),
+        None => root,
+    }
 }
 
 /// The page between the header and the player bar. Pinned, the queue panel docks beside it;

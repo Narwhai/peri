@@ -2,7 +2,7 @@
 //! that credit them, and related artists. The search page shows the same sections for the artist it finds.
 
 use rune::{Cursor, El, ScrollSpec, col, el, icon, row, text};
-use rune_kit::{Kit, Placement, TextInput, popover, scrim};
+use rune_kit::{Kit, Menu, MenuItem, Placement, TextInput, popover, scrim};
 
 use super::albums::{album_strip, back_label, cover, cover_image, play_button, secondary_button, song_cover, tinted_button};
 use super::table;
@@ -45,7 +45,7 @@ pub(super) fn artist_page(s: &App, name: &str, p: &Palette, kit: &Kit, layer: &m
         .on_press_tx(|s: &mut App, tx| s.go_back(tx))
         .child(icon(&icons::BACK, 16.0).color(p.tx2))
         .child(text(back_label(s)).font(TITLE).color(p.tx2));
-    let mut body = col().key("artist-page-body").w_full().px(28.0).py(16.0).gap(22.0).child(back).child(head(s, info, others, Some(link_artist(s, info, p, kit, layer)), p));
+    let mut body = col().key("artist-page-body").w_full().px(28.0).py(16.0).gap(22.0).child(back).child(head(s, info, others, Some(link_artist(s, info, p, kit, layer)), Some(editable_picture(s, info, p, kit, layer)), p));
     if info.is_empty() {
         body = body.child(text(format!("Nothing in the library is by or credits {}.", info.name)).key("artist-empty").font(BODY).color(p.tx3));
     }
@@ -153,12 +153,11 @@ pub(super) fn release_strips(s: &App, key: &str, albums: &[usize], artists: bool
         .collect()
 }
 
-/// Picture (the first album's cover), name, counts, Play. On their page `link` is the Link
-/// artist button; in search results (`None`) the name and picture open the artist's page.
-pub(super) fn head(s: &App, info: &ArtistPage, others: &[(Relation, ArtistPage)], link: Option<El>, p: &Palette) -> El {
+/// Picture, name, counts, Play. On their page `link` is the Link artist button and `art` the
+/// picture they can change; in search results (`None`) the name and picture open the artist's page.
+pub(super) fn head(s: &App, info: &ArtistPage, others: &[(Relation, ArtistPage)], link: Option<El>, art: Option<El>, p: &Palette) -> El {
     let linked = link.is_none();
-    let first = info.albums.first().copied().or_else(|| info.appears_on.first().and_then(|&i| s.album_of(i)));
-    let mut art = cover("artist-cover".into(), first.and_then(|a| cover_image(s, &s.albums()[a])), Some(160.0), p);
+    let mut art = art.unwrap_or_else(|| picture(s, info, p));
     let mut counts = Vec::new();
     for kind in ReleaseType::ALL {
         let n = info.albums.iter().filter(|&&a| s.albums()[a].release_type == kind).count();
@@ -235,6 +234,82 @@ pub(super) fn head(s: &App, info: &ArtistPage, others: &[(Relation, ArtistPage)]
     }
     details = details.child(el().h(10.0)).child(buttons);
     row().gap(28.0).center_y().child(art).child(details)
+}
+
+const PICTURE_PX: f32 = 160.0;
+const PICTURE_EDIT_PX: f32 = 28.0;
+
+/// The picture the user gave the artist, else their first album's cover. Keyed `artist-cover`.
+fn picture(s: &App, info: &ArtistPage, p: &Palette) -> El {
+    let image = s.pictures.get(&info.names).or_else(|| {
+        let first = info.albums.first().copied().or_else(|| info.appears_on.first().and_then(|&i| s.album_of(i)));
+        first.and_then(|a| cover_image(s, &s.albums()[a]))
+    });
+    cover("artist-cover".into(), image, Some(PICTURE_PX), p)
+}
+
+/// The picture on the artist's own page: an image file dropped on it becomes their picture,
+/// and its ✎ menu (shown on hover) chooses, pastes or removes one. Wayland gets no drops, so
+/// the menu does everything a drop does. Keyed `artist-picture`.
+fn editable_picture(s: &App, info: &ArtistPage, p: &Palette, kit: &Kit, layer: &mut Vec<El>) -> El {
+    let has = s.pictures.has(&info.names);
+    let busy = s.pictures.importing(&info.names);
+    let button = el()
+        .key("artist-picture-edit")
+        .size(PICTURE_EDIT_PX, PICTURE_EDIT_PX)
+        .radius(PICTURE_EDIT_PX / 2.0)
+        .center()
+        .fill(p.bg.alpha(0.85))
+        .hover(p.ui)
+        .hover_alone()
+        .group_opacity(if s.picture_menu { 1.0 } else { 0.0 }, 1.0)
+        .cursor(Cursor::Pointer)
+        .role("button")
+        .label("Change picture")
+        .help("Change picture")
+        .focusable(true)
+        .on_press(|s: &mut App| s.picture_menu = !s.picture_menu)
+        .child(icon(&icons::EDIT, 15.0).color(p.tx));
+    let menu = Menu::new("artist-picture")
+        .trigger(button)
+        .open(s.picture_menu)
+        .item(MenuItem::new("Choose image…").on_select_tx(|s: &mut App, tx: &mut rune::Tx| s.choose_artist_picture(tx)))
+        .item(MenuItem::new("Paste image or link").shortcut("Ctrl+V").on_select_tx(|s: &mut App, tx: &mut rune::Tx| {
+            s.picture_menu = false;
+            tx.read_clipboard(|s: &mut App, content, _| s.paste_artist_picture(content));
+        }))
+        .separator()
+        .item(MenuItem::new("Remove picture").danger(true).disabled(!has).on_select(|s: &mut App| s.remove_artist_picture()))
+        .on_close(|s: &mut App| s.picture_menu = false)
+        .build(kit, layer);
+    let mut art = el()
+        .key("artist-picture")
+        .size(PICTURE_PX, PICTURE_PX)
+        .hover_group()
+        .child(picture(s, info, p))
+        .on_drop_files(|s: &mut App, files, _tx| {
+            s.picture_drop_hover = false;
+            if let Some(file) = files.first() {
+                s.set_artist_picture(crate::pictures::Input::File(file.clone()));
+            }
+        })
+        .accepts_files(crate::pictures::is_image)
+        .on_drop_hover(|s: &mut App, over, _tx| s.picture_drop_hover = over);
+    if s.picture_drop_hover {
+        art = art.child(
+            el().key("artist-picture-drop")
+                .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
+                .border(2.0, p.accent)
+                .fill(p.accent.alpha(0.18))
+                .center()
+                .padding(8.0)
+                .child(text("Drop to use as picture").font(SMALL).color(p.tx).wrap())
+                .inert(),
+        );
+    } else if busy {
+        art = art.child(el().key("artist-picture-busy").pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0)).fill(rune::Color::BLACK.alpha(0.35)).inert());
+    }
+    art.child(el().absolute(PICTURE_PX - PICTURE_EDIT_PX - 6.0, 6.0).child(menu))
 }
 
 /// Their albums' pills, one row per album with credits on it.

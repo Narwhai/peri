@@ -42,6 +42,8 @@ mod home_ui_tests;
 #[cfg(test)]
 mod label_ui_tests;
 #[cfg(test)]
+mod picture_ui_tests;
+#[cfg(test)]
 mod queue_panel_ui_tests;
 #[cfg(test)]
 mod queue_ui_tests;
