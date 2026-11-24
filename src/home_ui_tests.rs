@@ -301,7 +301,8 @@ fn recently_played_ties_break_by_library_order_and_never_played_songs_are_left_o
 
 #[test]
 fn double_clicking_a_recently_played_song_plays_the_list_from_it() {
-    let mut rt = runtime();
+    // Taller than the stats, top and people blocks, so the Recently Played rows are on screen.
+    let mut rt = runtime_sized((1200.0, 1800.0));
     let eta = track(&rt, "ETA");
     double_click(&mut rt, &format!("recent-songs-t{eta}"));
     assert_eq!(rt.state.current, Some(eta));
@@ -628,4 +629,60 @@ fn a_top_artist_or_album_row_opens_its_page() {
     let album = rt.state.top_model().albums[0].item;
     click(&mut rt, "top-album0");
     assert_eq!(rt.state.open_album(), Some(album), "the album opens");
+}
+
+/// A fresh library with the demo's songs and no plays: the demo's are stamped in 2027, after
+/// today, so they'd count in every window.
+fn unplayed_home() -> Runtime<App> {
+    let mut app = App::new(Output::Silent, Store::memory());
+    app.set_library(crate::demo_tracks(), false);
+    app.show_home();
+    let mut rt = Runtime::new(app, view, (1200.0, 1600.0), Env::new(true, 1.0));
+    rt.frame(0.0);
+    settle(&mut rt);
+    rt
+}
+
+/// Plays every song of `rt`'s library once, `at` seconds since the epoch.
+fn play_all_at(rt: &mut Runtime<App>, at: i64) {
+    let count = rt.state.tracks().len();
+    rt.update(move |s, _| {
+        for i in 0..count {
+            let _ = s.record_play(i, at);
+        }
+    });
+    settle(rt);
+}
+
+#[test]
+fn the_people_block_lists_credited_names_by_role_and_links_them() {
+    let mut rt = unplayed_home();
+    assert_eq!(text_of(&rt, "people-empty"), "No credited names played in the window.", "no plays, no names");
+    // Credit the first song, then play it: the names it carries are the ones listed.
+    rt.update(|s, _| s.edit_track(0, |t| t.credits = vec![crate::credits::Credit::parse(crate::credits::Role::Producer, "Kenny Segal")]));
+    let now = crate::listen::unix_now().expect("the clock");
+    rt.update(move |s, _| {
+        let _ = s.record_play(0, now - 60);
+    });
+    settle(&mut rt);
+    let boards = rt.state.people_model();
+    assert!(!boards.is_empty(), "the played song's credits are counted");
+    assert!(has(&rt, "people"), "the block shows");
+    assert!(!has(&rt, "people-empty"));
+    let first = "Kenny Segal".to_string();
+    let key = "people-producer-0".to_string();
+    assert!(has(&rt, &key), "the producer's name shows");
+    click(&mut rt, &key);
+    assert_eq!(rt.state.open_artist(), Some(first.as_str()), "a name opens its artist's page");
+}
+
+#[test]
+fn the_people_block_follows_the_window() {
+    let mut rt = unplayed_home();
+    let year_ago = crate::listen::unix_now().expect("the clock") - 365 * 86_400;
+    play_all_at(&mut rt, year_ago);
+    click(&mut rt, "7");
+    assert_eq!(text_of(&rt, "people-empty"), "No credited names played in the window.", "a year-old play isn't in 7 days");
+    click(&mut rt, "all");
+    assert!(has(&rt, "people"), "all time shows them");
 }

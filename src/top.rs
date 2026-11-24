@@ -102,7 +102,7 @@ fn rank<T: Clone + Eq + std::hash::Hash>(counts: impl IntoIterator<Item = T>) ->
 
 /// The play counts of each song in the window: all time reads the tallies, a window reads the
 /// events since its start. Returns (library song, plays) for every song with plays.
-fn song_plays(tracks: &[Track], plays: &Plays, window: Window, now: i64) -> Vec<(usize, u32)> {
+pub(crate) fn song_plays(tracks: &[Track], plays: &Plays, window: Window, now: i64) -> Vec<(usize, u32)> {
     match window.since(now) {
         None => tracks
             .iter()

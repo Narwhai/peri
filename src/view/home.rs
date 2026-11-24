@@ -29,6 +29,7 @@ pub(super) fn home_page(s: &App, p: &Palette) -> El {
         .gap(28.0)
         .child(stats_strip(s, p))
         .child(top_block(s, p))
+        .child(people_block(s, p))
         .child(recent_albums(s, p))
         .child(recent_songs(s, p))
         .child(unlistened_albums(s, p));
@@ -63,6 +64,39 @@ fn top_block(s: &App, p: &Palette) -> El {
     });
     let columns = row().key("top-columns").w_full().gap(24.0).flex_wrap().child(artists).child(albums).child(songs);
     col().key("top").w_full().gap(10.0).child(head).child(columns)
+}
+
+/// The people behind the music: each role's top names over the chosen window, one row per role
+/// with its names as chips. Roles nobody has played on are left out.
+fn people_block(s: &App, p: &Palette) -> El {
+    let boards = s.people_model();
+    if boards.is_empty() {
+        return col().key("people").w_full().gap(10.0).child(text("The people behind your music").font(HEADING).color(p.tx)).child(text("No credited names played in the window.").key("people-empty").font(BODY).color(p.tx3));
+    }
+    let mut body = col().key("people-roles").w_full().gap(8.0);
+    for board in boards.iter() {
+        let mut chips = row().w_full().gap(6.0).flex_wrap().items_center().child(text(board.role.label().to_string()).font(SMALL).color(p.tx3).min_w(90.0));
+        for (n, r) in board.names.iter().enumerate() {
+            let name = r.item.clone();
+            chips = chips.child(
+                row()
+                    .key(format!("people-{}-{n}", board.role.label().to_lowercase().replace(' ', "-")))
+                    .h(24.0)
+                    .px(10.0)
+                    .radius(12.0)
+                    .center_y()
+                    .fill(p.ui.alpha(0.45))
+                    .hover(p.ui.alpha(0.8))
+                    .cursor(Cursor::Pointer)
+                    .role("link")
+                    .label(name.clone())
+                    .on_press_tx(move |s: &mut App, tx| s.show_artist(&name, tx))
+                    .child(text(format!("{}  {}", r.item, r.plays)).font(SMALL).color(p.tx)),
+            );
+        }
+        body = body.child(chips);
+    }
+    col().key("people").w_full().gap(10.0).child(text("The people behind your music").font(HEADING).color(p.tx)).child(body)
 }
 
 /// One leaderboard row: its name and its plays.

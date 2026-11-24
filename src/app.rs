@@ -902,6 +902,13 @@ impl App {
         })
     }
 
+    /// The credits leaderboards for the chosen window, kept like `top_model`.
+    pub fn people_model(&self) -> Rc<Vec<crate::people::RoleBoard>> {
+        let now = unix_now().unwrap_or(0);
+        let key = (self.data_version, self.top_window, now / 86_400);
+        self.pages.people.get(key, || crate::people::boards(&self.tracks, &self.plays, self.top_window, now))
+    }
+
     /// The library's totals for the stats strip, kept until the library changes.
     pub fn totals(&self) -> Rc<Totals> {
         self.pages.totals.get(self.data_version, || Totals::of(&self.tracks, &self.albums))
