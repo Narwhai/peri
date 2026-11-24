@@ -896,7 +896,6 @@ impl App {
         self.pages.recent_albums.get(self.data_version, || self.recently_added())
     }
 
-    /// `recently_played`, kept until the library changes.
     /// The Home leaderboards for the chosen window, kept until the library, the relations, the
     /// window or the day changes.
     pub fn top_model(&self) -> Rc<TopModel> {
@@ -950,6 +949,7 @@ impl App {
         self.pages.totals.get(self.data_version, || Totals::of(&self.tracks, &self.albums))
     }
 
+    /// `recently_played`, kept until the library changes.
     pub fn recent_songs(&self) -> Rc<Vec<usize>> {
         self.pages.recent_songs.get(self.data_version, || self.recently_played())
     }
