@@ -13,6 +13,10 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 ureq = "3.5.1"
 
+# The local UTC offset for activity days, read from the system clock (see src/activity.rs).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 # Rune's vendored crates, patched as Rune's own workspace does; apps that build Rune patch them too.
 [patch.crates-io]
 wgpu-hal = { git = "https://github.com/Narwhai/rune", rev = "1e05a3b584184f5b1427e5a73bd312d56d0b6d14" }

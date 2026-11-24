@@ -62,6 +62,8 @@ pub struct Pages {
     /// Keyed by the library's data version, the window and the day, which is what the windows
     /// count back from.
     pub top: Memo<(u64, crate::top::Window, i64), TopModel>,
+    /// Keyed by the library's data version, the local offset and the day: the heatmap's days.
+    pub activity: Memo<(u64, i64, i64), crate::activity::Activity>,
     /// Keyed like `top`: each discovery tab's albums.
     pub discover: Memo<(u64, crate::discover::Tab, i64), Vec<usize>>,
     /// Keyed like `top`.

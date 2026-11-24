@@ -31,6 +31,7 @@ pub(super) fn home_page(s: &App, p: &Palette) -> El {
         .child(stats_strip(s, p))
         .child(top_block(s, p))
         .child(people_block(s, p))
+        .child(activity_block(s, p))
         .child(recent_albums(s, p))
         .child(recent_songs(s, p))
         .child(discovery_block(s, p));
@@ -65,6 +66,47 @@ fn top_block(s: &App, p: &Palette) -> El {
     });
     let columns = row().key("top-columns").w_full().gap(24.0).flex_wrap().child(artists).child(albums).child(songs);
     col().key("top").w_full().gap(10.0).child(head).child(columns)
+}
+
+/// The activity block: the heatmap of plays per day over the last weeks, with the current and
+/// longest streak. Under a few active days it says so instead.
+fn activity_block(s: &App, p: &Palette) -> El {
+    let a = s.activity();
+    let head = text("Activity").font(HEADING).color(p.tx);
+    if !a.enough() {
+        let line = "Play a few more days to see your activity here.";
+        return col().key("activity").w_full().gap(10.0).child(head).child(text(line).key("activity-empty").font(BODY).color(p.tx3));
+    }
+    let mut grid = row().key("activity-grid").gap(3.0);
+    for week in a.grid.iter() {
+        let mut column = col().gap(3.0);
+        for cell in week.iter() {
+            let (key, level) = match cell {
+                Some(c) => (format!("activity-day-{}", c.day), crate::activity::intensity(c.plays, a.busiest)),
+                None => (String::new(), 0),
+            };
+            let fill = if level == 0 { p.ui.alpha(0.25) } else { p.accent.alpha(0.25 * f32::from(level) + 0.1) };
+            let mut cellel = el().size(11.0, 11.0).radius(2.0).fill(fill);
+            if !key.is_empty() {
+                cellel = cellel.key(key);
+            }
+            column = column.child(cellel);
+        }
+        grid = grid.child(column);
+    }
+    let streaks = format!("Current streak {} day{}  •  Longest {} day{}", a.streak.current, plural(a.streak.current), a.streak.longest, plural(a.streak.longest));
+    col()
+        .key("activity")
+        .w_full()
+        .gap(10.0)
+        .child(head)
+        .child(grid)
+        .child(text(streaks).key("activity-streaks").font(SMALL).color(p.tx3))
+}
+
+/// "s" unless `n` is 1.
+fn plural(n: u32) -> &'static str {
+    if n == 1 { "" } else { "s" }
 }
 
 /// The people behind the music: each role's top names over the chosen window, one row per role
@@ -131,12 +173,19 @@ fn stats_strip(s: &App, p: &Palette) -> El {
         ("Artists", t.artists.to_string()),
         ("Hours", format!("{:.1}", t.hours())),
         ("Albums played", played),
+        ("Streak", streak_figure(s)),
     ];
     let mut strip = row().key("stats-tiles").w_full().gap(10.0);
     for (label, value) in tiles {
         strip = strip.child(stat_tile(label, &value, p));
     }
     col().key("stats").w_full().gap(10.0).child(text("Library").font(HEADING).color(p.tx)).child(strip)
+}
+
+/// The streak tile's figure: the current run, in days.
+fn streak_figure(s: &App) -> String {
+    let streak = s.activity().streak;
+    format!("{} day{}", streak.current, plural(streak.current))
 }
 
 /// A stats tile: its figure large, its label under it, on a faint panel.

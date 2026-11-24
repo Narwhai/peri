@@ -921,6 +921,18 @@ impl App {
         })
     }
 
+    /// The heatmap and streaks, from every play, in the local time zone. Kept by the library, the
+    /// offset and the day.
+    pub fn activity(&self) -> Rc<crate::activity::Activity> {
+        let now = unix_now().unwrap_or(0);
+        let offset = crate::activity::local_offset(now);
+        let key = (self.data_version, offset, now / 86_400);
+        self.pages.activity.get(key, || {
+            let times = self.plays.plays_since(&self.tracks, i64::MIN).into_iter().map(|(_, at)| at);
+            crate::activity::Activity::of(times, offset, now)
+        })
+    }
+
     /// The credits leaderboards for the chosen window, kept like `top_model`.
     pub fn people_model(&self) -> Rc<Vec<crate::people::RoleBoard>> {
         let now = unix_now().unwrap_or(0);

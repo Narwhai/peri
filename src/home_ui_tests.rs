@@ -481,7 +481,7 @@ fn unlistened_order_is_chosen_from_the_segmented_control_and_saved() {
     let mut app = App::new(Output::Silent, Store::at(&file));
     app.set_library(vec![album_track("Mid", Some(2005)), album_track("Late", Some(2010)), album_track("Early", Some(1990))], false);
     app.show_home();
-    let mut rt = Runtime::new(app, view, (1200.0, 900.0), Env::new(true, 1.0));
+    let mut rt = Runtime::new(app, view, (1200.0, 1800.0), Env::new(true, 1.0));
     rt.frame(0.0);
     settle(&mut rt);
     assert_eq!(rt.state.unlistened_order, UnlistenedOrder::Newest, "Newest unless chosen");
@@ -747,4 +747,49 @@ fn an_unlistened_album_moves_to_continue_once_part_of_it_plays() {
     let shown = rt.state.discover_albums(crate::discover::Tab::Continue);
     let titles: Vec<String> = shown.iter().map(|&a| rt.state.albums()[a].title.clone()).collect();
     assert!(titles.contains(&title), "a part-played album is in Continue: {titles:?}");
+}
+
+/// A fresh home page whose plays are `days_ago` days back from now, one at each of `times` per day.
+/// Each day's plays land on the demo's songs, at noon UTC so the local day is stable.
+fn home_with_play_days(days_ago: &[i64]) -> Runtime<App> {
+    let mut rt = unplayed_home();
+    let today = crate::listen::unix_now().expect("the clock") / 86_400;
+    let plays: Vec<i64> = days_ago.iter().map(|&d| (today - d) * 86_400 + 12 * 3600).collect();
+    rt.update(move |s, _| {
+        for (n, at) in plays.iter().enumerate() {
+            let _ = s.record_play(n % s.tracks().len(), *at);
+        }
+    });
+    settle(&mut rt);
+    rt
+}
+
+#[test]
+fn the_activity_block_shows_the_heatmap_and_streaks() {
+    let rt = home_with_play_days(&[0, 1, 2, 3, 10]);
+    assert!(has(&rt, "activity-grid"), "the grid shows with enough days");
+    assert_eq!(text_of(&rt, "activity-streaks"), "Current streak 4 days  •  Longest 4 days", "four days running to today");
+    assert!(has(&rt, "stat-streak"), "the streak tile shows in the stats strip");
+    assert_eq!(text_of(&rt, "stat-streak"), "4 days");
+}
+
+#[test]
+fn a_few_active_days_show_a_note_instead_of_the_heatmap() {
+    let rt = home_with_play_days(&[0, 5]);
+    assert!(!has(&rt, "activity-grid"), "two days aren't enough for a heatmap");
+    assert_eq!(text_of(&rt, "activity-empty"), "Play a few more days to see your activity here.");
+}
+
+#[test]
+fn a_lapsed_streak_is_not_current() {
+    let rt = home_with_play_days(&[10, 11, 12, 13]);
+    assert_eq!(text_of(&rt, "activity-streaks"), "Current streak 0 days  •  Longest 4 days");
+}
+
+#[test]
+fn heatmap_cells_show_for_days_with_plays_and_are_keyed_by_day() {
+    let rt = home_with_play_days(&[0, 1, 2]);
+    let today = crate::listen::unix_now().expect("the clock") / 86_400;
+    assert!(has(&rt, &format!("activity-day-{today}")), "today has a cell");
+    assert!(has(&rt, &format!("activity-day-{}", today - 2)), "a day with plays has a cell");
 }
