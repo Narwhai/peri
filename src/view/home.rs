@@ -1,5 +1,5 @@
-//! The home page: the newest albums as one strip of cards, the songs played last as a table, and
-//! the albums nobody has played as a grid.
+//! The home page: the library's totals as a strip of tiles, the newest albums as one strip of
+//! cards, the songs played last as a table, and the albums nobody has played as a grid.
 
 use rune::{Cursor, El, ScrollPos, ScrollSpec, Tx, col, el, icon, row, text};
 
@@ -27,10 +27,50 @@ pub(super) fn home_page(s: &App, p: &Palette) -> El {
         .px(28.0)
         .py(16.0)
         .gap(28.0)
+        .child(stats_strip(s, p))
         .child(recent_albums(s, p))
         .child(recent_songs(s, p))
         .child(unlistened_albums(s, p));
     col().key("home-page").w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: false }).child(body)
+}
+
+/// The stats strip: the library's totals as a row of tiles, each a figure over its label.
+fn stats_strip(s: &App, p: &Palette) -> El {
+    let t = s.totals();
+    if t.songs == 0 {
+        return section_empty("stats", "Library", "No songs in the library yet.", p);
+    }
+    let played = match t.played_share() {
+        Some(share) => format!("{:.0}%", share * 100.0),
+        None => "–".to_string(),
+    };
+    let tiles = [
+        ("Songs", t.songs.to_string()),
+        ("Albums", t.albums.to_string()),
+        ("Artists", t.artists.to_string()),
+        ("Hours", format!("{:.1}", t.hours())),
+        ("Albums played", played),
+    ];
+    let mut strip = row().key("stats-tiles").w_full().gap(10.0);
+    for (label, value) in tiles {
+        strip = strip.child(stat_tile(label, &value, p));
+    }
+    col().key("stats").w_full().gap(10.0).child(text("Library").font(HEADING).color(p.tx)).child(strip)
+}
+
+/// A stats tile: its figure large, its label under it, on a faint panel.
+fn stat_tile(label: &str, value: &str, p: &Palette) -> El {
+    let slug = label.to_lowercase().replace(' ', "-");
+    col()
+        .key(format!("stat-tile-{slug}"))
+        .grow(1.0)
+        .min_w(0.0)
+        .padding(12.0)
+        .gap(2.0)
+        .radius(6.0)
+        .fill(p.ui.alpha(0.35))
+        .child(text(value.to_string()).key(format!("stat-{slug}")).font(HEADING).color(p.tx).truncate())
+        .child(text(label.to_string()).font(SMALL).color(p.tx3).truncate())
 }
 
 /// Recently Added: the newest albums as one row of cards across the page, scrolling sideways

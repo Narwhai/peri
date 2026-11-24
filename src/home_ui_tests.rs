@@ -535,3 +535,27 @@ fn unlistened_says_so_once_every_album_has_been_played() {
     assert_eq!(text_of(&rt, "unlistened-albums-empty"), "Every album has been played.");
     assert!(!has(&rt, "unlistened-albums-wall"));
 }
+
+#[test]
+fn the_stats_strip_sits_above_recently_added_and_shows_the_totals() {
+    let rt = runtime();
+    let strip = rect(&rt, "stats");
+    let added = rect(&rt, "recent-albums");
+    assert!(strip[1] < added[1], "the strip is above Recently Added");
+    let totals = rt.state.totals();
+    assert_eq!(text_of(&rt, "stat-songs"), totals.songs.to_string(), "the Songs tile figure");
+    assert_eq!(text_of(&rt, "stat-albums"), totals.albums.to_string());
+    assert_eq!(text_of(&rt, "stat-artists"), totals.artists.to_string());
+    assert_eq!(text_of(&rt, "stat-hours"), format!("{:.1}", totals.hours()));
+    let share = totals.played_share().expect("the demo has albums");
+    assert_eq!(text_of(&rt, "stat-albums-played"), format!("{:.0}%", share * 100.0));
+}
+
+#[test]
+fn an_empty_library_says_so_in_the_stats_strip() {
+    let mut rt = runtime();
+    rt.update(|s, _| s.set_library(Vec::new(), false));
+    settle(&mut rt);
+    assert_eq!(text_of(&rt, "stats-empty"), "No songs in the library yet.");
+    assert!(!has(&rt, "stats-tiles"));
+}

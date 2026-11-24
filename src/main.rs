@@ -24,6 +24,7 @@ mod plays;
 mod queue;
 mod relations;
 mod search;
+mod stats;
 mod view;
 
 #[cfg(test)]

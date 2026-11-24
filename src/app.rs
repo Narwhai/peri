@@ -24,6 +24,7 @@ use crate::library::{self, ScanMsg, Track};
 use crate::listen::{Listen, unix_now};
 use crate::palette::{Appearance, Theme};
 use crate::plays::Plays;
+use crate::stats::Totals;
 use crate::queue::{Entry, Queue, QueueReplace, Repeat, Rng};
 
 /// How often the view refreshes the playback position while a track plays.
@@ -882,6 +883,11 @@ impl App {
     }
 
     /// `recently_played`, kept until the library changes.
+    /// The library's totals for the stats strip, kept until the library changes.
+    pub fn totals(&self) -> Rc<Totals> {
+        self.pages.totals.get(self.data_version, || Totals::of(&self.tracks, &self.albums))
+    }
+
     pub fn recent_songs(&self) -> Rc<Vec<usize>> {
         self.pages.recent_songs.get(self.data_version, || self.recently_played())
     }
