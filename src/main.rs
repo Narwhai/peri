@@ -25,6 +25,7 @@ mod queue;
 mod relations;
 mod search;
 mod stats;
+mod top;
 mod view;
 
 #[cfg(test)]

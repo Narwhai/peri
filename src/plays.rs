@@ -83,18 +83,20 @@ pub struct Plays {
     /// The log; `None` keeps plays in memory only (tests and headless runs).
     path: Option<PathBuf>,
     tally: HashMap<Key, Stats>,
+    /// Every play in the order it was recorded, for time windows.
+    events: Vec<(i64, Key)>,
 }
 
 impl Plays {
     /// Plays that live only as long as this value.
     pub fn memory() -> Plays {
-        Plays { path: None, tally: HashMap::new() }
+        Plays { path: None, tally: HashMap::new(), events: Vec::new() }
     }
 
     /// Reads the log at `path`, which need not exist yet. Lines that can't be read are skipped
     /// and reported in the error, which comes with the plays that could be read.
     pub fn open(path: PathBuf) -> (Plays, Option<String>) {
-        let mut plays = Plays { path: Some(path.clone()), tally: HashMap::new() };
+        let mut plays = Plays { path: Some(path.clone()), tally: HashMap::new(), events: Vec::new() };
         let text = match std::fs::read_to_string(&path) {
             Ok(text) => text,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (plays, None),
@@ -103,12 +105,30 @@ impl Plays {
         let mut bad = 0;
         for line in text.lines().filter(|l| !l.trim().is_empty()) {
             match serde_json::from_str::<Entry>(line) {
-                Ok(entry) => plays.tally.entry(entry.key()).or_default().add(entry.at),
+                Ok(entry) => plays.count(entry),
                 Err(_) => bad += 1,
             }
         }
         let error = (bad > 0).then(|| format!("Skipped {bad} unreadable line{} in {}", if bad == 1 { "" } else { "s" }, path.display()));
         (plays, error)
+    }
+
+    /// Tallies one play and keeps its event.
+    fn count(&mut self, entry: Entry) {
+        let key = entry.key();
+        self.tally.entry(key.clone()).or_default().add(entry.at);
+        self.events.push((entry.at, key));
+    }
+
+    /// Every play that counts in `tracks` at or after `since`, as the index of the first track
+    /// that is the played song and the play's time. Each play counts once, even when the song
+    /// has several copies in the library.
+    pub fn plays_since(&self, tracks: &[Track], since: i64) -> Vec<(usize, i64)> {
+        let mut first: HashMap<Key, usize> = HashMap::new();
+        for (i, t) in tracks.iter().enumerate() {
+            first.entry(key_of(t)).or_insert(i);
+        }
+        self.events.iter().filter(|(at, _)| *at >= since).filter_map(|(at, key)| first.get(key).map(|&i| (i, *at))).collect()
     }
 
     pub fn stats(&self, track: &Track) -> Stats {
@@ -128,7 +148,7 @@ impl Plays {
     /// the log can't be written.
     pub fn record(&mut self, track: &Track, at: i64) -> Result<(), String> {
         let entry = Entry::of(track, at);
-        self.tally.entry(entry.key()).or_default().add(at);
+        self.count(entry.clone());
         let Some(path) = &self.path else { return Ok(()) };
         append(path, &entry).map_err(|e| format!("Couldn't save the play of \u{201c}{}\u{201d} to {}: {e}", track.title, path.display()))
     }
@@ -213,6 +233,44 @@ mod tests {
         let b = track("/m/two.wav", None, "Untitled", None, None);
         plays.record(&a, 1).unwrap();
         assert_eq!((plays.stats(&a).count, plays.stats(&b).count), (1, 0));
+    }
+
+    #[test]
+    fn a_play_counts_once_in_a_window_and_goes_to_the_first_copy() {
+        let mut plays = Plays::memory();
+        let flac = track("/m/a/joga.flac", Some("Björk"), "Jóga", Some("Homogenic"), None);
+        let mp3 = track("/old/joga.mp3", Some("björk "), "JÓGA", Some("homogenic"), None);
+        let other = track("/m/other.flac", Some("Björk"), "Army", None, None);
+        let library = [other.clone(), flac.clone(), mp3.clone()];
+        plays.record(&mp3, 10).unwrap();
+        plays.record(&flac, 20).unwrap();
+        assert_eq!(plays.plays_since(&library, 0), vec![(1, 10), (1, 20)], "the first copy in library order takes both");
+        assert_eq!(plays.plays_since(&library, 15), vec![(1, 20)], "only plays at or after the window's start");
+    }
+
+    #[test]
+    fn events_follow_the_tally_and_unknown_songs_are_left_out() {
+        let mut plays = Plays::memory();
+        let joga = track("/m/joga.flac", Some("Björk"), "Jóga", None, None);
+        let gone = track("/m/gone.flac", Some("Nobody"), "Missing", None, None);
+        plays.record(&joga, 1).unwrap();
+        plays.record(&joga, 2).unwrap();
+        plays.record(&gone, 3).unwrap();
+        assert_eq!(plays.plays_since(&[joga.clone(), gone.clone()], 0).len(), 3, "every play is kept");
+        assert_eq!(plays.plays_since(std::slice::from_ref(&joga), 0), vec![(0, 1), (0, 2)], "the missing song isn't in the library");
+        assert_eq!(plays.stats(&joga).count, 2, "the tally agrees");
+    }
+
+    #[test]
+    fn the_log_gives_its_events_back_at_the_next_launch() {
+        let dir = Dir::new("events");
+        let path = dir.0.join(FILE);
+        let joga = track("/m/joga.flac", Some("Björk"), "Jóga", None, None);
+        let (mut plays, _) = Plays::open(path.clone());
+        plays.record(&joga, 100).unwrap();
+        plays.record(&joga, 300).unwrap();
+        let (again, _) = Plays::open(path);
+        assert_eq!(again.plays_since(std::slice::from_ref(&joga), 200), vec![(0, 300)]);
     }
 
     #[test]

@@ -10,6 +10,14 @@ use crate::label::LabelPage;
 use crate::relations::Relation;
 use crate::search::SearchResults;
 use crate::stats::Totals;
+use crate::top::Ranked;
+
+/// The home page's leaderboards: the top artists, albums and songs in one window.
+pub struct TopModel {
+    pub artists: Vec<Ranked<String>>,
+    pub albums: Vec<Ranked<usize>>,
+    pub songs: Vec<Ranked<usize>>,
+}
 
 /// An artist's page, and the artists involved with them, each with their page.
 pub type ArtistModel = (ArtistPage, Vec<(Relation, ArtistPage)>);
@@ -51,6 +59,9 @@ pub struct Pages {
     pub recent_albums: Memo<u64, Vec<usize>>,
     pub recent_songs: Memo<u64, Vec<usize>>,
     pub totals: Memo<u64, Totals>,
+    /// Keyed by the library's data version, the window and the day, which is what the windows
+    /// count back from.
+    pub top: Memo<(u64, crate::top::Window, i64), TopModel>,
     /// Keyed by the library's data version, the order and the Random seed.
     pub unlistened: Memo<(u64, crate::app::UnlistenedOrder, u64), Vec<usize>>,
 }

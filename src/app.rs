@@ -13,7 +13,7 @@ use crate::album::{self, Album, AlbumId};
 use crate::audio::{self, Engine};
 use crate::query::property::{Mode, Property};
 use crate::covers::Covers;
-use crate::pages::{ArtistModel, Pages};
+use crate::pages::{ArtistModel, Pages, TopModel};
 use crate::search::SearchResults;
 use crate::collab::CollabPage;
 use crate::label::LabelPage;
@@ -248,6 +248,8 @@ pub struct App {
     pub unlistened_order: UnlistenedOrder,
     /// The seed of Unlistened Releases' Random order; a re-roll sets a new one.
     pub unlistened_seed: u64,
+    /// The window the Home leaderboards show, kept in the preferences.
+    pub top_window: crate::top::Window,
     /// Album covers for cards and lists; `None` until setup has a waker.
     pub covers: Option<Covers>,
     /// Indices into `tracks` the active view shows, in play order. In an album view,
@@ -411,6 +413,10 @@ impl App {
             Ok(order) => (order, None),
             Err(e) => (UnlistenedOrder::default(), Some(e)),
         };
+        let (top_window, top_window_error) = match store.load_top_window() {
+            Ok(window) => (window, None),
+            Err(e) => (crate::top::Window::default(), Some(e)),
+        };
         let (queue_restore, queue_error) = match store.load_queue() {
             Ok(saved) => (saved, None),
             Err(e) => (None, Some(e)),
@@ -450,6 +456,7 @@ impl App {
             home_viewport: Live::new(0.0),
             unlistened_order,
             unlistened_seed,
+            top_window,
             covers: None,
             filtered: Vec::new(),
             shown_albums: Vec::new(),
@@ -504,7 +511,7 @@ impl App {
             volume_before_drag: None,
             shuffle: false,
             repeat: Repeat::Off,
-            error: relations_error.clone().or(lastfm_error).or(plays_error).or(graph_error).or(tab_error).or(theme_error).or(appearance_error).or(unlistened_error).or(queue_error).or(queue_replace_error).or(queue_pinned_error),
+            error: relations_error.clone().or(lastfm_error).or(plays_error).or(graph_error).or(tab_error).or(theme_error).or(appearance_error).or(unlistened_error).or(top_window_error).or(queue_error).or(queue_replace_error).or(queue_pinned_error),
             scan: None,
             drop_hover: false,
             details: None,
@@ -883,6 +890,18 @@ impl App {
     }
 
     /// `recently_played`, kept until the library changes.
+    /// The Home leaderboards for the chosen window, kept until the library, the relations, the
+    /// window or the day changes.
+    pub fn top_model(&self) -> Rc<TopModel> {
+        let now = unix_now().unwrap_or(0);
+        let key = (self.data_version, self.top_window, now / 86_400);
+        self.pages.top.get(key, || TopModel {
+            artists: crate::top::artists(&self.tracks, &self.plays, &self.relations, self.top_window, now),
+            albums: crate::top::albums(&self.tracks, &self.albums, &self.plays, self.top_window, now),
+            songs: crate::top::songs(&self.tracks, &self.plays, self.top_window, now),
+        })
+    }
+
     /// The library's totals for the stats strip, kept until the library changes.
     pub fn totals(&self) -> Rc<Totals> {
         self.pages.totals.get(self.data_version, || Totals::of(&self.tracks, &self.albums))
@@ -1174,6 +1193,14 @@ impl App {
     pub fn set_unlistened_order(&mut self, order: UnlistenedOrder) {
         self.unlistened_order = order;
         if let Err(e) = self.store.save_unlistened_order(order) {
+            self.error = Some(e);
+        }
+    }
+
+    /// Chooses the window the Home leaderboards show and saves it. A failed save shows as an error.
+    pub fn set_top_window(&mut self, window: crate::top::Window) {
+        self.top_window = window;
+        if let Err(e) = self.store.save_top_window(window) {
             self.error = Some(e);
         }
     }

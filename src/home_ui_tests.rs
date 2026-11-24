@@ -314,7 +314,7 @@ fn double_clicking_a_recently_played_song_plays_the_list_from_it() {
 
 #[test]
 fn a_single_click_selects_a_recently_played_song_without_playing_it() {
-    let mut rt = runtime();
+    let mut rt = runtime_sized((1200.0, 1600.0));
     let says = track(&rt, "Says");
     click(&mut rt, &format!("recent-songs-t{says}"));
     assert_eq!(rt.state.selected, Some(says));
@@ -494,7 +494,7 @@ fn unlistened_order_is_chosen_from_the_segmented_control_and_saved() {
 
 #[test]
 fn the_shuffle_button_shows_only_in_random_and_rerolls_the_seed() {
-    let mut rt = runtime();
+    let mut rt = runtime_sized((1200.0, 1600.0));
     assert!(!has(&rt, "unlistened-reroll"), "no shuffle in Newest");
     click(&mut rt, "random");
     assert_eq!(rt.state.unlistened_order, UnlistenedOrder::Random);
@@ -558,4 +558,74 @@ fn an_empty_library_says_so_in_the_stats_strip() {
     settle(&mut rt);
     assert_eq!(text_of(&rt, "stats-empty"), "No songs in the library yet.");
     assert!(!has(&rt, "stats-tiles"));
+}
+
+/// Each demo song's play, now-ish, so the 7 and 30 day windows have plays to show.
+fn play_demo_songs_now(rt: &mut Runtime<App>) {
+    let now = crate::listen::unix_now().expect("the clock");
+    let count = rt.state.tracks().len();
+    rt.update(move |s, _| {
+        for i in 0..count {
+            let _ = s.record_play(i, now - 60);
+        }
+    });
+    settle(rt);
+}
+
+#[test]
+fn the_top_block_shows_three_columns_of_the_leaders() {
+    let rt = runtime();
+    assert!(has(&rt, "top-artists") && has(&rt, "top-albums") && has(&rt, "top-songs"));
+    assert_eq!(rt.state.top_window, crate::top::Window::All, "all time unless chosen");
+    let first = rt.state.top_model().songs[0].item;
+    assert!(has(&rt, "top-song0"), "the most played song is listed first");
+    assert!(rt.find("top-song0").is_some(), "its row shows");
+    assert!(rt.elements().iter().any(|e| e.text.as_deref() == Some(rt.state.tracks()[first].title.as_str())), "the row names the song");
+}
+
+#[test]
+fn an_empty_window_says_no_plays_in_it() {
+    // A library with songs but no plays: the demo's plays are stamped in 2027, after today.
+    let mut app = App::new(Output::Silent, Store::memory());
+    app.set_library(crate::demo_tracks(), false);
+    app.show_home();
+    let mut rt = Runtime::new(app, view, (1200.0, 1600.0), Env::new(true, 1.0));
+    rt.frame(0.0);
+    settle(&mut rt);
+    click(&mut rt, "7");
+    assert_eq!(rt.state.top_window, crate::top::Window::Days7);
+    assert_eq!(text_of(&rt, "top-empty"), "No plays in the 7 days.");
+    assert!(!has(&rt, "top-columns"));
+}
+
+#[test]
+fn switching_the_window_follows_recent_plays_and_is_saved() {
+    let dir = std::env::temp_dir().join(format!("peri-top-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let file = dir.join("prefs.json");
+    let mut app = App::new(Output::Silent, Store::at(&file));
+    crate::scene_home(&mut app);
+    let mut rt = Runtime::new(app, view, (1200.0, 900.0), Env::new(true, 1.0));
+    rt.frame(0.0);
+    settle(&mut rt);
+    play_demo_songs_now(&mut rt);
+    click(&mut rt, "7");
+    assert!(has(&rt, "top-columns"), "recent plays show in the 7 days window");
+    assert_eq!(App::new(Output::Silent, Store::at(&file)).top_window, crate::top::Window::Days7, "the window is saved");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+
+
+#[test]
+fn a_top_artist_or_album_row_opens_its_page() {
+    let mut rt = runtime();
+    let artist = rt.state.top_model().artists[0].item.clone();
+    click(&mut rt, "top-artist0");
+    assert_eq!(rt.state.open_artist(), Some(artist.as_str()), "the artist's page opens");
+    click(&mut rt, "back");
+    assert_eq!(rt.state.page, Page::Home);
+    let album = rt.state.top_model().albums[0].item;
+    click(&mut rt, "top-album0");
+    assert_eq!(rt.state.open_album(), Some(album), "the album opens");
 }
