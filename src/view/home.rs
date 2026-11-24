@@ -1,5 +1,7 @@
-//! The home page: the library's totals as a strip of tiles, the newest albums as one strip of
-//! cards, the songs played last as a table, and the albums nobody has played as a grid.
+//! The home page: the newest albums as one strip of cards, the songs played last as a table, and
+//! the Discover block's albums as a grid; below them the analytics: the library's totals as a
+//! strip of tiles, the top artists, albums and songs, the people behind them, the activity
+//! heatmap and the genre and decade mix.
 
 use rune::{Cursor, El, ScrollPos, ScrollSpec, Tx, col, el, icon, row, text};
 
@@ -28,14 +30,14 @@ pub(super) fn home_page(s: &App, p: &Palette) -> El {
         .px(28.0)
         .py(16.0)
         .gap(28.0)
+        .child(recent_albums(s, p))
+        .child(recent_songs(s, p))
+        .child(discovery_block(s, p))
         .child(stats_strip(s, p))
         .child(top_block(s, p))
         .child(people_block(s, p))
         .child(activity_block(s, p))
-        .child(mix_block(s, p))
-        .child(recent_albums(s, p))
-        .child(recent_songs(s, p))
-        .child(discovery_block(s, p));
+        .child(mix_block(s, p));
     col().key("home-page").w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: false }).child(body)
 }
 

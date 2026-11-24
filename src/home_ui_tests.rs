@@ -539,11 +539,11 @@ fn unlistened_says_so_once_every_album_has_been_played() {
 }
 
 #[test]
-fn the_stats_strip_sits_above_recently_added_and_shows_the_totals() {
+fn the_stats_strip_sits_below_the_discover_block_and_shows_the_totals() {
     let rt = runtime();
     let strip = rect(&rt, "stats");
-    let added = rect(&rt, "recent-albums");
-    assert!(strip[1] < added[1], "the strip is above Recently Added");
+    let discover = rect(&rt, "discover");
+    assert!(strip[1] > discover[1], "the strip is below the Discover block");
     let totals = rt.state.totals();
     assert_eq!(text_of(&rt, "stat-songs"), totals.songs.to_string(), "the Songs tile figure");
     assert_eq!(text_of(&rt, "stat-albums"), totals.albums.to_string());
@@ -607,7 +607,7 @@ fn switching_the_window_follows_recent_plays_and_is_saved() {
     let file = dir.join("prefs.json");
     let mut app = App::new(Output::Silent, Store::at(&file));
     crate::scene_home(&mut app);
-    let mut rt = Runtime::new(app, view, (1200.0, 900.0), Env::new(true, 1.0));
+    let mut rt = Runtime::new(app, view, (1200.0, 1800.0), Env::new(true, 1.0));
     rt.frame(0.0);
     settle(&mut rt);
     play_demo_songs_now(&mut rt);
@@ -616,8 +616,6 @@ fn switching_the_window_follows_recent_plays_and_is_saved() {
     assert_eq!(App::new(Output::Silent, Store::at(&file)).top_window, crate::top::Window::Days7, "the window is saved");
     let _ = std::fs::remove_dir_all(&dir);
 }
-
-
 
 #[test]
 fn a_top_artist_or_album_row_opens_its_page() {
