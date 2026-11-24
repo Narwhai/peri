@@ -76,7 +76,8 @@ pub(super) fn settings_page(s: &App, p: &Palette, kit: &Kit) -> El {
         .child(appearance_section(s, p))
         .child(queue_section(s, p))
         .child(section)
-        .child(lastfm_section(s, p, kit));
+        .child(lastfm_section(s, p, kit))
+        .child(pictures_section(s, p, kit));
     col().key("settings-page").w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: false }).child(body)
 }
 
@@ -101,6 +102,24 @@ fn appearance_section(s: &App, p: &Palette) -> El {
         .child(text("Mode follows the system unless set to Light or Dark.").font(BODY).color(p.tx3).wrap())
         .child(field("Theme", theme))
         .child(field("Mode", mode))
+}
+
+/// Whether artist pages look pictures up online. Off unless turned on.
+fn pictures_section(s: &App, p: &Palette, kit: &Kit) -> El {
+    let on = s.picture_lookups;
+    let switch = rune_kit::Switch::new(on).label("Look up artist pictures on Wikimedia Commons").on_toggle(move |s: &mut App| s.set_picture_lookups(!on)).build(kit).key("picture-lookups");
+    col()
+        .key("settings-pictures")
+        .w_full()
+        .gap(10.0)
+        .child(text("Artist pictures").font(HEADING).color(p.tx))
+        .child(
+            text("Artists show the picture you give them, else an artist.jpg from their music folder. With this on, artists without either are looked up on MusicBrainz and Wikidata, and a picture on Wikimedia Commons shows with its credit until you keep or remove it. Pictures you keep are never replaced.")
+                .font(BODY)
+                .color(p.tx3)
+                .wrap(),
+        )
+        .child(switch)
 }
 
 /// What a new list does over an edited queue.

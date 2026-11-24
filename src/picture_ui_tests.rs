@@ -61,8 +61,16 @@ impl Data {
 
     /// The runtime on `artist`'s page.
     fn runtime(&self, artist: &str) -> Runtime<App> {
+        self.runtime_with(artist, library(), None)
+    }
+
+    /// The runtime on `artist`'s page with `tracks`, downloads and lookups answered by `fetch`.
+    fn runtime_with(&self, artist: &str, tracks: Vec<Track>, fetch: Option<crate::pictures::Fetch>) -> Runtime<App> {
         let mut app = App::new(Output::Silent, Store::at(self.0.join("prefs.json")));
-        app.set_library(library(), false);
+        if let Some(fetch) = fetch {
+            app.pictures.set_fetch(fetch);
+        }
+        app.set_library(tracks, false);
         app.setup_with(Arc::new(|| {}), Vec::new());
         let mut rt = Runtime::new(app, view, (1300.0, 900.0), Env::new(true, 1.0));
         rt.on_key = Some(crate::app::on_key);
@@ -108,7 +116,13 @@ fn menu(rt: &mut Runtime<App>, n: usize) {
 
 const CHOOSE: usize = 0;
 const PASTE: usize = 1;
-const REMOVE: usize = 3;
+const KEEP: usize = 3;
+const LOOK_UP: usize = 4;
+const REMOVE: usize = 6;
+
+fn text_of(rt: &Runtime<App>, key: &str) -> String {
+    rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).and_then(|e| e.text).unwrap_or_default()
+}
 
 fn names(v: &[&str]) -> Vec<String> {
     strings(v)
@@ -269,4 +283,144 @@ fn merged_names_share_a_picture_while_an_alias_keeps_its_own() {
     let rt = data.runtime("Some Body");
     assert_eq!(shown(&rt, &names(&["Somebody", "Some Body"])), Some([100, 100]));
     assert!(Path::new(&data.0.join(&entry.file)).exists());
+}
+
+/// Somebody's album under `music/Somebody/Elsewhere`, so their folder can hold an artist.jpg.
+fn in_folder(data: &Data) -> Vec<Track> {
+    let mut tracks = library();
+    let dir = data.0.join("music/Somebody/Elsewhere");
+    std::fs::create_dir_all(&dir).unwrap();
+    tracks[0].path = dir.join("01 Over There.flac");
+    tracks
+}
+
+impl Data {
+    /// The runtime on Somebody's page, their songs in the music folder, lookups answered by
+    /// `fetch` (the network is never reached).
+    fn online(&self, fetch: crate::pictures::Fetch) -> Runtime<App> {
+        self.runtime_with("Somebody", in_folder(self), Some(fetch))
+    }
+}
+
+fn wikimedia() -> (crate::pictures::Fetch, Arc<std::sync::Mutex<Vec<String>>>) {
+    let asked = Arc::new(std::sync::Mutex::new(Vec::new()));
+    (crate::pictures::online::tests::fake(png(1200, 800), asked.clone()), asked)
+}
+
+#[test]
+fn an_artist_jpg_in_their_music_folder_shows_until_they_have_their_own() {
+    let data = Data::new("folder", "{}");
+    let mut rt = data.online(Arc::new(crate::pictures::no_downloads));
+    let somebody = names(&["Somebody"]);
+    assert_eq!(rt.state.artist_picture(&rt.state.artist_model("Somebody", false).0).1, crate::pictures::Shown::Cover);
+
+    let folder_pic = data.0.join("music/Somebody/artist.jpg");
+    std::fs::write(&folder_pic, png(90, 90)).unwrap();
+    // Found once per library version, as a rescan would.
+    let tracks = in_folder(&data);
+    rt.update(move |s, _| s.set_library(tracks, false));
+    settle(&mut rt);
+    let info = rt.state.artist_model("Somebody", false).0.clone();
+    let (image, shown) = rt.state.artist_picture(&info);
+    assert_eq!(shown, crate::pictures::Shown::Folder(folder_pic.clone()));
+    assert_eq!(image.and_then(|i| i.wait().ok()), Some([90, 90]));
+    assert!(!rt.state.pictures.has(&somebody), "shown in place, not copied in");
+    assert!(rt.find("artist-picture-attribution").is_none());
+
+    // Their own wins.
+    let file = data.image("mine.png", 40, 40);
+    menu(&mut rt, CHOOSE);
+    rt.resolve_file_dialog(Some(file)).unwrap();
+    settle(&mut rt);
+    assert!(matches!(rt.state.artist_picture(&info).1, crate::pictures::Shown::User(None)));
+    assert!(folder_pic.exists(), "the folder's picture is left alone");
+}
+
+#[test]
+fn lookups_are_off_by_default_and_the_settings_switch_turns_them_on_and_saves() {
+    let data = Data::new("off", "{}");
+    let (fetch, asked) = wikimedia();
+    let mut rt = data.online(fetch);
+    assert!(!rt.state.picture_lookups);
+    assert!(asked.lock().unwrap().is_empty(), "nothing is looked up unless turned on");
+    assert!(rt.find("artist-picture-attribution").is_none());
+
+    rt.update(|s, _| s.show_settings());
+    settle(&mut rt);
+    rt.update(|_, tx| tx.scroll_into_view_in("settings-page", "picture-lookups"));
+    settle(&mut rt);
+    click(&mut rt, "picture-lookups");
+    assert!(rt.state.picture_lookups);
+    let prefs: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(data.0.join("prefs.json")).unwrap()).unwrap();
+    assert_eq!(prefs["artist_picture_lookups"], serde_json::json!(true));
+
+    rt.update(|s, tx| s.show_artist("Somebody", tx));
+    settle(&mut rt);
+    let urls = asked.lock().unwrap().clone();
+    assert!(urls[0].starts_with("https://musicbrainz.org/ws/2/artist/"), "{urls:?}");
+    assert!(urls.iter().any(|u| u.starts_with("https://www.wikidata.org/")));
+    assert!(urls.iter().any(|u| u.starts_with("https://commons.wikimedia.org/")));
+    assert!(rt.find("artist-picture-attribution").is_some(), "a Commons picture shows with its credit");
+    assert!(!rt.state.pictures.has(&names(&["Somebody"])), "only shown until kept");
+}
+
+#[test]
+fn a_looked_up_picture_is_kept_with_its_credit_and_never_replaced() {
+    let data = Data::new("keep", r#"{ "artist_picture_lookups": true }"#);
+    let (fetch, asked) = wikimedia();
+    let mut rt = data.online(fetch);
+    let somebody = names(&["Somebody"]);
+    let attribution = text_of(&rt, "artist-picture-attribution");
+    assert_eq!(attribution, "Photo: Jane Doe & co · CC BY-SA 4.0 · Wikimedia Commons");
+
+    menu(&mut rt, KEEP);
+    let entry = rt.state.pictures.entry_for(&somebody).expect("kept");
+    assert_eq!(entry.source, Source::Wikimedia);
+    assert_eq!(entry.attribution.as_ref().map(|a| a.page.as_str()), Some("https://commons.wikimedia.org/wiki/File:Somebody_live_2019.jpg"));
+    assert_eq!(stored(&data, &entry.file).width(), 1000);
+    assert_eq!(text_of(&rt, "artist-picture-attribution"), attribution, "the credit stays with it");
+
+    // Next launch: theirs, with no lookup at all.
+    drop(rt);
+    asked.lock().unwrap().clear();
+    let (fetch, asked) = wikimedia();
+    let rt = data.online(fetch);
+    assert!(asked.lock().unwrap().is_empty(), "a page with a picture of its own isn't looked up");
+    assert_eq!(rt.state.pictures.entry_for(&somebody), Some(entry));
+}
+
+#[test]
+fn removing_a_looked_up_picture_declines_it_until_looked_up_again() {
+    let data = Data::new("decline", r#"{ "artist_picture_lookups": true }"#);
+    let (fetch, asked) = wikimedia();
+    let mut rt = data.online(fetch.clone());
+    assert!(rt.find("artist-picture-attribution").is_some());
+    menu(&mut rt, REMOVE);
+    assert!(rt.find("artist-picture-attribution").is_none(), "removed");
+    assert_eq!(data.index()["declined"], serde_json::json!([["Somebody"]]));
+
+    drop(rt);
+    asked.lock().unwrap().clear();
+    let mut rt = data.online(fetch);
+    assert!(asked.lock().unwrap().is_empty(), "a declined page isn't looked up next launch");
+    menu(&mut rt, LOOK_UP);
+    assert!(!asked.lock().unwrap().is_empty(), "asked for, it is");
+    assert!(rt.find("artist-picture-attribution").is_some());
+    assert!(data.index().get("declined").is_none());
+}
+
+#[test]
+fn look_up_works_with_lookups_off_and_failures_change_nothing() {
+    let data = Data::new("ask", "{}");
+    let mut rt = data.online(Arc::new(|_: &str| Err("offline".to_string())));
+    menu(&mut rt, LOOK_UP);
+    assert!(rt.find("artist-picture-attribution").is_none());
+    assert!(rt.state.error.is_none(), "a lookup that finds nothing doesn't interrupt");
+
+    let (fetch, asked) = wikimedia();
+    rt.update(|s, _| s.pictures.set_fetch(fetch));
+    menu(&mut rt, LOOK_UP);
+    assert!(!asked.lock().unwrap().is_empty());
+    assert!(rt.find("artist-picture-attribution").is_some(), "shown though lookups are off: the user asked");
+    assert!(!rt.state.picture_lookups);
 }
