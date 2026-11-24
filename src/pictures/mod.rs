@@ -24,6 +24,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::covers::{Inner, Slot, THUMB_PX, shrink};
 
+pub mod folder;
+pub mod online;
+
 pub const INDEX_FILE: &str = "artist-pictures.json";
 /// The folder under the data folder the pictures are copied into.
 pub const FOLDER: &str = "artists";
