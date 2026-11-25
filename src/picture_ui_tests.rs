@@ -125,6 +125,18 @@ fn text_of(rt: &Runtime<App>, key: &str) -> String {
     rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).and_then(|e| e.text).unwrap_or_default()
 }
 
+/// The credit the picture's dialog shows, opening it by pressing the picture and closing it
+/// again; empty when it shows none.
+fn credit(rt: &mut Runtime<App>) -> String {
+    click(rt, "artist-picture");
+    assert!(rt.state.picture_dialog, "pressing the picture opens its dialog");
+    let credit = [text_of(rt, "picture-author"), text_of(rt, "picture-license")].into_iter().filter(|t| !t.is_empty()).collect::<Vec<_>>().join(" · ");
+    rt.key(rune::KeyEvent { key: rune::Key::Escape, mods: rune::Mods::default() });
+    settle(rt);
+    assert!(!rt.state.picture_dialog, "Escape closes it");
+    credit
+}
+
 fn names(v: &[&str]) -> Vec<String> {
     strings(v)
 }
@@ -326,14 +338,14 @@ fn an_artist_jpg_in_their_music_folder_shows_until_they_have_their_own() {
     assert_eq!(shown, crate::pictures::Shown::Folder(folder_pic.clone()));
     assert_eq!(image.and_then(|i| i.wait().ok()), Some([90, 90]));
     assert!(!rt.state.pictures.has(&somebody), "shown in place, not copied in");
-    assert!(rt.find("artist-picture-attribution").is_none());
+    assert_eq!(credit(&mut rt), "", "a folder picture has no credit");
 
     // Their own wins.
     let file = data.image("mine.png", 40, 40);
     menu(&mut rt, CHOOSE);
     rt.resolve_file_dialog(Some(file)).unwrap();
     settle(&mut rt);
-    assert!(matches!(rt.state.artist_picture(&info).1, crate::pictures::Shown::User(None)));
+    assert!(matches!(rt.state.artist_picture(&info).1, crate::pictures::Shown::User(e) if e.source == Source::Local));
     assert!(folder_pic.exists(), "the folder's picture is left alone");
 }
 
@@ -344,7 +356,6 @@ fn lookups_are_off_by_default_and_the_settings_switch_turns_them_on_and_saves() 
     let mut rt = data.online(fetch);
     assert!(!rt.state.picture_lookups);
     assert!(asked.lock().unwrap().is_empty(), "nothing is looked up unless turned on");
-    assert!(rt.find("artist-picture-attribution").is_none());
 
     rt.update(|s, _| s.show_settings());
     settle(&mut rt);
@@ -361,7 +372,8 @@ fn lookups_are_off_by_default_and_the_settings_switch_turns_them_on_and_saves() 
     assert!(urls[0].starts_with("https://musicbrainz.org/ws/2/artist/"), "{urls:?}");
     assert!(urls.iter().any(|u| u.starts_with("https://www.wikidata.org/")));
     assert!(urls.iter().any(|u| u.starts_with("https://commons.wikimedia.org/")));
-    assert!(rt.find("artist-picture-attribution").is_some(), "a Commons picture shows with its credit");
+    assert!(rt.find("artist-picture-attribution").is_none(), "no credit under the picture");
+    assert_eq!(credit(&mut rt), "Photo: Jane Doe & co · CC BY-SA 4.0", "its dialog credits it");
     assert!(!rt.state.pictures.has(&names(&["Somebody"])), "only shown until kept");
 }
 
@@ -371,15 +383,15 @@ fn a_looked_up_picture_is_kept_with_its_credit_and_never_replaced() {
     let (fetch, asked) = wikimedia();
     let mut rt = data.online(fetch);
     let somebody = names(&["Somebody"]);
-    let attribution = text_of(&rt, "artist-picture-attribution");
-    assert_eq!(attribution, "Photo: Jane Doe & co · CC BY-SA 4.0 · Wikimedia Commons");
+    let attribution = credit(&mut rt);
+    assert_eq!(attribution, "Photo: Jane Doe & co · CC BY-SA 4.0");
 
     menu(&mut rt, KEEP);
     let entry = rt.state.pictures.entry_for(&somebody).expect("kept");
     assert_eq!(entry.source, Source::Wikimedia);
     assert_eq!(entry.attribution.as_ref().map(|a| a.page.as_str()), Some("https://commons.wikimedia.org/wiki/File:Somebody_live_2019.jpg"));
     assert_eq!(stored(&data, &entry.file).width(), 1000);
-    assert_eq!(text_of(&rt, "artist-picture-attribution"), attribution, "the credit stays with it");
+    assert_eq!(credit(&mut rt), attribution, "the credit stays with it");
 
     // Next launch: theirs, with no lookup at all.
     drop(rt);
@@ -395,16 +407,16 @@ fn removing_a_looked_up_picture_declines_it_for_good() {
     let data = Data::new("decline", r#"{ "artist_picture_lookups": true }"#);
     let (fetch, asked) = wikimedia();
     let mut rt = data.online(fetch.clone());
-    assert!(rt.find("artist-picture-attribution").is_some());
+    assert!(!credit(&mut rt).is_empty());
     menu(&mut rt, REMOVE);
-    assert!(rt.find("artist-picture-attribution").is_none(), "removed");
+    assert_eq!(credit(&mut rt), "", "removed");
     assert_eq!(data.index()["declined"], serde_json::json!([["Somebody"]]));
 
     drop(rt);
     asked.lock().unwrap().clear();
-    let rt = data.online(fetch);
+    let mut rt = data.online(fetch);
     assert!(asked.lock().unwrap().is_empty(), "a declined page isn't looked up next launch");
-    assert!(rt.find("artist-picture-attribution").is_none());
+    assert_eq!(credit(&mut rt), "");
 }
 
 #[test]
@@ -435,7 +447,7 @@ fn the_picker_offers_every_wikimedia_picture_and_the_pick_is_kept_with_its_credi
     assert_eq!(entry.source, Source::Wikimedia);
     assert_eq!(entry.attribution.as_ref().map(|a| a.page.as_str()), Some("https://commons.wikimedia.org/wiki/File:Somebody_live_2019.jpg"), "its credit, as Commons gives it (the stand-in gives every file the same one)");
     assert!(asked.lock().unwrap().iter().any(|u| u.contains("iiurlwidth=1000") && u.contains("band")), "the picked file is fetched at full size");
-    assert!(rt.find("artist-picture-attribution").is_some(), "shown with its credit");
+    assert!(!credit(&mut rt).is_empty(), "shown with its credit");
 }
 
 #[test]
@@ -454,4 +466,73 @@ fn the_picker_says_when_nothing_is_found_or_the_lookup_fails() {
     rt.update(|s, _| s.pictures.set_fetch(Arc::new(|_: &str| Ok(br#"{"artists":[]}"#.to_vec()))));
     menu(&mut rt, LOOK_UP);
     assert!(rt.find("picker-empty").is_some());
+}
+
+#[test]
+fn the_pictures_dialog_says_where_it_is_from_and_links_to_commons() {
+    let data = Data::new("dialog", r#"{ "artist_picture_lookups": true }"#);
+    let (fetch, _) = wikimedia();
+    let mut rt = data.online(fetch);
+    click(&mut rt, "artist-picture");
+    assert!(rt.find("picture-dialog").is_some());
+    assert!(text_of(&rt, "picture-from").contains("Wikimedia Commons"));
+    assert!(rt.find("picture-commons").is_some(), "a link to the file's page");
+    assert!(rt.find("picture-license").is_some(), "and its license");
+    // Keep from the dialog.
+    click(&mut rt, "picture-keep");
+    assert!(!rt.state.picture_dialog);
+    assert_eq!(rt.state.pictures.entry_for(&names(&["Somebody"])).map(|e| e.source), Some(Source::Wikimedia));
+    click(&mut rt, "artist-picture");
+    assert_eq!(text_of(&rt, "picture-from"), "From Wikimedia Commons, kept as yours");
+    assert!(rt.find("picture-keep").is_none(), "nothing left to keep");
+    // Choose from Wikimedia… swaps the dialog for the picker.
+    click(&mut rt, "picture-wikimedia");
+    assert!(!rt.state.picture_dialog && rt.state.pictures.picker().is_some());
+}
+
+/// Somebody's two albums, each with a cover in its folder, so the dialog can offer them.
+fn with_covers(data: &Data) -> Vec<Track> {
+    let mut tracks = library();
+    for (i, (album, year)) in [("Elsewhere", 2020), ("Later", 2023)].into_iter().enumerate() {
+        let dir = data.0.join(format!("music/Somebody/{album}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("cover.png"), png(600 + i as u32 * 100, 600)).unwrap();
+        let mut t = tracks[0].clone();
+        t.path = dir.join("01.flac");
+        t.album = Some(album.into());
+        t.year = Some(year);
+        t.title = format!("{album} song");
+        if i == 0 {
+            tracks[0] = t;
+        } else {
+            tracks.push(t);
+        }
+    }
+    tracks
+}
+
+#[test]
+fn a_releases_cover_from_the_dialog_becomes_the_picture() {
+    let data = Data::new("covers", "{}");
+    let rt0 = data.runtime_with("Somebody", with_covers(&data), None);
+    let mut rt = rt0;
+    click(&mut rt, "artist-picture");
+    assert!(text_of(&rt, "picture-from").starts_with("The cover of Later"), "the newest release's cover shows for now: {}", text_of(&rt, "picture-from"));
+    let later = rt.state.albums().iter().position(|a| a.title == "Later").unwrap();
+    let elsewhere = rt.state.albums().iter().position(|a| a.title == "Elsewhere").unwrap();
+    assert!(rt.find(&format!("picture-cover-{later}")).is_some());
+    assert!(rt.find(&format!("picture-cover-{elsewhere}")).is_some(), "each of their releases with a cover");
+
+    click(&mut rt, &format!("picture-cover-{elsewhere}"));
+    assert!(!rt.state.picture_dialog, "picking closes the dialog");
+    assert!(rt.state.error.is_none(), "{:?}", rt.state.error);
+    let entry = rt.state.pictures.entry_for(&names(&["Somebody"])).expect("the cover is their picture");
+    assert_eq!((entry.source, entry.release.as_deref()), (Source::Cover, Some("Elsewhere")));
+    assert_eq!(stored(&data, &entry.file).width(), 600, "copied in from the cover");
+    assert_eq!(shown(&rt, &names(&["Somebody"])), Some([480, 480]));
+
+    click(&mut rt, "artist-picture");
+    assert_eq!(text_of(&rt, "picture-from"), "The cover of Elsewhere");
+    assert!(rt.find(&format!("picture-cover-{elsewhere}/art/in-use")).is_some(), "the one in use is marked");
+    assert!(rt.find(&format!("picture-cover-{later}/art/in-use")).is_none());
 }

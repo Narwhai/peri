@@ -158,10 +158,7 @@ pub(super) fn release_strips(s: &App, key: &str, albums: &[usize], artists: bool
 /// picture they can change; in search results (`None`) the name and picture open the artist's page.
 pub(super) fn head(s: &App, info: &ArtistPage, others: &[(Relation, ArtistPage)], link: Option<El>, art: Option<El>, p: &Palette) -> El {
     let linked = link.is_none();
-    let mut art = art.unwrap_or_else(|| {
-        let (art, shown) = picture(s, info, p);
-        with_attribution(art, &shown, p)
-    });
+    let mut art = art.unwrap_or_else(|| picture(s, info, p).0);
     let mut counts = Vec::new();
     for kind in ReleaseType::ALL {
         let n = info.albums.iter().filter(|&&a| s.albums()[a].release_type == kind).count();
@@ -257,32 +254,8 @@ fn picture(s: &App, info: &ArtistPage, p: &Palette) -> (El, Shown) {
     (art, shown)
 }
 
-/// The picture with, for one from Wikimedia Commons, who made it and its license under it,
-/// linking to its page there.
-fn with_attribution(art: El, shown: &Shown, p: &Palette) -> El {
-    let attribution = match shown {
-        Shown::Online(a) | Shown::User(Some(a)) => a,
-        Shown::User(None) | Shown::Folder(_) | Shown::Cover => return art,
-    };
-    let page = attribution.page.clone();
-    let line = text(attribution.line())
-        .key("artist-picture-attribution")
-        .font(SMALL)
-        .color(p.tx3)
-        .wrap()
-        .w(PICTURE_PX)
-        .cursor(Cursor::Pointer)
-        .role("link")
-        .help(page.clone())
-        .on_press_tx(move |s: &mut App, tx| {
-            if let Err(e) = tx.open_url(&page) {
-                s.error = Some(format!("Couldn't open {page}: {e}"));
-            }
-        });
-    col().gap(6.0).child(art).child(line)
-}
-
-/// The picture on the artist's own page: an image file dropped on it becomes their picture,
+/// The picture on the artist's own page: pressing it opens its dialog (where it's from, and
+/// their releases' covers to use instead), an image file dropped on it becomes their picture,
 /// and its ✎ menu (shown on hover) chooses, pastes or removes one. Wayland gets no drops, so
 /// the menu does everything a drop does. Keyed `artist-picture`.
 fn editable_picture(s: &App, info: &ArtistPage, p: &Palette, kit: &Kit, layer: &mut Vec<El>) -> El {
@@ -326,6 +299,11 @@ fn editable_picture(s: &App, info: &ArtistPage, p: &Palette, kit: &Kit, layer: &
         .key("artist-picture")
         .size(PICTURE_PX, PICTURE_PX)
         .hover_group()
+        .cursor(Cursor::Pointer)
+        .role("button")
+        .label("Picture details")
+        .help("Where the picture is from, and other pictures to use")
+        .on_press(|s: &mut App| s.open_picture_dialog())
         .child(art)
         .on_drop_files(|s: &mut App, files, _tx| {
             s.picture_drop_hover = false;
@@ -349,7 +327,8 @@ fn editable_picture(s: &App, info: &ArtistPage, p: &Palette, kit: &Kit, layer: &
     } else if busy {
         art = art.child(el().key("artist-picture-busy").pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0)).fill(rune::Color::BLACK.alpha(0.35)).inert());
     }
-    with_attribution(art.child(el().absolute(PICTURE_PX - PICTURE_EDIT_PX - 6.0, 6.0).child(menu)), &shown, p)
+    super::picture_dialog::picture_dialog(s, info, &shown, p, kit, layer);
+    art.child(el().absolute(PICTURE_PX - PICTURE_EDIT_PX - 6.0, 6.0).child(menu))
 }
 
 /// Their albums' pills, one row per album with credits on it.

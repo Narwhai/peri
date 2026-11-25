@@ -59,6 +59,8 @@ pub enum Source {
     User,
     /// A Wikimedia Commons picture a lookup found, which the user kept.
     Wikimedia,
+    /// The cover of one of their releases, which the user picked.
+    Cover,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -78,6 +80,9 @@ pub struct Entry {
     /// Who made it and its license, for a picture kept from Wikimedia Commons.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attribution: Option<online::Attribution>,
+    /// The release whose cover it is, for a cover the user picked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release: Option<String>,
     /// When the artist first got a picture, and when it last changed (Unix seconds).
     pub added: u64,
     pub updated: u64,
@@ -131,6 +136,8 @@ pub enum Input {
     Url(String),
     /// A Wikimedia Commons file the user picked, kept with its credit.
     Commons(String),
+    /// The cover of a release, read from its first song, and the release's title.
+    Cover(PathBuf, String),
 }
 
 impl Input {
@@ -139,6 +146,7 @@ impl Input {
             Input::File(_) => Source::Local,
             Input::Bytes(_) | Input::Url(_) => Source::User,
             Input::Commons(_) => Source::Wikimedia,
+            Input::Cover(..) => Source::Cover,
         }
     }
 
@@ -147,7 +155,11 @@ impl Input {
             Input::Url(url) => Some(url.clone()),
             _ => None,
         };
-        Origin { source: self.source(), url, attribution: None }
+        let release = match self {
+            Input::Cover(_, title) => Some(title.clone()),
+            _ => None,
+        };
+        Origin { source: self.source(), url, attribution: None, release }
     }
 }
 
@@ -157,13 +169,14 @@ struct Origin {
     source: Source,
     url: Option<String>,
     attribution: Option<online::Attribution>,
+    release: Option<String>,
 }
 
 /// What an artist page's picture is.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Shown {
-    /// One the user gave, with its attribution when it was kept from Wikimedia Commons.
-    User(Option<online::Attribution>),
+    /// One the user gave: its entry says where from.
+    User(Box<Entry>),
     /// An `artist.jpg` in their music folder.
     Folder(PathBuf),
     /// One a lookup found, shown until the user keeps or removes it.
@@ -532,7 +545,7 @@ impl ArtistPictures {
         let Some(Lookup::Found(looked)) = self.lookups.borrow().get(&key).cloned() else {
             return Err("There's no looked-up picture to keep".into());
         };
-        let origin = Origin { source: Source::Wikimedia, url: Some(looked.url.clone()), attribution: Some(looked.attribution.clone()) };
+        let origin = Origin { source: Source::Wikimedia, url: Some(looked.url.clone()), attribution: Some(looked.attribution.clone()), release: None };
         self.set(target, looked.jpeg.to_vec(), origin)
     }
 
@@ -597,7 +610,7 @@ impl ArtistPictures {
                     waker();
                 });
                 if let Err(e) = spawned {
-                    let origin = Origin { source: Source::User, url: None, attribution: None };
+                    let origin = Origin { source: Source::User, url: None, attribution: None, release: None };
                     let _ = self.imports.0.send((Target { names: Vec::new(), mbid: None }, origin, Err(format!("Couldn't start the import: {e}"))));
                 }
             }
@@ -645,8 +658,8 @@ impl ArtistPictures {
         let added = old.iter().map(|e| e.added).min().unwrap_or(now);
         let mbid = target.mbid.clone().or_else(|| old.iter().find_map(|e| e.mbid.clone()));
         self.index.artists.retain(|e| !e.matches(&target.names));
-        let Origin { source, url, attribution } = origin;
-        self.index.artists.push(Entry { names: target.names.clone(), mbid, file, source, url, attribution, added, updated: now });
+        let Origin { source, url, attribution, release } = origin;
+        self.index.artists.push(Entry { names: target.names.clone(), mbid, file, source, url, attribution, release, added, updated: now });
         self.save()?;
         for e in old {
             self.forget_file(&e.file);
@@ -676,9 +689,9 @@ impl ArtistPictures {
         Ok(())
     }
 
-    /// Whose picture the page with these names has, kept from Wikimedia Commons.
-    pub fn attribution(&self, names: &[String]) -> Option<online::Attribution> {
-        self.entry(names)?.attribution.clone()
+    /// The saved entry of the page with these names: where its picture came from.
+    pub fn entry_of(&self, names: &[String]) -> Option<Entry> {
+        self.entry(names).cloned()
     }
 
     fn refuse_unreadable(&self) -> Result<(), String> {
@@ -768,6 +781,7 @@ fn input_bytes(input: Input, fetch: &Fetch) -> Result<Vec<u8>, String> {
         Input::Bytes(bytes) if bytes.len() as u64 > MAX_BYTES => Err("That image is too large for a picture".into()),
         Input::Bytes(bytes) => Ok(bytes),
         Input::Url(url) | Input::Commons(url) => fetch(&url),
+        Input::Cover(song, title) => crate::library::read_cover(&song).ok_or_else(|| format!("{title} has no cover")),
     }
 }
 

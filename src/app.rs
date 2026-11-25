@@ -372,6 +372,9 @@ pub struct App {
     pub pictures: crate::pictures::ArtistPictures,
     /// The artist picture's ✎ menu is open.
     pub picture_menu: bool,
+    /// The artist picture's dialog is open: where the picture is from, its credit and link,
+    /// and their releases' covers to use instead.
+    pub picture_dialog: bool,
     /// An image file is dragged over the artist picture.
     pub picture_drop_hover: bool,
     /// Artist pages without a picture of the user's look one up on Wikimedia Commons. Off
@@ -524,6 +527,7 @@ impl App {
             drop_hover: false,
             pictures,
             picture_menu: false,
+            picture_dialog: false,
             picture_drop_hover: false,
             picture_lookups,
             details: None,
@@ -1032,8 +1036,8 @@ impl App {
     /// for) a Wikimedia Commons picture; else their first album's cover.
     pub fn artist_picture(&self, info: &crate::artist::ArtistPage) -> (Option<rune::Image>, crate::pictures::Shown) {
         use crate::pictures::Shown;
-        if self.pictures.has(&info.names) {
-            return (self.pictures.get(&info.names), Shown::User(self.pictures.attribution(&info.names)));
+        if let Some(entry) = self.pictures.entry_of(&info.names) {
+            return (self.pictures.get(&info.names), Shown::User(Box::new(entry)));
         }
         if let Some(path) = self.pictures.folder(info, &self.tracks, &self.albums, self.data_version) {
             return (self.pictures.folder_image(&path), Shown::Folder(path));
@@ -1069,6 +1073,31 @@ impl App {
         self.picture_menu = false;
         let Some(target) = self.picture_target() else { return };
         self.pictures.open_picker(&target.names, target.mbid);
+    }
+
+    /// Pressing the artist picture: its dialog, with where it's from and other choices.
+    pub fn open_picture_dialog(&mut self) {
+        self.picture_menu = false;
+        self.picture_dialog = true;
+    }
+
+    pub fn close_picture_dialog(&mut self) {
+        self.picture_dialog = false;
+    }
+
+    /// The dialog's pick of a release: album `a`'s cover, copied in as the open artist's picture.
+    pub fn use_cover_as_picture(&mut self, a: usize) {
+        let Some(album) = self.albums.get(a) else { return };
+        let Some(&first) = album.tracks.first() else { return };
+        let input = crate::pictures::Input::Cover(self.tracks[first].path.clone(), album.title.clone());
+        self.picture_dialog = false;
+        self.set_artist_picture(input);
+    }
+
+    /// The dialog's Choose from Wikimedia…: the picker, in place of the dialog.
+    pub fn picture_dialog_to_picker(&mut self) {
+        self.picture_dialog = false;
+        self.open_picture_picker();
     }
 
     /// The picker's pick: the Commons file is copied in as the open artist's picture, with its credit.
@@ -1218,6 +1247,8 @@ impl App {
     fn go_to(&mut self, page: Page) {
         self.close_panel();
         self.details = None;
+        self.picture_dialog = false;
+        self.pictures.close_picker();
         if page == self.page {
             return;
         }
