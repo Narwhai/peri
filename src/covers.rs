@@ -164,6 +164,11 @@ impl<K: Clone + Eq + std::hash::Hash> Inner<K> {
         }
     }
 
+    /// Bumped with every arrival.
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation
+    }
+
     /// Marks a slot as used in the current generation.
     pub(crate) fn touch(&mut self, path: &K) {
         let generation = self.generation;

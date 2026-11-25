@@ -43,8 +43,9 @@ const JPEG_QUALITY: u8 = 88;
 pub const MAX_BYTES: u64 = 20 * 1024 * 1024;
 /// Images wider or taller than this aren't decoded.
 const MAX_SIDE: u32 = 16_384;
-/// Decoded pictures kept; few artist pages are open at once.
-const CAPACITY: usize = 32;
+/// Decoded pictures kept: more than the graph shows at once (`MAX_PICTURES` in its view), so
+/// what's in view is never evicted and read again. At 480 px each is about 0.9 MB.
+pub const CAPACITY: usize = 128;
 const DOWNLOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 /// Extensions the file picker and drops take.
 pub const EXTENSIONS: [&str; 5] = ["png", "jpg", "jpeg", "webp", "gif"];
@@ -278,6 +279,8 @@ pub struct ArtistPictures {
     /// The open picker, and what its worker sends; a new picker drops the old one's messages.
     picker: Option<Picker>,
     picker_msgs: Option<Receiver<PickerMsg>>,
+    /// Bumped when a picture is set, removed or declined, or a lookup finishes.
+    changes: u64,
 }
 
 impl ArtistPictures {
@@ -308,6 +311,7 @@ impl ArtistPictures {
             folders: RefCell::new((0, HashMap::new())),
             picker: None,
             picker_msgs: None,
+            changes: 0,
         };
         (pictures, error)
     }
@@ -558,7 +562,14 @@ impl ArtistPictures {
         if !self.index.declined(names) {
             self.index.declined.push(names.to_vec());
         }
+        self.changes += 1;
         self.save()
+    }
+
+    /// Changes whenever what any page would show could have: a picture arrived, was set or
+    /// removed, or a lookup finished. Memoized drawing of many pictures (the graph) keys on it.
+    pub fn revision(&self) -> u64 {
+        self.cache.borrow().generation().wrapping_add(self.changes)
     }
 
     /// Takes pictures the reader finished; true when any arrived.
@@ -567,6 +578,7 @@ impl ArtistPictures {
         if let Some((_, done)) = &self.lookup_worker {
             for (key, found) in done.try_iter() {
                 looked = true;
+                self.changes += 1;
                 self.lookups.borrow_mut().insert(key, found.map_or(Lookup::Nothing, |l| Lookup::Found(Arc::new(l))));
             }
         }
@@ -660,6 +672,7 @@ impl ArtistPictures {
         self.index.artists.retain(|e| !e.matches(&target.names));
         let Origin { source, url, attribution, release } = origin;
         self.index.artists.push(Entry { names: target.names.clone(), mbid, file, source, url, attribution, release, added, updated: now });
+        self.changes += 1;
         self.save()?;
         for e in old {
             self.forget_file(&e.file);
@@ -682,6 +695,7 @@ impl ArtistPictures {
                 self.lookups.borrow_mut().insert(key, Lookup::Nothing);
             }
         }
+        self.changes += 1;
         self.save()?;
         for e in old {
             self.forget_file(&e.file);
