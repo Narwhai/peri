@@ -38,7 +38,17 @@ pub(super) fn home_page(s: &App, p: &Palette) -> El {
         .child(people_block(s, p))
         .child(activity_block(s, p))
         .child(mix_block(s, p));
-    col().key("home-page").w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: false }).child(body)
+    let at = s.home_scroll.clone();
+    col()
+        .key("home-page")
+        .w_full()
+        .grow(1.0)
+        .min_h(0.0)
+        .scroll(ScrollSpec { stick_bottom: false })
+        .on_scroll_offset(move |pos: ScrollPos| {
+            at.set(pos.offset);
+        })
+        .child(body)
 }
 
 /// Top artists, albums and songs over the chosen window, side by side; they wrap on narrow

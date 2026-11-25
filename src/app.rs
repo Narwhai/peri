@@ -240,6 +240,10 @@ pub struct App {
     pub library_scroll: Live<[f32; 2]>,
     /// `library_scroll` when a page last opened from the library, where Back returns to.
     library_scroll_saved: [f32; 2],
+    /// The Home page's scroll, kept current while it shows.
+    pub home_scroll: Live<[f32; 2]>,
+    /// `home_scroll` when a page last opened from Home, where Back returns to.
+    home_scroll_saved: [f32; 2],
     /// The Home strip's sideways scroll as `[offset, max]`, kept current while it shows.
     pub home_strip: Live<[f32; 2]>,
     /// The Home strip's viewport width, kept current while it shows.
@@ -458,6 +462,8 @@ impl App {
             artist_with_aliases: false,
             library_scroll: Live::new([0.0, 0.0]),
             library_scroll_saved: [0.0, 0.0],
+            home_scroll: Live::new([0.0, 0.0]),
+            home_scroll_saved: [0.0, 0.0],
             home_strip: Live::new([0.0; 2]),
             home_viewport: Live::new(0.0),
             unlistened_order,
@@ -1160,11 +1166,14 @@ impl App {
         if left == Page::Library {
             self.library_scroll_saved = self.library_scroll.get();
         } else {
+            if left == Page::Home {
+                self.home_scroll_saved = self.home_scroll.get();
+            }
             self.history.push(left);
         }
     }
 
-    /// Back: the page before this one, else the library, scrolled to where it was left.
+    /// Back: the page before this one, else the library; the library and Home scroll to where they were left.
     pub fn go_back(&mut self, tx: &mut Tx) {
         self.close_panel();
         self.details = None;
@@ -1181,6 +1190,10 @@ impl App {
         if self.page == Page::Library {
             let [x, y] = self.library_scroll_saved;
             tx.scroll_to_instant("tracks", x, y);
+        }
+        if self.page == Page::Home {
+            let [x, y] = self.home_scroll_saved;
+            tx.scroll_to_instant("home-page", x, y);
         }
         if self.page == Page::Graph {
             // An artist linked on the page just left changes the graph.

@@ -837,3 +837,42 @@ fn the_mix_follows_the_plays_and_its_bars_are_proportional() {
     assert!(has(&rt, "mix-genres-bar0"));
     assert!((rect(&rt, "mix-genres-bar0")[2] - rect(&rt, "mix-genres-track0")[2]).abs() < 1.0, "a full bar fills its track");
 }
+
+/// Scrolls Home down by `dy` points.
+fn scroll_home(rt: &mut Runtime<App>, dy: f32) {
+    let (x, y) = rt.find("home-page").expect("Home shows");
+    rt.wheel(x, y, -dy);
+    settle(rt);
+}
+
+#[test]
+fn back_from_a_name_in_the_people_block_returns_home_to_where_it_was() {
+    let mut rt = unplayed_home();
+    rt.set_viewport((1200.0, 900.0), 1.0);
+    rt.update(|s, _| s.edit_track(0, |t| t.credits = vec![crate::credits::Credit::parse(crate::credits::Role::Producer, "Kenny Segal")]));
+    let now = crate::listen::unix_now().expect("the clock");
+    rt.update(move |s, _| {
+        let _ = s.record_play(0, now - 60);
+    });
+    settle(&mut rt);
+    scroll_home(&mut rt, 400.0);
+    let before = rt.state.home_scroll.get()[1];
+    assert!(before > 300.0, "Home scrolled, to {before}");
+    click(&mut rt, "people-producer-0");
+    assert_eq!(rt.state.open_artist(), Some("Kenny Segal"), "the name opened its artist's page");
+    click(&mut rt, "back");
+    assert_eq!(rt.state.page, Page::Home);
+    let after = rt.state.home_scroll.get()[1];
+    assert!((after - before).abs() < 1.0, "back at {before}, not {after}");
+    assert!(has(&rt, "people-producer-0"), "the same name shows again");
+}
+
+#[test]
+fn the_home_tab_still_opens_at_the_top_from_another_tab() {
+    let mut rt = runtime_sized((1200.0, 900.0));
+    scroll_home(&mut rt, 1200.0);
+    click(&mut rt, "library-tab");
+    click(&mut rt, "home-tab");
+    assert_eq!(rt.state.page, Page::Home);
+    assert!(rt.state.home_scroll.get()[1] < 1.0, "the Home tab opens at the top, at {}", rt.state.home_scroll.get()[1]);
+}
