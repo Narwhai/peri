@@ -10,7 +10,8 @@ use crate::view::view;
 
 /// The demo library with `last_played` set on some songs, on the Home tab.
 fn runtime() -> Runtime<App> {
-    runtime_sized((1200.0, 900.0))
+    // Tall enough for the Home page's blocks, so the controls and cards a test clicks are on screen.
+    runtime_sized((1200.0, 1800.0))
 }
 
 /// `runtime` in a window `size` points big.
@@ -196,7 +197,7 @@ fn recently_added_cards_are_200_wide_and_the_strip_spans_the_page_body() {
 
 #[test]
 fn the_arrows_scroll_the_recently_added_strip_and_stop_at_its_ends() {
-    let mut rt = runtime_sized((640.0, 900.0));
+    let mut rt = runtime_sized((640.0, 1800.0));
     let first = rt.state.recently_added()[0];
     let card = format!("recent-albums{first}");
     let start = rect(&rt, &card)[0];
@@ -301,7 +302,8 @@ fn recently_played_ties_break_by_library_order_and_never_played_songs_are_left_o
 
 #[test]
 fn double_clicking_a_recently_played_song_plays_the_list_from_it() {
-    let mut rt = runtime();
+    // Taller than the stats, top and people blocks, so the Recently Played rows are on screen.
+    let mut rt = runtime_sized((1200.0, 1800.0));
     let eta = track(&rt, "ETA");
     double_click(&mut rt, &format!("recent-songs-t{eta}"));
     assert_eq!(rt.state.current, Some(eta));
@@ -314,7 +316,7 @@ fn double_clicking_a_recently_played_song_plays_the_list_from_it() {
 
 #[test]
 fn a_single_click_selects_a_recently_played_song_without_playing_it() {
-    let mut rt = runtime();
+    let mut rt = runtime_sized((1200.0, 1600.0));
     let says = track(&rt, "Says");
     click(&mut rt, &format!("recent-songs-t{says}"));
     assert_eq!(rt.state.selected, Some(says));
@@ -480,7 +482,7 @@ fn unlistened_order_is_chosen_from_the_segmented_control_and_saved() {
     let mut app = App::new(Output::Silent, Store::at(&file));
     app.set_library(vec![album_track("Mid", Some(2005)), album_track("Late", Some(2010)), album_track("Early", Some(1990))], false);
     app.show_home();
-    let mut rt = Runtime::new(app, view, (1200.0, 900.0), Env::new(true, 1.0));
+    let mut rt = Runtime::new(app, view, (1200.0, 1800.0), Env::new(true, 1.0));
     rt.frame(0.0);
     settle(&mut rt);
     assert_eq!(rt.state.unlistened_order, UnlistenedOrder::Newest, "Newest unless chosen");
@@ -494,7 +496,7 @@ fn unlistened_order_is_chosen_from_the_segmented_control_and_saved() {
 
 #[test]
 fn the_shuffle_button_shows_only_in_random_and_rerolls_the_seed() {
-    let mut rt = runtime();
+    let mut rt = runtime_sized((1200.0, 1600.0));
     assert!(!has(&rt, "unlistened-reroll"), "no shuffle in Newest");
     click(&mut rt, "random");
     assert_eq!(rt.state.unlistened_order, UnlistenedOrder::Random);
@@ -534,4 +536,343 @@ fn unlistened_says_so_once_every_album_has_been_played() {
     settle(&mut rt);
     assert_eq!(text_of(&rt, "unlistened-albums-empty"), "Every album has been played.");
     assert!(!has(&rt, "unlistened-albums-wall"));
+}
+
+#[test]
+fn the_stats_strip_sits_below_the_discover_block_and_shows_the_totals() {
+    let rt = runtime();
+    let strip = rect(&rt, "stats");
+    let discover = rect(&rt, "discover");
+    assert!(strip[1] > discover[1], "the strip is below the Discover block");
+    let totals = rt.state.totals();
+    assert_eq!(text_of(&rt, "stat-songs"), totals.songs.to_string(), "the Songs tile figure");
+    assert_eq!(text_of(&rt, "stat-albums"), totals.albums.to_string());
+    assert_eq!(text_of(&rt, "stat-artists"), totals.artists.to_string());
+    assert_eq!(text_of(&rt, "stat-hours"), format!("{:.1}", totals.hours()));
+    let share = totals.played_share().expect("the demo has albums");
+    assert_eq!(text_of(&rt, "stat-albums-played"), format!("{:.0}%", share * 100.0));
+}
+
+#[test]
+fn an_empty_library_says_so_in_the_stats_strip() {
+    let mut rt = runtime();
+    rt.update(|s, _| s.set_library(Vec::new(), false));
+    settle(&mut rt);
+    assert_eq!(text_of(&rt, "stats-empty"), "No songs in the library yet.");
+    assert!(!has(&rt, "stats-tiles"));
+}
+
+/// Each demo song's play, now-ish, so the 7 and 30 day windows have plays to show.
+fn play_demo_songs_now(rt: &mut Runtime<App>) {
+    let now = crate::listen::unix_now().expect("the clock");
+    let count = rt.state.tracks().len();
+    rt.update(move |s, _| {
+        for i in 0..count {
+            let _ = s.record_play(i, now - 60);
+        }
+    });
+    settle(rt);
+}
+
+#[test]
+fn the_top_block_shows_three_columns_of_the_leaders() {
+    let rt = runtime();
+    assert!(has(&rt, "top-artists") && has(&rt, "top-albums") && has(&rt, "top-songs"));
+    assert_eq!(rt.state.top_window, crate::top::Window::All, "all time unless chosen");
+    let first = rt.state.top_model().songs[0].item;
+    assert!(has(&rt, "top-song0"), "the most played song is listed first");
+    assert!(rt.find("top-song0").is_some(), "its row shows");
+    assert!(rt.elements().iter().any(|e| e.text.as_deref() == Some(rt.state.tracks()[first].title.as_str())), "the row names the song");
+}
+
+#[test]
+fn an_empty_window_says_no_plays_in_it() {
+    // A library with songs but no plays: the demo's plays are stamped in 2027, after today.
+    let mut app = App::new(Output::Silent, Store::memory());
+    app.set_library(crate::demo_tracks(), false);
+    app.show_home();
+    let mut rt = Runtime::new(app, view, (1200.0, 1600.0), Env::new(true, 1.0));
+    rt.frame(0.0);
+    settle(&mut rt);
+    click(&mut rt, "7");
+    assert_eq!(rt.state.top_window, crate::top::Window::Days7);
+    assert_eq!(text_of(&rt, "top-empty"), "No plays in the 7 days.");
+    assert!(!has(&rt, "top-columns"));
+}
+
+#[test]
+fn switching_the_window_follows_recent_plays_and_is_saved() {
+    let dir = std::env::temp_dir().join(format!("peri-top-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let file = dir.join("prefs.json");
+    let mut app = App::new(Output::Silent, Store::at(&file));
+    crate::scene_home(&mut app);
+    let mut rt = Runtime::new(app, view, (1200.0, 1800.0), Env::new(true, 1.0));
+    rt.frame(0.0);
+    settle(&mut rt);
+    play_demo_songs_now(&mut rt);
+    click(&mut rt, "7");
+    assert!(has(&rt, "top-columns"), "recent plays show in the 7 days window");
+    assert_eq!(App::new(Output::Silent, Store::at(&file)).top_window, crate::top::Window::Days7, "the window is saved");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_top_artist_or_album_row_opens_its_page() {
+    let mut rt = runtime();
+    let artist = rt.state.top_model().artists[0].item.clone();
+    click(&mut rt, "top-artist0");
+    assert_eq!(rt.state.open_artist(), Some(artist.as_str()), "the artist's page opens");
+    click(&mut rt, "back");
+    assert_eq!(rt.state.page, Page::Home);
+    let album = rt.state.top_model().albums[0].item;
+    click(&mut rt, "top-album0");
+    assert_eq!(rt.state.open_album(), Some(album), "the album opens");
+}
+
+/// A fresh library with the demo's songs and no plays: the demo's are stamped in 2027, after
+/// today, so they'd count in every window.
+fn unplayed_home() -> Runtime<App> {
+    let mut app = App::new(Output::Silent, Store::memory());
+    app.set_library(crate::demo_tracks(), false);
+    app.show_home();
+    let mut rt = Runtime::new(app, view, (1200.0, 1600.0), Env::new(true, 1.0));
+    rt.frame(0.0);
+    settle(&mut rt);
+    rt
+}
+
+/// Plays every song of `rt`'s library once, `at` seconds since the epoch.
+fn play_all_at(rt: &mut Runtime<App>, at: i64) {
+    let count = rt.state.tracks().len();
+    rt.update(move |s, _| {
+        for i in 0..count {
+            let _ = s.record_play(i, at);
+        }
+    });
+    settle(rt);
+}
+
+#[test]
+fn the_people_block_lists_credited_names_by_role_and_links_them() {
+    let mut rt = unplayed_home();
+    assert_eq!(text_of(&rt, "people-empty"), "No credited names played in the window.", "no plays, no names");
+    // Credit the first song, then play it: the names it carries are the ones listed.
+    rt.update(|s, _| s.edit_track(0, |t| t.credits = vec![crate::credits::Credit::parse(crate::credits::Role::Producer, "Kenny Segal")]));
+    let now = crate::listen::unix_now().expect("the clock");
+    rt.update(move |s, _| {
+        let _ = s.record_play(0, now - 60);
+    });
+    settle(&mut rt);
+    let boards = rt.state.people_model();
+    assert!(!boards.is_empty(), "the played song's credits are counted");
+    assert!(has(&rt, "people"), "the block shows");
+    assert!(!has(&rt, "people-empty"));
+    let first = "Kenny Segal".to_string();
+    let key = "people-producer-0".to_string();
+    assert!(has(&rt, &key), "the producer's name shows");
+    click(&mut rt, &key);
+    assert_eq!(rt.state.open_artist(), Some(first.as_str()), "a name opens its artist's page");
+}
+
+#[test]
+fn the_people_block_follows_the_window() {
+    let mut rt = unplayed_home();
+    let year_ago = crate::listen::unix_now().expect("the clock") - 365 * 86_400;
+    play_all_at(&mut rt, year_ago);
+    click(&mut rt, "7");
+    assert_eq!(text_of(&rt, "people-empty"), "No credited names played in the window.", "a year-old play isn't in 7 days");
+    click(&mut rt, "all");
+    assert!(has(&rt, "people"), "all time shows them");
+}
+
+#[test]
+fn the_discovery_block_opens_on_unlistened_with_its_order_control() {
+    let rt = runtime();
+    assert_eq!(rt.state.discover, crate::discover::Tab::Unlistened, "Unlistened unless chosen");
+    assert!(has(&rt, "discover"), "the block shows");
+    assert!(has(&rt, "unlistened-albums"), "the Unlistened tab keeps its albums");
+    assert!(has(&rt, "unlistened-order"), "and its order control");
+    assert!(has(&rt, "discover-tab"), "the tab switch shows");
+}
+
+#[test]
+fn each_discovery_tab_shows_its_albums_or_says_why_there_are_none() {
+    let mut rt = unplayed_home();
+    click(&mut rt, "continue");
+    assert_eq!(rt.state.discover, crate::discover::Tab::Continue);
+    assert_eq!(text_of(&rt, "discover-continue-empty"), "No album is part way through yet.", "nothing started yet");
+    click(&mut rt, "rediscover");
+    assert_eq!(text_of(&rt, "discover-rediscover-empty"), "No album has 5 plays and was last played more than 60 days ago.");
+    click(&mut rt, "new");
+    assert!(has(&rt, "discover-new-wall") || has(&rt, "discover-new-empty"), "the New tab shows one or the other");
+    click(&mut rt, "unlistened");
+    assert!(has(&rt, "unlistened-albums-wall"), "back on Unlistened, its albums are back");
+}
+
+#[test]
+fn a_discovery_tab_is_remembered_across_launches() {
+    let dir = std::env::temp_dir().join(format!("peri-discover-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let file = dir.join("prefs.json");
+    let mut app = App::new(Output::Silent, Store::at(&file));
+    app.set_library(crate::demo_tracks(), false);
+    app.show_home();
+    let mut rt = Runtime::new(app, view, (1200.0, 1600.0), Env::new(true, 1.0));
+    rt.frame(0.0);
+    settle(&mut rt);
+    click(&mut rt, "rediscover");
+    assert_eq!(App::new(Output::Silent, Store::at(&file)).discover, crate::discover::Tab::Rediscover, "the tab is saved");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_unlistened_album_moves_to_continue_once_part_of_it_plays() {
+    let mut rt = unplayed_home();
+    let album_songs: Vec<usize> = {
+        let albums = rt.state.albums();
+        let big = albums.iter().max_by_key(|a| a.tracks.len()).expect("albums");
+        big.tracks.clone()
+    };
+    assert!(album_songs.len() >= 2, "the demo has an album with several songs");
+    let first = album_songs[0];
+    let title = rt.state.albums()[rt.state.album_of(first).expect("its album")].title.clone();
+    let now = crate::listen::unix_now().expect("the clock");
+    rt.update(move |s, _| {
+        let _ = s.record_play(first, now - 60);
+    });
+    settle(&mut rt);
+    click(&mut rt, "continue");
+    let shown = rt.state.discover_albums(crate::discover::Tab::Continue);
+    let titles: Vec<String> = shown.iter().map(|&a| rt.state.albums()[a].title.clone()).collect();
+    assert!(titles.contains(&title), "a part-played album is in Continue: {titles:?}");
+}
+
+/// Today in the local time zone, as days since the epoch, and the zone's offset.
+fn local_today() -> (i64, i64) {
+    let now = crate::listen::unix_now().expect("the clock");
+    let offset = crate::activity::local_offset(now);
+    (crate::activity::day_of(now, offset), offset)
+}
+
+/// A fresh home page with a play `days_ago` local days back from today, for each entry. Each
+/// play lands on the demo's songs at local noon, so its day doesn't depend on the time of day.
+fn home_with_play_days(days_ago: &[i64]) -> Runtime<App> {
+    let mut rt = unplayed_home();
+    let (today, offset) = local_today();
+    let plays: Vec<i64> = days_ago.iter().map(|&d| (today - d) * 86_400 + 12 * 3600 - offset).collect();
+    rt.update(move |s, _| {
+        for (n, at) in plays.iter().enumerate() {
+            let _ = s.record_play(n % s.tracks().len(), *at);
+        }
+    });
+    settle(&mut rt);
+    rt
+}
+
+#[test]
+fn the_activity_block_shows_the_heatmap_and_streaks() {
+    let rt = home_with_play_days(&[0, 1, 2, 3, 10]);
+    assert!(has(&rt, "activity-grid"), "the grid shows with enough days");
+    assert_eq!(text_of(&rt, "activity-streaks"), "Current streak 4 days  •  Longest 4 days", "four days running to today");
+    assert!(has(&rt, "stat-streak"), "the streak tile shows in the stats strip");
+    assert_eq!(text_of(&rt, "stat-streak"), "4 days");
+}
+
+#[test]
+fn a_few_active_days_show_a_note_instead_of_the_heatmap() {
+    let rt = home_with_play_days(&[0, 5]);
+    assert!(!has(&rt, "activity-grid"), "two days aren't enough for a heatmap");
+    assert_eq!(text_of(&rt, "activity-empty"), "Play a few more days to see your activity here.");
+}
+
+#[test]
+fn a_lapsed_streak_is_not_current() {
+    let rt = home_with_play_days(&[10, 11, 12, 13]);
+    assert_eq!(text_of(&rt, "activity-streaks"), "Current streak 0 days  •  Longest 4 days");
+}
+
+#[test]
+fn heatmap_cells_show_for_days_with_plays_and_are_keyed_by_day() {
+    let rt = home_with_play_days(&[0, 1, 2]);
+    let (today, _) = local_today();
+    assert!(has(&rt, &format!("activity-day-{today}")), "today has a cell");
+    assert!(has(&rt, &format!("activity-day-{}", today - 2)), "a day with plays has a cell");
+}
+
+#[test]
+fn the_mix_shows_genres_and_decades_labelled_by_their_source() {
+    let mut rt = unplayed_home();
+    assert!(has(&rt, "mix"), "the block shows");
+    assert_eq!(text_of(&rt, "mix-genres-title"), "Genres, of the library (nothing played yet)", "the library's share with no plays");
+    assert!(has(&rt, "mix-genres-bar0"), "a bar per genre");
+    let now = crate::listen::unix_now().expect("the clock");
+    play_all_at(&mut rt, now - 60);
+    assert_eq!(text_of(&rt, "mix-genres-title"), "Genres, of plays", "plays once there are some");
+    assert_eq!(text_of(&rt, "mix-decades-title"), "Decades, of plays");
+}
+
+#[test]
+fn a_mix_with_no_songs_says_so() {
+    let mut rt = unplayed_home();
+    rt.update(|s, _| s.set_library(Vec::new(), false));
+    settle(&mut rt);
+    assert_eq!(text_of(&rt, "mix-genres-empty"), "No genres yet.");
+    assert_eq!(text_of(&rt, "mix-decades-empty"), "No decades yet.");
+    assert!(!has(&rt, "mix-genres-bar0"));
+}
+
+
+#[test]
+fn the_mix_follows_the_plays_and_its_bars_are_proportional() {
+    let mut rt = unplayed_home();
+    let now = crate::listen::unix_now().expect("the clock");
+    rt.update(move |s, _| {
+        let _ = s.record_play(0, now - 60);
+    });
+    settle(&mut rt);
+    let mix = rt.state.mix_model();
+    let top = mix.0.bars.first().expect("the played song has a genre");
+    assert_eq!(top.share, 1.0, "the only played song's genre has all the plays");
+    assert!(has(&rt, "mix-genres-bar0"));
+    assert!((rect(&rt, "mix-genres-bar0")[2] - rect(&rt, "mix-genres-track0")[2]).abs() < 1.0, "a full bar fills its track");
+}
+
+/// Scrolls Home down by `dy` points.
+fn scroll_home(rt: &mut Runtime<App>, dy: f32) {
+    let (x, y) = rt.find("home-page").expect("Home shows");
+    rt.wheel(x, y, -dy);
+    settle(rt);
+}
+
+#[test]
+fn back_from_a_name_in_the_people_block_returns_home_to_where_it_was() {
+    let mut rt = unplayed_home();
+    rt.set_viewport((1200.0, 900.0), 1.0);
+    rt.update(|s, _| s.edit_track(0, |t| t.credits = vec![crate::credits::Credit::parse(crate::credits::Role::Producer, "Kenny Segal")]));
+    let now = crate::listen::unix_now().expect("the clock");
+    rt.update(move |s, _| {
+        let _ = s.record_play(0, now - 60);
+    });
+    settle(&mut rt);
+    scroll_home(&mut rt, 400.0);
+    let before = rt.state.home_scroll.get()[1];
+    assert!(before > 300.0, "Home scrolled, to {before}");
+    click(&mut rt, "people-producer-0");
+    assert_eq!(rt.state.open_artist(), Some("Kenny Segal"), "the name opened its artist's page");
+    click(&mut rt, "back");
+    assert_eq!(rt.state.page, Page::Home);
+    let after = rt.state.home_scroll.get()[1];
+    assert!((after - before).abs() < 1.0, "back at {before}, not {after}");
+    assert!(has(&rt, "people-producer-0"), "the same name shows again");
+}
+
+#[test]
+fn the_home_tab_still_opens_at_the_top_from_another_tab() {
+    let mut rt = runtime_sized((1200.0, 900.0));
+    scroll_home(&mut rt, 1200.0);
+    click(&mut rt, "library-tab");
+    click(&mut rt, "home-tab");
+    assert_eq!(rt.state.page, Page::Home);
+    assert!(rt.state.home_scroll.get()[1] < 1.0, "the Home tab opens at the top, at {}", rt.state.home_scroll.get()[1]);
 }

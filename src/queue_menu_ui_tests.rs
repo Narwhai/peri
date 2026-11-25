@@ -150,6 +150,8 @@ fn a_home_song_row_has_the_menu_too() {
     let eta = idx(&rt, "ETA");
     // Recently Played lists only songs that have played.
     rt.update(move |s, _| s.record_play(eta, 1_700_000_000).expect("the play is recorded"));
+    // Taller than the stats strip and the recent albums, so the song's row is on screen.
+    rt.set_viewport((980.0, 1100.0), 1.0);
     settle(&mut rt);
     let before = titles(&rt).len();
     click(&mut rt, "home-tab");

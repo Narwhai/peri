@@ -13,7 +13,7 @@ use crate::album::{self, Album, AlbumId};
 use crate::audio::{self, Engine};
 use crate::query::property::{Mode, Property};
 use crate::covers::Covers;
-use crate::pages::{ArtistModel, Pages};
+use crate::pages::{ArtistModel, Pages, TopModel};
 use crate::search::SearchResults;
 use crate::collab::CollabPage;
 use crate::label::LabelPage;
@@ -24,6 +24,7 @@ use crate::library::{self, ScanMsg, Track};
 use crate::listen::{Listen, unix_now};
 use crate::palette::{Appearance, Theme};
 use crate::plays::Plays;
+use crate::stats::Totals;
 use crate::queue::{Entry, Queue, QueueReplace, Repeat, Rng};
 
 /// How often the view refreshes the playback position while a track plays.
@@ -239,6 +240,10 @@ pub struct App {
     pub library_scroll: Live<[f32; 2]>,
     /// `library_scroll` when a page last opened from the library, where Back returns to.
     library_scroll_saved: [f32; 2],
+    /// The Home page's scroll, kept current while it shows.
+    pub home_scroll: Live<[f32; 2]>,
+    /// `home_scroll` when a page last opened from Home, where Back returns to.
+    home_scroll_saved: [f32; 2],
     /// The Home strip's sideways scroll as `[offset, max]`, kept current while it shows.
     pub home_strip: Live<[f32; 2]>,
     /// The Home strip's viewport width, kept current while it shows.
@@ -247,6 +252,10 @@ pub struct App {
     pub unlistened_order: UnlistenedOrder,
     /// The seed of Unlistened Releases' Random order; a re-roll sets a new one.
     pub unlistened_seed: u64,
+    /// The window the Home leaderboards show, kept in the preferences.
+    pub top_window: crate::top::Window,
+    /// The tab of the home page's discovery block, kept in the preferences.
+    pub discover: crate::discover::Tab,
     /// Album covers for cards and lists; `None` until setup has a waker.
     pub covers: Option<Covers>,
     /// Indices into `tracks` the active view shows, in play order. In an album view,
@@ -429,6 +438,14 @@ impl App {
             Ok(order) => (order, None),
             Err(e) => (UnlistenedOrder::default(), Some(e)),
         };
+        let (discover, discover_error) = match store.load_discover() {
+            Ok(tab) => (tab, None),
+            Err(e) => (crate::discover::Tab::default(), Some(e)),
+        };
+        let (top_window, top_window_error) = match store.load_top_window() {
+            Ok(window) => (window, None),
+            Err(e) => (crate::top::Window::default(), Some(e)),
+        };
         let (queue_restore, queue_error) = match store.load_queue() {
             Ok(saved) => (saved, None),
             Err(e) => (None, Some(e)),
@@ -464,10 +481,14 @@ impl App {
             artist_with_aliases: false,
             library_scroll: Live::new([0.0, 0.0]),
             library_scroll_saved: [0.0, 0.0],
+            home_scroll: Live::new([0.0, 0.0]),
+            home_scroll_saved: [0.0, 0.0],
             home_strip: Live::new([0.0; 2]),
             home_viewport: Live::new(0.0),
             unlistened_order,
             unlistened_seed,
+            top_window,
+            discover,
             covers: None,
             filtered: Vec::new(),
             shown_albums: Vec::new(),
@@ -522,7 +543,7 @@ impl App {
             volume_before_drag: None,
             shuffle: false,
             repeat: Repeat::Off,
-            error: relations_error.clone().or(lastfm_error).or(plays_error).or(graph_error).or(tab_error).or(theme_error).or(appearance_error).or(unlistened_error).or(queue_error).or(queue_replace_error).or(queue_pinned_error).or(pictures_error),
+            error: relations_error.clone().or(lastfm_error).or(plays_error).or(graph_error).or(tab_error).or(theme_error).or(appearance_error).or(unlistened_error).or(top_window_error).or(discover_error).or(queue_error).or(queue_replace_error).or(queue_pinned_error).or(pictures_error),
             scan: None,
             drop_hover: false,
             pictures,
@@ -906,6 +927,59 @@ impl App {
         self.pages.recent_albums.get(self.data_version, || self.recently_added())
     }
 
+    /// The Home leaderboards for the chosen window, kept until the library, the relations, the
+    /// window or the day changes.
+    pub fn top_model(&self) -> Rc<TopModel> {
+        let now = unix_now().unwrap_or(0);
+        let key = (self.data_version, self.top_window, now / 86_400);
+        self.pages.top.get(key, || TopModel {
+            artists: crate::top::artists(&self.tracks, &self.plays, &self.relations, self.top_window, now),
+            albums: crate::top::albums(&self.tracks, &self.albums, &self.plays, self.top_window, now),
+            songs: crate::top::songs(&self.tracks, &self.plays, self.top_window, now),
+        })
+    }
+
+    /// A discovery tab's albums, kept like `top_model`. Unlistened is `unlistened_albums`.
+    pub fn discover_albums(&self, tab: crate::discover::Tab) -> Rc<Vec<usize>> {
+        let now = unix_now().unwrap_or(0);
+        let key = (self.data_version, tab, now / 86_400);
+        self.pages.discover.get(key, || match tab {
+            crate::discover::Tab::Unlistened => self.unlistened(self.unlistened_order, self.unlistened_seed),
+            crate::discover::Tab::Continue => crate::discover::continuing(&self.albums, &self.tracks),
+            crate::discover::Tab::Rediscover => crate::discover::rediscover(&self.albums, now),
+            crate::discover::Tab::New => crate::discover::new_this_month(&self.albums, now),
+        })
+    }
+
+    /// The genre and decade shares, kept until the library changes.
+    pub fn mix_model(&self) -> Rc<(crate::mix::Mix, crate::mix::Mix)> {
+        self.pages.mix.get(self.data_version, || (crate::mix::genres(&self.tracks), crate::mix::decades(&self.tracks)))
+    }
+
+    /// The heatmap and streaks, from every play, in the local time zone. Kept by the library, the
+    /// offset and the day.
+    pub fn activity(&self) -> Rc<crate::activity::Activity> {
+        let now = unix_now().unwrap_or(0);
+        let offset = crate::activity::local_offset(now);
+        let key = (self.data_version, offset, now / 86_400);
+        self.pages.activity.get(key, || {
+            let times = self.plays.plays_since(&self.tracks, i64::MIN).into_iter().map(|(_, at)| at);
+            crate::activity::Activity::of(times, offset, now)
+        })
+    }
+
+    /// The credits leaderboards for the chosen window, kept like `top_model`.
+    pub fn people_model(&self) -> Rc<Vec<crate::people::RoleBoard>> {
+        let now = unix_now().unwrap_or(0);
+        let key = (self.data_version, self.top_window, now / 86_400);
+        self.pages.people.get(key, || crate::people::boards(&self.tracks, &self.plays, self.top_window, now))
+    }
+
+    /// The library's totals for the stats strip, kept until the library changes.
+    pub fn totals(&self) -> Rc<Totals> {
+        self.pages.totals.get(self.data_version, || Totals::of(&self.tracks, &self.albums))
+    }
+
     /// `recently_played`, kept until the library changes.
     pub fn recent_songs(&self) -> Rc<Vec<usize>> {
         self.pages.recent_songs.get(self.data_version, || self.recently_played())
@@ -1265,11 +1339,14 @@ impl App {
         if left == Page::Library {
             self.library_scroll_saved = self.library_scroll.get();
         } else {
+            if left == Page::Home {
+                self.home_scroll_saved = self.home_scroll.get();
+            }
             self.history.push(left);
         }
     }
 
-    /// Back: the page before this one, else the library, scrolled to where it was left.
+    /// Back: the page before this one, else the library; the library and Home scroll to where they were left.
     pub fn go_back(&mut self, tx: &mut Tx) {
         self.close_panel();
         self.details = None;
@@ -1286,6 +1363,10 @@ impl App {
         if self.page == Page::Library {
             let [x, y] = self.library_scroll_saved;
             tx.scroll_to_instant("tracks", x, y);
+        }
+        if self.page == Page::Home {
+            let [x, y] = self.home_scroll_saved;
+            tx.scroll_to_instant("home-page", x, y);
         }
         if self.page == Page::Graph {
             // An artist linked on the page just left changes the graph.
@@ -1341,6 +1422,22 @@ impl App {
     pub fn set_unlistened_order(&mut self, order: UnlistenedOrder) {
         self.unlistened_order = order;
         if let Err(e) = self.store.save_unlistened_order(order) {
+            self.error = Some(e);
+        }
+    }
+
+    /// Chooses the discovery tab and saves it. A failed save shows as an error.
+    pub fn set_discover(&mut self, tab: crate::discover::Tab) {
+        self.discover = tab;
+        if let Err(e) = self.store.save_discover(tab) {
+            self.error = Some(e);
+        }
+    }
+
+    /// Chooses the window the Home leaderboards show and saves it. A failed save shows as an error.
+    pub fn set_top_window(&mut self, window: crate::top::Window) {
+        self.top_window = window;
+        if let Err(e) = self.store.save_top_window(window) {
             self.error = Some(e);
         }
     }

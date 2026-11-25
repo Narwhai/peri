@@ -3,6 +3,7 @@
 //! `cargo run --release -- ~/Music` opens the window and scans the folders and files given.
 //! `-- --snap out.png --scene library` renders a demo library headless.
 
+mod activity;
 mod album;
 mod app;
 mod artist;
@@ -12,6 +13,7 @@ mod covers;
 mod pages;
 mod collab;
 mod credits;
+mod discover;
 mod details;
 mod graph;
 mod icons;
@@ -19,12 +21,16 @@ mod label;
 mod lastfm;
 mod library;
 mod listen;
+mod mix;
 mod palette;
+mod people;
 mod pictures;
 mod plays;
 mod queue;
 mod relations;
 mod search;
+mod stats;
+mod top;
 mod view;
 
 #[cfg(test)]
