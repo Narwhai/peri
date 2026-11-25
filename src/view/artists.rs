@@ -317,7 +317,7 @@ fn editable_picture(s: &App, info: &ArtistPage, p: &Palette, kit: &Kit, layer: &
         .separator()
         // Kept in place when disabled, so each item keeps its key.
         .item(MenuItem::new("Keep this picture").description("Copy it in as yours, with its credit").disabled(!online).on_select(|s: &mut App| s.keep_artist_picture()))
-        .item(MenuItem::new("Look up on Wikimedia").disabled(has).on_select(|s: &mut App| s.look_up_artist_picture()))
+        .item(MenuItem::new("Choose from Wikimedia…").on_select(|s: &mut App| s.open_picture_picker()))
         .separator()
         .item(MenuItem::new("Remove picture").danger(true).disabled(!has && !online).on_select(|s: &mut App| s.remove_artist_picture()))
         .on_close(|s: &mut App| s.picture_menu = false)

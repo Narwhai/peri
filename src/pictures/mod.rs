@@ -129,6 +129,8 @@ pub enum Input {
     /// Image bytes, as pasted.
     Bytes(Vec<u8>),
     Url(String),
+    /// A Wikimedia Commons file the user picked, kept with its credit.
+    Commons(String),
 }
 
 impl Input {
@@ -136,6 +138,7 @@ impl Input {
         match self {
             Input::File(_) => Source::Local,
             Input::Bytes(_) | Input::Url(_) => Source::User,
+            Input::Commons(_) => Source::Wikimedia,
         }
     }
 
@@ -208,6 +211,28 @@ impl ReadFrom {
 /// the network, and tests may stand in their own.
 pub type Fetch = Arc<dyn Fn(&str) -> Result<Vec<u8>, String> + Send + Sync>;
 
+/// The picture picker: the candidates a lookup found for a page, their thumbnails as they arrive.
+pub struct Picker {
+    /// The page's names.
+    pub names: Vec<String>,
+    /// `None` while the candidates are gathered.
+    pub candidates: Option<Result<Vec<online::Candidate>, String>>,
+    /// Each candidate's thumbnail, by file, once downloaded (`None` when it couldn't be).
+    thumbs: HashMap<String, Option<Image>>,
+}
+
+impl Picker {
+    /// A candidate's thumbnail: `None` while it downloads, `Some(None)` when it couldn't be.
+    pub fn thumb(&self, file: &str) -> Option<Option<Image>> {
+        self.thumbs.get(file).cloned()
+    }
+}
+
+enum PickerMsg {
+    Candidates(Result<Vec<online::Candidate>, String>),
+    Thumb(String, Option<(u32, u32, Vec<u8>)>),
+}
+
 /// A finished import: whose, from what, and the JPEG to store or why there's none.
 type Done = (Target, Origin, Result<Vec<u8>, String>);
 /// The reader's jobs (cache key, what to read) and answers (key, shrunk RGBA if it decoded).
@@ -237,6 +262,9 @@ pub struct ArtistPictures {
     lookup_worker: Option<(Sender<LookupJob>, Receiver<LookupDone>)>,
     /// Each page's music-folder picture, found once per library version.
     folders: RefCell<(u64, HashMap<String, Option<PathBuf>>)>,
+    /// The open picker, and what its worker sends; a new picker drops the old one's messages.
+    picker: Option<Picker>,
+    picker_msgs: Option<Receiver<PickerMsg>>,
 }
 
 impl ArtistPictures {
@@ -265,6 +293,8 @@ impl ArtistPictures {
             lookups: RefCell::new(HashMap::new()),
             lookup_worker: None,
             folders: RefCell::new((0, HashMap::new())),
+            picker: None,
+            picker_msgs: None,
         };
         (pictures, error)
     }
@@ -408,21 +438,6 @@ impl ArtistPictures {
         Some((self.cached(format!("online:{key}"), ReadFrom::Bytes(looked.jpeg.clone())), looked.attribution.clone()))
     }
 
-    /// Looks the page up again, as the user asked: even with lookups off, and after they
-    /// removed the picture a lookup found.
-    pub fn look_up(&mut self, names: &[String], mbid: Option<String>) {
-        let Some(key) = names.first().map(|n| n.to_lowercase()) else { return };
-        if self.index.declined(names) {
-            self.index.declined.retain(|d| !same(d, names));
-            let _ = self.save();
-        }
-        if matches!(self.lookups.borrow().get(&key), Some(Lookup::Pending)) {
-            return;
-        }
-        self.cache.borrow_mut().slots.remove(&format!("online:{key}"));
-        self.start_lookup(key, names.to_vec(), mbid);
-    }
-
     fn start_lookup(&self, key: String, names: Vec<String>, mbid: Option<String>) {
         match &self.lookup_worker {
             Some((jobs, _)) => {
@@ -434,6 +449,75 @@ impl ArtistPictures {
                 self.lookups.borrow_mut().insert(key, found.map_or(Lookup::Nothing, |l| Lookup::Found(Arc::new(l))));
             }
         }
+    }
+
+    /// Opens the picker for the page with these names: its candidates are gathered and their
+    /// thumbnails downloaded off the UI thread once started, else now.
+    pub fn open_picker(&mut self, names: &[String], mbid: Option<String>) {
+        let (tx, rx) = channel();
+        self.picker = Some(Picker { names: names.to_vec(), candidates: None, thumbs: HashMap::new() });
+        self.picker_msgs = Some(rx);
+        let (names, fetch) = (names.to_vec(), self.fetch.clone());
+        let job = move |wake: &dyn Fn()| {
+            let found = online::candidates(&names, mbid.as_deref(), &fetch);
+            let thumbs: Vec<(String, String)> = found.iter().flatten().map(|c| (c.file.clone(), c.thumb.clone())).collect();
+            if tx.send(PickerMsg::Candidates(found)).is_err() {
+                return;
+            }
+            wake();
+            for (file, url) in thumbs {
+                let thumb = fetch(&url).ok().and_then(|bytes| shrink(&bytes, online::THUMB_WIDTH));
+                if tx.send(PickerMsg::Thumb(file, thumb)).is_err() {
+                    return;
+                }
+                wake();
+            }
+        };
+        match self.waker.clone() {
+            Some(waker) => {
+                let spawned = std::thread::Builder::new().name("artist-picture-picker".into()).spawn(move || job(&*waker));
+                if let Err(e) = spawned
+                    && let Some(picker) = &mut self.picker
+                {
+                    picker.candidates = Some(Err(format!("Couldn't start the lookup: {e}")));
+                }
+            }
+            None => {
+                job(&|| {});
+                self.drain_picker();
+            }
+        }
+    }
+
+    pub fn close_picker(&mut self) {
+        self.picker = None;
+        self.picker_msgs = None;
+    }
+
+    pub fn picker(&self) -> Option<&Picker> {
+        self.picker.as_ref()
+    }
+
+    /// Takes the picker worker's news; true when any arrived.
+    fn drain_picker(&mut self) -> bool {
+        let Some(rx) = &self.picker_msgs else { return false };
+        let msgs: Vec<PickerMsg> = rx.try_iter().collect();
+        let Some(picker) = &mut self.picker else { return false };
+        for msg in &msgs {
+            match msg {
+                PickerMsg::Candidates(found) => picker.candidates = Some(found.clone()),
+                PickerMsg::Thumb(file, thumb) => {
+                    let image = thumb.as_ref().map(|(w, h, rgba)| self.images.rgba(*w, *h, rgba.clone()));
+                    if let Some(image) = &image
+                        && self.waker.is_none()
+                    {
+                        let _ = image.wait();
+                    }
+                    picker.thumbs.insert(file.clone(), image);
+                }
+            }
+        }
+        !msgs.is_empty()
     }
 
     /// Whether a lookup for the page with these names is running.
@@ -465,8 +549,8 @@ impl ArtistPictures {
     }
 
     /// Takes pictures the reader finished; true when any arrived.
-    pub fn drain(&self) -> bool {
-        let mut looked = false;
+    pub fn drain(&mut self) -> bool {
+        let mut looked = self.drain_picker();
         if let Some((_, done)) = &self.lookup_worker {
             for (key, found) in done.try_iter() {
                 looked = true;
@@ -493,8 +577,17 @@ impl ArtistPictures {
         }
         let (outbox, fetch) = (self.imports.0.clone(), self.fetch.clone());
         let job = move || {
-            let origin = input.origin();
-            let result = input_bytes(input, &fetch).and_then(|bytes| prepare(&bytes));
+            let mut origin = input.origin();
+            let bytes = match input {
+                // A picked Commons file brings its credit, read with it.
+                Input::Commons(file) => online::file_picture(&file, &fetch).map(|found| {
+                    origin.url = Some(found.url);
+                    origin.attribution = Some(found.attribution);
+                    found.bytes
+                }),
+                input => input_bytes(input, &fetch),
+            };
+            let result = bytes.and_then(|bytes| prepare(&bytes));
             let _ = outbox.send((target, origin, result));
         };
         match self.waker.clone() {
@@ -674,7 +767,7 @@ fn input_bytes(input: Input, fetch: &Fetch) -> Result<Vec<u8>, String> {
         Input::File(path) => read_limited(&path),
         Input::Bytes(bytes) if bytes.len() as u64 > MAX_BYTES => Err("That image is too large for a picture".into()),
         Input::Bytes(bytes) => Ok(bytes),
-        Input::Url(url) => fetch(&url),
+        Input::Url(url) | Input::Commons(url) => fetch(&url),
     }
 }
 

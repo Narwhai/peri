@@ -1063,11 +1063,18 @@ impl App {
         }
     }
 
-    /// The ✎ menu's Look up on Wikimedia: asked for, so it runs even with lookups off.
-    pub fn look_up_artist_picture(&mut self) {
+    /// The ✎ menu's Choose from Wikimedia…: the pictures Wikidata, MusicBrainz and the
+    /// artist's Commons category have, to pick from. Asked for, so it runs with lookups off.
+    pub fn open_picture_picker(&mut self) {
         self.picture_menu = false;
         let Some(target) = self.picture_target() else { return };
-        self.pictures.look_up(&target.names, target.mbid);
+        self.pictures.open_picker(&target.names, target.mbid);
+    }
+
+    /// The picker's pick: the Commons file is copied in as the open artist's picture, with its credit.
+    pub fn pick_artist_picture(&mut self, file: &str) {
+        self.pictures.close_picker();
+        self.set_artist_picture(crate::pictures::Input::Commons(file.to_string()));
     }
 
     /// Uses `input` as the open artist's picture; it shows once it's copied in.
