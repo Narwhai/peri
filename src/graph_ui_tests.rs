@@ -683,3 +683,158 @@ fn switching_header_tabs_leaves_their_icons_and_labels_in_place() {
         }
     }
 }
+
+// Pictures
+
+fn png(w: u32, h: u32, rgba: [u8; 4]) -> Vec<u8> {
+    let img = image::RgbaImage::from_pixel(w, h, image::Rgba(rgba));
+    let mut out = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut out, image::ImageFormat::Png).unwrap();
+    out.into_inner()
+}
+
+/// A music folder under the temp folder, removed on drop.
+struct Music(std::path::PathBuf);
+
+impl Music {
+    fn new(name: &str) -> Music {
+        let dir = std::env::temp_dir().join(format!("peri-graph-pictures-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        Music(dir)
+    }
+
+    /// `n`'s song on `artist`'s album `album`, in `Artist/Album/`.
+    fn song(&self, n: u32, artist: &str, album: &str, credits: Vec<Credit>) -> Track {
+        let dir = self.0.join(artist).join(album);
+        std::fs::create_dir_all(&dir).unwrap();
+        Track { path: dir.join(format!("{n:02}.flac")), album_artist: Some(artist.into()), album: Some(album.into()), ..song(n, &[artist], &[], credits) }
+    }
+
+    fn image(&self, rel: &str, rgba: [u8; 4]) -> std::path::PathBuf {
+        let path = self.0.join(rel);
+        std::fs::write(&path, png(64, 64, rgba)).unwrap();
+        path
+    }
+}
+
+impl Drop for Music {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Armand Hammer has an `artist.jpg` in their folder, billy woods only an album cover, Kenny
+/// Segal a picture of the user's, and Silka (featured, with no album) nothing at all. Lookups
+/// are on, answered by `fetch`, which records what it's asked.
+fn pictured_runtime(music: &Music, asked: std::sync::Arc<std::sync::Mutex<Vec<String>>>) -> Runtime<App> {
+    let tracks = vec![
+        music.song(1, "Armand Hammer", "Haram", vec![Credit::parse(Role::Producer, "The Alchemist")]),
+        music.song(2, "billy woods", "Hiding Places", vec![Credit::parse(Role::Producer, "Kenny Segal")]),
+        Track { path: music.0.join("loose.flac"), ..song(3, &["Armand Hammer", "Silka"], &["Silka"], vec![Credit::parse(Role::Producer, "Kenny Segal")]) },
+    ];
+    music.image("Armand Hammer/artist.jpg", [200, 30, 60, 255]);
+    music.image("billy woods/Hiding Places/cover.jpg", [30, 200, 60, 255]);
+    let mut app = App::new(Output::Silent, Store::memory());
+    app.pictures.set_fetch(std::sync::Arc::new(move |url: &str| {
+        asked.lock().unwrap().push(url.to_string());
+        Err("offline".into())
+    }));
+    app.picture_lookups = true;
+    app.set_relations(Relations { merges: Vec::new(), links: vec![Link { from: "billy woods".into(), kind: LinkKind::MemberOf, to: "Armand Hammer".into() }] });
+    app.set_library(tracks, false);
+    app.setup_with(std::sync::Arc::new(|| {}), Vec::new());
+    let target = crate::pictures::Target { names: vec!["Kenny Segal".into()], mbid: None };
+    app.pictures.import(target, crate::pictures::Input::Bytes(png(64, 64, [30, 60, 200, 255])));
+    assert_eq!(app.pictures.finish(), (true, None));
+    let mut rt = Runtime::new(app, view, (1200.0, 800.0), Env::new(true, 1.0));
+    rt.poll = Some(crate::app::poll);
+    settle(&mut rt);
+    click(&mut rt, "graph-tab");
+    rt
+}
+
+/// Zooms the camera to `zoom` about the canvas's middle.
+fn zoom_to(rt: &mut Runtime<App>, zoom: f32) {
+    rt.update(move |s, _| {
+        let cam = s.graph.cam();
+        let [w, h] = s.graph.viewport.expect("laid out");
+        s.graph.zoom_about([w / 2.0, h / 2.0], zoom / cam.zoom);
+        s.graph.drawn_region = s.graph.region().0;
+    });
+    settle(rt);
+}
+
+fn picture_key(rt: &Runtime<App>, name: &str) -> String {
+    format!("pic-{}", rt.state.graph.model.find(name).expect("a node"))
+}
+
+#[test]
+fn nodes_show_their_artists_picture_else_an_album_cover_else_their_dot() {
+    let music = Music::new("show");
+    let asked = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut rt = pictured_runtime(&music, asked.clone());
+    zoom_to(&mut rt, 2.0);
+    for name in ["Armand Hammer", "billy woods", "Kenny Segal"] {
+        let key = picture_key(&rt, name);
+        let el = rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key.as_str())).unwrap_or_else(|| panic!("{name} shows a picture"));
+        // Drawn over the dot, at its size, cropped round.
+        let (x, y) = node_on_screen(&rt, name);
+        let r = crate::graph::state::radius(rt.state.graph.model.nodes[rt.state.graph.model.find(name).unwrap()].degree) * rt.state.graph.cam().zoom;
+        let [ex, ey, ew, eh] = el.rect;
+        assert!((ex + ew / 2.0 - x).abs() < 1.0 && (ey + eh / 2.0 - y).abs() < 1.0, "{name}'s picture sits on its dot: {:?} at {x},{y}", el.rect);
+        assert!((ew - 2.0 * r).abs() < 1.0 && (eh - ew).abs() < 0.5, "as wide as the dot: {ew} for radius {r}");
+        // Its corner radius is in world points, under the camera's scale.
+        assert!((el.radius * el.scale - ew / 2.0).abs() < 1.0, "round: radius {} × {} of {ew}", el.radius, el.scale);
+    }
+    assert!(!has(&rt, &picture_key(&rt, "Silka")), "no picture or cover: the plain dot");
+    assert!(!has(&rt, &picture_key(&rt, "The Alchemist")));
+    // Which source each shows: the folder's, the cover, the user's.
+    let source = |rt: &Runtime<App>, name: &str| {
+        let info = rt.state.picture_page(name);
+        rt.state.graph_picture(&info).map(|i| i.and_then(|i| i.wait().ok()))
+    };
+    assert_eq!(source(&rt, "Armand Hammer"), Some(Some([64, 64])), "their artist.jpg");
+    assert_eq!(source(&rt, "Kenny Segal"), Some(Some([64, 64])), "the user's picture");
+    assert_eq!(source(&rt, "billy woods"), None, "no picture of their own: the album cover shows");
+    // Opening the graph and drawing pictures never looks one up, with lookups on.
+    assert!(asked.lock().unwrap().is_empty(), "the graph asked for {:?}", asked.lock().unwrap());
+}
+
+#[test]
+fn pictures_show_only_for_nodes_drawn_big_enough_and_not_faded_by_a_pick() {
+    let music = Music::new("zoom");
+    let asked = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut rt = pictured_runtime(&music, asked);
+    zoom_to(&mut rt, 0.2);
+    assert!(!rt.elements().iter().any(|e| e.key.as_deref().is_some_and(|k| k.starts_with("pic-"))), "zoomed out, dots only");
+    zoom_to(&mut rt, 2.0);
+    let woods = picture_key(&rt, "billy woods");
+    assert!(has(&rt, &woods));
+    // Picking Silka fades billy woods, who isn't linked to them: their picture goes.
+    rt.update(|s, _| {
+        s.graph.find = rune::TextEdit::new("silka");
+        s.graph_found();
+    });
+    settle(&mut rt);
+    zoom_to(&mut rt, 2.0);
+    assert!(!has(&rt, &woods), "faded artists show their dot");
+    assert!(has(&rt, &picture_key(&rt, "Armand Hammer")), "Silka's neighbours keep theirs");
+}
+
+#[test]
+fn a_picture_set_on_the_artist_page_shows_in_the_graph() {
+    let music = Music::new("set");
+    let asked = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut rt = pictured_runtime(&music, asked);
+    zoom_to(&mut rt, 2.0);
+    let alchemist = picture_key(&rt, "The Alchemist");
+    assert!(!has(&rt, &alchemist));
+    rt.update(|s, _| {
+        let target = crate::pictures::Target { names: vec!["The Alchemist".into()], mbid: None };
+        s.pictures.import(target, crate::pictures::Input::Bytes(png(32, 32, [9, 9, 9, 255])));
+        s.finish_pictures();
+    });
+    settle(&mut rt);
+    assert!(has(&rt, &alchemist), "the memoized pictures rebuild when one is set");
+}

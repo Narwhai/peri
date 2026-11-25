@@ -5,8 +5,13 @@
 //! running the view. Names show only for the artists in view that are big enough at the zoom,
 //! from a coarse [`Region`] that changes in steps as the camera moves: only then does the view
 //! run again, and the shapes are memoized on the graph's version so even then they're reused.
+//!
+//! **Pictures:** the artists in that region drawn big enough show their picture over their dot,
+//! cropped round: the one their page shows (their own, an `artist.jpg` in their music folder, a
+//! lookup this session already found), else their newest album's cover. The graph never starts
+//! a lookup. They're read lazily, only for the artists in view, and memoized like the names.
 
-use rune::{Color, Cursor, Drag, El, LineCap, MagnifyEvent, Phase, PointerButton, Shape, Transition, Tx, WheelEvent, canvas, col, el, memo, row, text};
+use rune::{Color, Cursor, Drag, El, LineCap, MagnifyEvent, Phase, PointerButton, Shape, SurfaceFit, Transition, Tx, WheelEvent, canvas, col, el, memo, row, text};
 use rune_kit::{Kit, MenuItem, TextInput, context_menu};
 
 use super::*;
@@ -21,6 +26,12 @@ const MAX_LABELS: usize = 160;
 const LABEL_FROM: f32 = 7.0;
 /// The most linked artists in view are named however small they're drawn.
 const ALWAYS_LABEL: usize = 12;
+/// A picture shows once its dot is drawn this many points wide; smaller, the dot shows.
+const PICTURE_FROM: f32 = 14.0;
+/// Pictures show for at most this many artists at once, the most linked first: fewer than the
+/// covers and pictures caches hold, so what's drawn is never evicted.
+pub(crate) const MAX_PICTURES: usize = 96;
+const _: () = assert!(MAX_PICTURES < crate::pictures::CAPACITY);
 /// Wheel steps zoom by this per point: a mouse wheel's 40-point notch is about 10%.
 const WHEEL_ZOOM: f32 = 0.0025;
 
@@ -59,7 +70,7 @@ pub(super) fn graph_page(s: &App, p: &Palette, kit: &Kit, zoom: f32, layer: &mut
     } else if g.model.nodes.is_empty() {
         empty(if s.scan.is_some() { "Reading your music…" } else { "No artists" }, "Artists show once songs with artist tags are in the library.", p)
     } else {
-        canvas_area(g, p, kit, zoom, layer)
+        canvas_area(s, p, kit, zoom, layer)
     };
     col().key("graph-page").w_full().grow(1.0).min_h(0.0).child(graph_toolbar(s, p, kit)).child(body)
 }
@@ -166,7 +177,8 @@ fn legend_chip(kind: EdgeKind, on: bool, p: &Palette) -> El {
 }
 
 /// The canvas: the world under the camera, and what's hovered over it.
-fn canvas_area(g: &Graph, p: &Palette, kit: &Kit, zoom: f32, layer: &mut Vec<El>) -> El {
+fn canvas_area(s: &App, p: &Palette, kit: &Kit, zoom: f32, layer: &mut Vec<El>) -> El {
+    let g = &s.graph;
     let (region, rect) = g.region();
     let p = *p;
     // While an artist is dragged, what moves draws on its own layer, every frame; the rest
@@ -177,6 +189,9 @@ fn canvas_area(g: &Graph, p: &Palette, kit: &Kit, zoom: f32, layer: &mut Vec<El>
     let names = memo("graph-names", (g.version, g.selected, region, drag.map(|_| g.drag.as_ref().map_or(0, |d| d.tick)), p.dark), || names(g, region.zoom(), rect, &p));
     let [w, h] = g.size;
     let lit = memo("graph-hover", (g.version, g.hover.clone(), region.level, p.dark), || highlight(g, region.zoom(), &p));
+    // Rebuilt as pictures and covers arrive, until all in view have.
+    let arrived = (s.pictures.revision(), s.covers.as_ref().map_or(0, |c| c.generation()));
+    let pictures = memo("graph-pictures", (g.version, g.selected, region, drag, arrived, p.dark), || pictures(s, region.zoom(), rect, &p));
     let world = el()
         .key("graph-world")
         .pin(Some(0.0), Some(0.0), None, None)
@@ -188,6 +203,8 @@ fn canvas_area(g: &Graph, p: &Palette, kit: &Kit, zoom: f32, layer: &mut Vec<El>
         .children(moving)
         .children(pacer(g))
         .child(lit)
+        // Over the lit link, whose rings show round them, and under the names.
+        .child(pictures)
         .child(names);
     let tip = match &g.hover {
         Some(Hover::Node(i)) => hover_tip(g, *i, &p),
@@ -587,6 +604,82 @@ fn moving(g: &Graph, zoom: f32, p: &Palette) -> El {
         dot(&mut tiles, g, i as usize, zoom, dim(i), p);
     }
     tiles.flush(world, "moving-dots")
+}
+
+/// The artists in `rect` that show a picture at `zoom`: drawn big enough, not faded by a pick
+/// or moved by a drag, the most linked first, at most [`MAX_PICTURES`].
+fn pictured(g: &Graph, zoom: f32, rect: [f32; 4]) -> Vec<usize> {
+    if g.world.len() != g.model.nodes.len() {
+        return Vec::new();
+    }
+    let near = near(g);
+    let mut moving = vec![false; g.model.nodes.len()];
+    for &i in g.drag.iter().flat_map(|d| &d.moving) {
+        moving[i as usize] = true;
+    }
+    let in_rect = |[x, y]: [f32; 2]| x >= rect[0] && x <= rect[2] && y >= rect[1] && y <= rect[3];
+    let mut shown: Vec<usize> = (0..g.model.nodes.len())
+        .filter(|&i| radius(g.model.nodes[i].degree) * 2.0 * zoom >= PICTURE_FROM && in_rect(g.world[i]) && (g.selected.is_none() || near[i]) && !moving[i])
+        .collect();
+    shown.sort_by_key(|&i| (std::cmp::Reverse(g.model.nodes[i].degree), i));
+    shown.truncate(MAX_PICTURES);
+    shown
+}
+
+/// Their pictures over the dots of the artists [`pictured`] picks, cropped round to the dot,
+/// with a hairline rim so a picture reads as a node over the lines. Those without a picture or
+/// cover, or whose picture is still loading, keep their dot.
+fn pictures(s: &App, zoom: f32, rect: [f32; 4], p: &Palette) -> El {
+    let g = &s.graph;
+    let [w, h] = g.size;
+    let mut world = el().key("graph-pictures").pin(Some(0.0), Some(0.0), None, None).size(w.max(1.0), h.max(1.0)).instant_changes();
+    for i in pictured(g, zoom, rect) {
+        let Some(image) = node_picture(s, &g.model.nodes[i].name) else { continue };
+        let r = radius(g.model.nodes[i].degree);
+        let [x, y] = g.world[i];
+        let picked = g.selected == Some(i);
+        let rim = if picked { p.accent } else { p.bg.alpha(0.8) };
+        world = world.child(
+            el().key(format!("pic-{i}"))
+                .pin(Some(x - r), Some(y - r), None, None)
+                .size(2.0 * r, 2.0 * r)
+                .radius(r)
+                .fill(p.ui)
+                .pixels_fit(image.pixels(), SurfaceFit::Fill)
+                .border(if picked { 2.0 } else { 1.0 } / zoom, rim)
+                // Pictures come and go with the region at once, never fading.
+                .transition(Transition::none()),
+        );
+        if g.pinned.get(i).copied().unwrap_or(false) {
+            // The pin's head, as `dot` draws it, again over the picture.
+            let head = 2.0 / zoom;
+            let k = std::f32::consts::FRAC_1_SQRT_2 * (r + head);
+            let d = head + 1.0 / zoom;
+            world = world.child(
+                el().key(format!("pin-{i}"))
+                    .pin(Some(x + k - d), Some(y - k - d), None, None)
+                    .size(2.0 * d, 2.0 * d)
+                    .radius(d)
+                    .fill(p.accent)
+                    .border(1.0 / zoom, p.bg)
+                    .transition(Transition::none()),
+            );
+        }
+    }
+    world
+}
+
+/// The picture artist `name`'s node shows: their page's, else their newest album's cover
+/// (else the first song they're on). `None` while it loads or when there's none.
+fn node_picture(s: &App, name: &str) -> Option<rune::Image> {
+    let info = s.picture_page(name);
+    match s.graph_picture(&info) {
+        Some(picture) => picture,
+        None => {
+            let first = info.albums.first().copied().or_else(|| info.appears_on.first().and_then(|&i| s.album_of(i)));
+            first.and_then(|a| super::albums::cover_image(s, &s.albums()[a]))
+        }
+    }
 }
 
 /// The names of the artists in `rect` worth naming at `zoom`: the most linked, the big enough
