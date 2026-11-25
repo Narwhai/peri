@@ -117,6 +117,7 @@ fn menu(rt: &mut Runtime<App>, n: usize) {
 const CHOOSE: usize = 0;
 const PASTE: usize = 1;
 const KEEP: usize = 3;
+/// Choose from Wikimedia…: the picker.
 const LOOK_UP: usize = 4;
 const REMOVE: usize = 6;
 
@@ -390,7 +391,7 @@ fn a_looked_up_picture_is_kept_with_its_credit_and_never_replaced() {
 }
 
 #[test]
-fn removing_a_looked_up_picture_declines_it_until_looked_up_again() {
+fn removing_a_looked_up_picture_declines_it_for_good() {
     let data = Data::new("decline", r#"{ "artist_picture_lookups": true }"#);
     let (fetch, asked) = wikimedia();
     let mut rt = data.online(fetch.clone());
@@ -401,26 +402,56 @@ fn removing_a_looked_up_picture_declines_it_until_looked_up_again() {
 
     drop(rt);
     asked.lock().unwrap().clear();
-    let mut rt = data.online(fetch);
+    let rt = data.online(fetch);
     assert!(asked.lock().unwrap().is_empty(), "a declined page isn't looked up next launch");
-    menu(&mut rt, LOOK_UP);
-    assert!(!asked.lock().unwrap().is_empty(), "asked for, it is");
-    assert!(rt.find("artist-picture-attribution").is_some());
-    assert!(data.index().get("declined").is_none());
+    assert!(rt.find("artist-picture-attribution").is_none());
 }
 
 #[test]
-fn look_up_works_with_lookups_off_and_failures_change_nothing() {
-    let data = Data::new("ask", "{}");
+fn the_picker_offers_every_wikimedia_picture_and_the_pick_is_kept_with_its_credit() {
+    // Lookups off: the picker is asked for, so it looks anyway.
+    let data = Data::new("picker", "{}");
+    let (fetch, asked) = wikimedia();
+    let mut rt = data.online(fetch);
+    assert!(asked.lock().unwrap().is_empty());
+    menu(&mut rt, LOOK_UP);
+    assert!(rt.find("picture-picker-dialog").is_some(), "the picker opens");
+    let found = match &rt.state.pictures.picker().unwrap().candidates {
+        Some(Ok(found)) => found.clone(),
+        other => panic!("{:?}", other.as_ref().map(|r| r.as_ref().map(Vec::len))),
+    };
+    assert_eq!(found.len(), 2 + 12, "the main image, MusicBrainz's other, and a dozen category photos");
+    for n in 0..found.len() {
+        assert!(rt.find(&format!("picker-{n}")).is_some() || n >= 8, "tile {n}");
+    }
+    assert!(rt.state.pictures.picker().unwrap().thumb(&found[0].file).is_some_and(|t| t.is_some()), "thumbnails download");
+    assert!(!rt.state.pictures.has(&names(&["Somebody"])), "nothing is kept by looking");
+
+    // Pick the second: MusicBrainz's band photo.
+    click(&mut rt, "picker-1");
+    assert!(rt.state.pictures.picker().is_none(), "picking closes the picker");
+    assert!(rt.state.error.is_none(), "{:?}", rt.state.error);
+    let entry = rt.state.pictures.entry_for(&names(&["Somebody"])).expect("the pick is theirs");
+    assert_eq!(entry.source, Source::Wikimedia);
+    assert_eq!(entry.attribution.as_ref().map(|a| a.page.as_str()), Some("https://commons.wikimedia.org/wiki/File:Somebody_live_2019.jpg"), "its credit, as Commons gives it (the stand-in gives every file the same one)");
+    assert!(asked.lock().unwrap().iter().any(|u| u.contains("iiurlwidth=1000") && u.contains("band")), "the picked file is fetched at full size");
+    assert!(rt.find("artist-picture-attribution").is_some(), "shown with its credit");
+}
+
+#[test]
+fn the_picker_says_when_nothing_is_found_or_the_lookup_fails() {
+    let data = Data::new("picker-fail", "{}");
     let mut rt = data.online(Arc::new(|_: &str| Err("offline".to_string())));
     menu(&mut rt, LOOK_UP);
-    assert!(rt.find("artist-picture-attribution").is_none());
-    assert!(rt.state.error.is_none(), "a lookup that finds nothing doesn't interrupt");
+    assert!(rt.find("picker-error").is_some());
+    rt.key(rune::KeyEvent { key: rune::Key::Escape, mods: rune::Mods::default() });
+    settle(&mut rt);
+    assert!(rt.state.pictures.picker().is_none(), "Escape closes it");
+    assert_eq!(rt.state.page, crate::app::Page::Artist("Somebody".into()), "and stays on the page");
+    assert!(!rt.state.pictures.has(&names(&["Somebody"])));
 
-    let (fetch, asked) = wikimedia();
-    rt.update(|s, _| s.pictures.set_fetch(fetch));
+    // A name MusicBrainz can't tell apart: nothing to offer.
+    rt.update(|s, _| s.pictures.set_fetch(Arc::new(|_: &str| Ok(br#"{"artists":[]}"#.to_vec()))));
     menu(&mut rt, LOOK_UP);
-    assert!(!asked.lock().unwrap().is_empty());
-    assert!(rt.find("artist-picture-attribution").is_some(), "shown though lookups are off: the user asked");
-    assert!(!rt.state.picture_lookups);
+    assert!(rt.find("picker-empty").is_some());
 }

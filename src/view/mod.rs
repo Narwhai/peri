@@ -9,6 +9,7 @@ mod graph;
 mod home;
 mod labels;
 mod list;
+mod picture_picker;
 mod player;
 mod queue;
 #[cfg(test)]
@@ -100,12 +101,13 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     });
     layer.extend(drop_veil);
     details::details_dialog(s, &p, &kit, &mut layer);
+    picture_picker::picture_picker(s, &p, &kit, &mut layer);
     queue::replace_dialog(s, &p, &kit, &mut layer);
     song_menu::song_menu(s, &kit, zoom, &mut layer);
     layer.extend(zoom_toast(s, zoom, &p));
     let root = zoomed(window, zoom, &p, rune_kit::root(body, layer));
     // Ctrl+V on an artist page, outside a field, pastes their picture.
-    match s.open_artist() {
+    match s.open_artist().filter(|_| s.pictures.picker().is_none()) {
         Some(_) => root.on_paste_content(|s: &mut App, content, _tx| s.paste_artist_picture(content)),
         None => root,
     }
