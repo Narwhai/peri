@@ -2,6 +2,7 @@
 //! each page keeps the model it last built and reuses it while its inputs are unchanged.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::artist::ArtistPage;
@@ -21,6 +22,35 @@ pub struct TopModel {
 
 /// An artist's page, and the artists involved with them, each with their page.
 pub type ArtistModel = (ArtistPage, Vec<(Relation, ArtistPage)>);
+
+/// Where artists' pictures may come from, by their name in ASCII lowercase (as pages match
+/// names): the albums they're an
+/// album artist of (in library order), and the first song they're an artist of.
+#[derive(Default)]
+pub struct PictureAlbums {
+    pub own: HashMap<String, Vec<usize>>,
+    pub first_song: HashMap<String, usize>,
+}
+
+impl PictureAlbums {
+    pub fn of(tracks: &[crate::library::Track], albums: &[crate::album::Album]) -> PictureAlbums {
+        let mut index = PictureAlbums::default();
+        for (a, album) in albums.iter().enumerate() {
+            for name in &album.album_artists {
+                let own = index.own.entry(name.to_ascii_lowercase()).or_default();
+                if own.last() != Some(&a) {
+                    own.push(a);
+                }
+            }
+        }
+        for (i, t) in tracks.iter().enumerate() {
+            for name in &t.artists {
+                index.first_song.entry(name.to_ascii_lowercase()).or_insert(i);
+            }
+        }
+        index
+    }
+}
 
 /// The last model a page built, with the key it was built for. Views only have `&App`, so it
 /// sits behind a `RefCell`.
@@ -72,4 +102,6 @@ pub struct Pages {
     pub people: Memo<(u64, crate::top::Window, i64), Vec<crate::people::RoleBoard>>,
     /// Keyed by the library's data version, the order and the Random seed.
     pub unlistened: Memo<(u64, crate::app::UnlistenedOrder, u64), Vec<usize>>,
+    /// Keyed by the library's data version: for the graph's pictures.
+    pub picture_albums: Memo<u64, PictureAlbums>,
 }

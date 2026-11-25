@@ -1193,6 +1193,38 @@ impl App {
         (None, Shown::Cover)
     }
 
+    /// Just enough of graph node `name`'s page to find its picture as their page would: their
+    /// merged names, their albums newest first, and else the first song they're on elsewhere.
+    /// Cheap enough to build for every artist in view, from an index kept per library version.
+    pub fn picture_page(&self, name: &str) -> crate::artist::ArtistPage {
+        let names = self.relations.merged(name);
+        let index = self.pages.picture_albums.get(self.data_version, || crate::pages::PictureAlbums::of(&self.tracks, &self.albums));
+        let mut albums: Vec<usize> = names.iter().flat_map(|n| index.own.get(&n.to_ascii_lowercase()).into_iter().flatten().copied()).collect();
+        albums.sort_by_key(|&a| (std::cmp::Reverse(self.albums[a].year), a));
+        albums.dedup();
+        let appears_on = names.iter().filter_map(|n| index.first_song.get(&n.to_ascii_lowercase()).copied()).min().into_iter().collect();
+        crate::artist::ArtistPage { name: names[0].clone(), names, albums, appears_on, ..Default::default() }
+    }
+
+    /// The picture a graph node shows: what their page would (their own, an `artist.jpg` in
+    /// their music folder, a picture a lookup already found this session), never starting a
+    /// lookup. `None` when they have none, so the view falls back to a cover; `Some(None)`
+    /// while it loads, so no cover flashes up before it.
+    pub fn graph_picture(&self, info: &crate::artist::ArtistPage) -> Option<Option<rune::Image>> {
+        if self.pictures.has(&info.names) {
+            return Some(self.pictures.get(&info.names));
+        }
+        if let Some(path) = self.pictures.folder(info, &self.tracks, &self.albums, self.data_version) {
+            return Some(self.pictures.folder_image(&path));
+        }
+        // A lookup is kept by the page's first name, which their page may spell as any of them.
+        (0..info.names.len()).find_map(|k| {
+            let mut names = info.names.clone();
+            names.rotate_left(k);
+            self.pictures.online(&names, false, || None).map(|(image, _)| image)
+        })
+    }
+
     /// Settings' switch for looking artist pictures up online, saved.
     pub fn set_picture_lookups(&mut self, on: bool) {
         self.picture_lookups = on;
