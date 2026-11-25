@@ -748,12 +748,19 @@ fn an_unlistened_album_moves_to_continue_once_part_of_it_plays() {
     assert!(titles.contains(&title), "a part-played album is in Continue: {titles:?}");
 }
 
-/// A fresh home page whose plays are `days_ago` days back from now, one at each of `times` per day.
-/// Each day's plays land on the demo's songs, at noon UTC so the local day is stable.
+/// Today in the local time zone, as days since the epoch, and the zone's offset.
+fn local_today() -> (i64, i64) {
+    let now = crate::listen::unix_now().expect("the clock");
+    let offset = crate::activity::local_offset(now);
+    (crate::activity::day_of(now, offset), offset)
+}
+
+/// A fresh home page with a play `days_ago` local days back from today, for each entry. Each
+/// play lands on the demo's songs at local noon, so its day doesn't depend on the time of day.
 fn home_with_play_days(days_ago: &[i64]) -> Runtime<App> {
     let mut rt = unplayed_home();
-    let today = crate::listen::unix_now().expect("the clock") / 86_400;
-    let plays: Vec<i64> = days_ago.iter().map(|&d| (today - d) * 86_400 + 12 * 3600).collect();
+    let (today, offset) = local_today();
+    let plays: Vec<i64> = days_ago.iter().map(|&d| (today - d) * 86_400 + 12 * 3600 - offset).collect();
     rt.update(move |s, _| {
         for (n, at) in plays.iter().enumerate() {
             let _ = s.record_play(n % s.tracks().len(), *at);
@@ -788,7 +795,7 @@ fn a_lapsed_streak_is_not_current() {
 #[test]
 fn heatmap_cells_show_for_days_with_plays_and_are_keyed_by_day() {
     let rt = home_with_play_days(&[0, 1, 2]);
-    let today = crate::listen::unix_now().expect("the clock") / 86_400;
+    let (today, _) = local_today();
     assert!(has(&rt, &format!("activity-day-{today}")), "today has a cell");
     assert!(has(&rt, &format!("activity-day-{}", today - 2)), "a day with plays has a cell");
 }
