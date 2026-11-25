@@ -47,9 +47,8 @@ fn click(rt: &mut Runtime<App>, key: &str) {
     settle(rt);
 }
 
-/// Double-clicks the element keyed `key`.
-fn double_click(rt: &mut Runtime<App>, key: &str) {
-    let (x, y) = rt.find(key).unwrap_or_else(|| panic!("no element {key}"));
+/// Double-clicks the point `(x, y)`.
+fn double_click(rt: &mut Runtime<App>, (x, y): (f32, f32)) {
     for _ in 0..2 {
         rt.pointer_down(x, y);
         rt.pointer_up(x, y);
@@ -305,7 +304,8 @@ fn double_clicking_a_recently_played_song_plays_the_list_from_it() {
     // Taller than the stats, top and people blocks, so the Recently Played rows are on screen.
     let mut rt = runtime_sized((1200.0, 1800.0));
     let eta = track(&rt, "ETA");
-    double_click(&mut rt, &format!("recent-songs-t{eta}"));
+    let at = title_of(&rt, &format!("recent-songs-t{eta}"));
+    double_click(&mut rt, at);
     assert_eq!(rt.state.current, Some(eta));
     let list = rt.state.recently_played();
     let next = list[list.iter().position(|&i| i == eta).unwrap_or_else(|| panic!("ETA is listed")) + 1];
@@ -318,7 +318,10 @@ fn double_clicking_a_recently_played_song_plays_the_list_from_it() {
 fn a_single_click_selects_a_recently_played_song_without_playing_it() {
     let mut rt = runtime_sized((1200.0, 1600.0));
     let says = track(&rt, "Says");
-    click(&mut rt, &format!("recent-songs-t{says}"));
+    let (x, y) = title_of(&rt, &format!("recent-songs-t{says}"));
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    settle(&mut rt);
     assert_eq!(rt.state.selected, Some(says));
     assert_eq!(rt.state.current, None);
 }
@@ -875,4 +878,11 @@ fn the_home_tab_still_opens_at_the_top_from_another_tab() {
     click(&mut rt, "home-tab");
     assert_eq!(rt.state.page, Page::Home);
     assert!(rt.state.home_scroll.get()[1] < 1.0, "the Home tab opens at the top, at {}", rt.state.home_scroll.get()[1]);
+}
+
+/// The middle of the title in the row keyed `row`: a plain spot of the row, away from the
+/// name links in its columns.
+fn title_of(rt: &Runtime<App>, row: &str) -> (f32, f32) {
+    let e = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("title") && e.path.contains(&format!("/{row}/"))).unwrap_or_else(|| panic!("no title in {row}"));
+    (e.rect[0] + e.rect[2] / 2.0, e.rect[1] + e.rect[3] / 2.0)
 }
