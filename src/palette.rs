@@ -102,41 +102,43 @@ impl Palette {
         }
     }
 
-    /// The Peridot theme's palette in one mode: greens after the gemstone, from olive-gold to deep teal-green.
+    /// The Peridot theme's palette in one mode: the Ladder palette from `color-schemes/peridot-palette.css`
+    /// (seeded from #93a043). Neutrals `n-3…n2` give the surfaces, strokes and text, the `v-3…v2` steps the accent.
+    /// Ladder has no red or extra hues, so `red` is a hand-picked one that reads on both backgrounds.
     fn peridot(dark: bool) -> Palette {
         if dark {
             Palette {
                 dark,
-                bg: rgb(0x0c130a),
-                bg2: rgb(0x151f12),
-                ui: rgb(0x27331f),
-                ui2: rgb(0x5b6b4a),
-                ui3: rgb(0x3d5a2a),
-                tx: rgb(0xe9f0d6),
-                tx2: rgb(0xa3b08a),
-                tx3: rgb(0x75845f),
+                bg: rgb(0x101107),        // n-3
+                bg2: rgb(0x1c1e13),       // n-2
+                ui: rgb(0x414337),        // n-1
+                ui2: rgb(0x616457),       // n
+                ui3: rgb(0x4a5204),       // v-2
+                tx: rgb(0xa8ab9d),        // n2
+                tx2: rgb(0x85877a),       // n1
+                tx3: rgb(0x616457),       // n
                 red: rgb(0xf0695d),
-                accent: rgb(0xa8cc3c),
-                on_accent: rgb(0x0c130a),
-                selected: rgb(0xb4d650),
-                tabs: [rgb(0xc9b44a), rgb(0xa8cc3c), rgb(0x5fb89a)],
+                accent: rgb(0x889601),    // v
+                on_accent: rgb(0x101107), // n-3
+                selected: rgb(0x98a71e),  // v1
+                tabs: [rgb(0x889601); 3], // v
             }
         } else {
             Palette {
                 dark,
-                bg: rgb(0xf3f7e8),
-                bg2: rgb(0xe6edd3),
-                ui: rgb(0xb5c09a),
-                ui2: rgb(0x6f7f55),
-                ui3: rgb(0x9cb86a),
-                tx: rgb(0x1c2a0c),
-                tx2: rgb(0x4d5e35),
-                tx3: rgb(0x6f7f55),
+                bg: rgb(0xf2f5e7),        // n-3
+                bg2: rgb(0xe5e8d9),       // n-2
+                ui: rgb(0xb3b6a7),        // n-1
+                ui2: rgb(0x898b7e),       // n
+                ui3: rgb(0xa2b147),       // v-2
+                tx: rgb(0x484b3e),        // n2
+                tx2: rgb(0x65675a),       // n1
+                tx3: rgb(0x898b7e),       // n
                 red: rgb(0xb3261e),
-                accent: rgb(0x4f7a0f),
-                on_accent: rgb(0xf7fbec),
-                selected: rgb(0x3f6b0a),
-                tabs: [rgb(0x8a7412), rgb(0x5e8a0c), rgb(0x1f6b4f)],
+                accent: rgb(0x5f6909),    // v
+                on_accent: rgb(0xf2f5e7), // n-3
+                selected: rgb(0x515a06),  // v1
+                tabs: [rgb(0x5f6909); 3], // v
             }
         }
     }
@@ -237,8 +239,8 @@ mod tests {
         assert_eq!(rgb(0x3d85f3).hex(), "#3d85f3ff");
         assert_eq!(Theme::Bolis.palette(false).bg.hex(), "#edeeefff");
         assert_eq!(Theme::Bolis.palette(true).bg.hex(), "#0b0b0cff");
-        assert_eq!(Theme::Peridot.palette(false).bg.hex(), "#f3f7e8ff");
-        assert_eq!(Theme::Peridot.palette(true).bg.hex(), "#0c130aff");
+        assert_eq!(Theme::Peridot.palette(false).bg.hex(), "#f2f5e7ff");
+        assert_eq!(Theme::Peridot.palette(true).bg.hex(), "#101107ff");
     }
 
     #[test]
@@ -252,8 +254,25 @@ mod tests {
                 assert!(contrast(p.tx3, p.bg) >= 3.0, "{label}: tx3 on bg");
                 assert!(contrast(p.on_accent, p.accent) >= 4.5, "{label}: on_accent on accent");
                 assert!(contrast(p.red, p.bg) >= 4.5, "{label}: red on bg");
+                // Header and now-playing bar text sits on bg2; segmented labels and accent icons on bg.
+                assert!(contrast(p.tx, p.bg2) >= 7.0, "{label}: tx on bg2");
+                assert!(contrast(p.tx2, p.bg2) >= 4.5, "{label}: tx2 on bg2");
+                assert!(contrast(p.selected, p.bg) >= 4.5, "{label}: selected on bg");
+                assert!(contrast(p.accent, p.bg) >= 3.0, "{label}: accent on bg");
+                for (i, tab) in p.tabs.iter().enumerate() {
+                    assert!(contrast(*tab, p.bg) >= 3.0, "{label}: tab {i} on bg");
+                }
             }
         }
+    }
+
+    #[test]
+    fn peridot_uses_the_ladder_palette() {
+        // Ladder's n-3 (bg), n2 (tx) and v (accent) steps, light then dark.
+        let light = Theme::Peridot.palette(false);
+        assert_eq!([light.bg.hex(), light.tx.hex(), light.accent.hex()], ["#f2f5e7ff", "#484b3eff", "#5f6909ff"]);
+        let dark = Theme::Peridot.palette(true);
+        assert_eq!([dark.bg.hex(), dark.tx.hex(), dark.accent.hex()], ["#101107ff", "#a8ab9dff", "#889601ff"]);
     }
 
     #[test]
