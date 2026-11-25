@@ -5,8 +5,9 @@
 use crate::album::Album;
 use crate::library::Track;
 
-/// How many albums each tab lists.
-pub const DISCOVER_COUNT: usize = 12;
+/// How many albums each tab keeps: a pool the home page's grid takes as many whole rows from as
+/// fit the window.
+pub const DISCOVER_COUNT: usize = 60;
 /// An album counts as rediscoverable once it has this many plays.
 pub const REDISCOVER_PLAYS: u32 = 5;
 /// ...and was last played this long ago, in days.

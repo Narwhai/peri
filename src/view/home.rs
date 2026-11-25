@@ -5,7 +5,7 @@
 
 use rune::{Cursor, El, ScrollPos, ScrollSpec, Tx, col, el, icon, row, text};
 
-use super::albums::{CARD_GAP, small_card, song_cover};
+use super::albums::{CARD_GAP, columns_for, small_card, song_cover};
 use super::table;
 use super::toolbar::segmented;
 use super::*;
@@ -20,6 +20,10 @@ const RECENT_COLUMNS: [Property; 3] = [Property::Artist, Property::Album, Proper
 const SONG_ROW_H: f32 = 40.0;
 /// The recently added cards' width.
 const CARD_W: f32 = 200.0;
+/// How many rows of cards the Discover grid shows.
+const ROWS: usize = 3;
+/// The Discover block's width before its first layout reports it.
+const DISCOVER_W: f32 = 1000.0;
 /// The recently added strip's viewport, which scrolls sideways.
 const STRIP_KEY: &str = "recent-albums-strip";
 
@@ -326,7 +330,7 @@ fn recent_songs(s: &App, p: &Palette) -> El {
 }
 
 /// The discovery block: one heading with a switch between its tabs, over the chosen tab's albums
-/// as a wrapping grid of cards. Unlistened is the albums with no plays, in the order chosen.
+/// as full rows of cards. Unlistened is the albums with no plays, in the order chosen.
 fn discovery_block(s: &App, p: &Palette) -> El {
     let switch = segmented("discover-tab", &Tab::ALL.map(|t| (t.id(), t.label())), s.discover.id(), p, |s: &mut App, id: &str| {
         if let Some(tab) = Tab::ALL.into_iter().find(|t| t.id() == id) {
@@ -338,11 +342,35 @@ fn discovery_block(s: &App, p: &Palette) -> El {
         Tab::Unlistened => unlistened_albums(s, p),
         tab => discover_wall(s, tab, p),
     };
-    col().key("discover").w_full().gap(10.0).child(head).child(body)
+    let width = s.discover_width.clone();
+    col().key("discover").w_full().gap(10.0).on_layout(move |_: &mut App, r| {
+        width.set(r[2]);
+    }).child(head).child(body)
 }
 
-/// Unlistened Releases' controls and albums: the albums with no plays, as a wrapping grid of
-/// cards, in the chosen order. Random has a button to re-roll its selection.
+/// The Discover grid: `albums` as up to `ROWS` full rows of `CARD_W` cards, as many to a row as
+/// fit the block's width, each row flush with both edges by spreading what's left of the width
+/// into the gaps, as the Library grid does. Only a list shorter than one row leaves a row part
+/// full. Cards are keyed `{key}{album}`, rows `{wall}-row{n}`.
+fn card_rows(s: &App, wall: String, key: &str, albums: &[usize], p: &Palette) -> El {
+    let width = Some(s.discover_width.get()).filter(|&w| w > 0.0).unwrap_or(DISCOVER_W);
+    let columns = columns_for(width, CARD_W);
+    let gap = if columns > 1 { ((width - CARD_W * columns as f32) / (columns as f32 - 1.0)).max(CARD_GAP) } else { CARD_GAP };
+    let shown = albums.len().min(columns * ROWS);
+    let shown = if shown >= columns { shown - shown % columns } else { shown };
+    let mut grid = col().key(wall.clone()).w_full().gap(CARD_GAP);
+    for (n, line) in albums[..shown].chunks(columns).enumerate() {
+        let mut r = row().key(format!("{wall}-row{n}")).w_full().gap(gap).items_start();
+        for &o in line {
+            r = r.child(small_card(s, key, o, true, CARD_W, p));
+        }
+        grid = grid.child(r);
+    }
+    grid
+}
+
+/// Unlistened Releases' controls and albums: the albums with no plays, as rows of cards, in
+/// the chosen order. Random has a button to re-roll its selection.
 fn unlistened_albums(s: &App, p: &Palette) -> El {
     let albums = s.unlistened_albums();
     let order = segmented("unlistened-order", &UnlistenedOrder::ALL.map(|o| (o.id(), o.label())), s.unlistened_order.id(), p, |s: &mut App, id: &str| {
@@ -358,11 +386,7 @@ fn unlistened_albums(s: &App, p: &Palette) -> El {
     let body: El = if albums.is_empty() {
         text("Every album has been played.").key("unlistened-albums-empty").font(BODY).color(p.tx3)
     } else {
-        let mut wall = row().key("unlistened-albums-wall").w_full().gap(CARD_GAP).flex_wrap();
-        for &o in albums.iter() {
-            wall = wall.child(small_card(s, "unlistened-albums", o, true, CARD_W, p));
-        }
-        wall
+        card_rows(s, "unlistened-albums-wall".into(), "unlistened-albums", &albums, p)
     };
     col().key("unlistened-albums").w_full().gap(10.0).child(head).child(body)
 }
@@ -375,11 +399,7 @@ fn discover_wall(s: &App, tab: Tab, p: &Palette) -> El {
     if albums.is_empty() {
         return text(discover_empty(tab)).key(format!("{key}-empty")).font(BODY).color(p.tx3);
     }
-    let mut wall = row().key(format!("{key}-wall")).w_full().gap(CARD_GAP).flex_wrap();
-    for &o in albums.iter() {
-        wall = wall.child(small_card(s, &key, o, true, CARD_W, p));
-    }
-    wall
+    card_rows(s, format!("{key}-wall"), &key, &albums, p)
 }
 
 /// Why a discovery tab has no albums.

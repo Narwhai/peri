@@ -466,7 +466,7 @@ fn unlistened_newest_and_oldest_put_undated_albums_last() {
 }
 
 #[test]
-fn unlistened_lists_at_most_unlistened_count_albums() {
+fn unlistened_keeps_at_most_unlistened_count_albums() {
     let mut rt = runtime();
     let tracks: Vec<Track> = (0..UNLISTENED_COUNT + 5).map(|n| album_track(&format!("Album {n:02}"), Some(1_000 + n as i64))).collect();
     rt.update(|s, _| s.set_library(tracks, false));
@@ -474,7 +474,52 @@ fn unlistened_lists_at_most_unlistened_count_albums() {
     let newest = rt.state.unlistened_albums();
     assert_eq!(newest.len(), UNLISTENED_COUNT);
     assert_eq!(rt.state.albums()[newest[0]].title, format!("Album {:02}", UNLISTENED_COUNT + 4), "newest first");
-    assert!(has(&rt, &format!("unlistened-albums{}", newest[UNLISTENED_COUNT - 1])), "the last card shows");
+    assert!(has(&rt, &format!("unlistened-albums{}", newest[0])), "the first card shows");
+}
+
+/// The cards of the Discover grid keyed `wall`, row by row, as their rects.
+fn grid_rows(rt: &Runtime<App>, wall: &str) -> Vec<Vec<[f32; 4]>> {
+    let mut rows = Vec::new();
+    while let Some(r) = rt.elements().into_iter().find(|e| e.key.as_deref() == Some(&format!("{wall}-row{}", rows.len()))) {
+        let [x, y, w, h] = r.rect;
+        let cards: Vec<[f32; 4]> = rt
+            .elements()
+            .into_iter()
+            .filter(|e| e.key.as_deref().is_some_and(|k| k.strip_prefix("unlistened-albums").is_some_and(|n| n.parse::<usize>().is_ok())))
+            .map(|e| e.rect)
+            .filter(|c| c[0] >= x - 0.5 && c[0] + c[2] <= x + w + 0.5 && c[1] >= y - 0.5 && c[1] + c[3] <= y + h + 0.5)
+            .collect();
+        rows.push(cards);
+    }
+    rows
+}
+
+#[test]
+fn the_discover_grid_fills_whole_rows_flush_with_both_edges_at_any_width() {
+    let mut rt = runtime();
+    let tracks: Vec<Track> = (0..UNLISTENED_COUNT + 5).map(|n| album_track(&format!("Album {n:02}"), Some(1_000 + n as i64))).collect();
+    rt.update(|s, _| s.set_library(tracks, false));
+    settle(&mut rt);
+    let list = rt.state.unlistened_albums();
+    for width in [720.0, 900.0, 1013.0, 1200.0, 1600.0, 2400.0] {
+        rt.set_viewport((width, 1800.0), 1.0);
+        settle(&mut rt);
+        let wall = rect(&rt, "unlistened-albums-wall");
+        let columns = crate::view::columns_for(wall[2], 200.0);
+        let shown: Vec<usize> = list.iter().copied().filter(|a| has(&rt, &format!("unlistened-albums{a}"))).collect();
+        assert_eq!(shown.len(), columns * 3, "{width}: three full rows of {columns}");
+        assert_eq!(shown, list[..shown.len()], "{width}: the list's first albums, in order");
+        let rows = grid_rows(&rt, "unlistened-albums-wall");
+        assert_eq!(rows.len(), 3, "{width}: three rows");
+        for (n, cards) in rows.iter().enumerate() {
+            assert_eq!(cards.len(), columns, "{width}: row {n} is full");
+            let left = cards.iter().map(|c| c[0]).fold(f32::MAX, f32::min);
+            let right = cards.iter().map(|c| c[0] + c[2]).fold(f32::MIN, f32::max);
+            assert!((left - wall[0]).abs() < 1.0, "{width}: row {n} starts at the left edge");
+            assert!((right - (wall[0] + wall[2])).abs() < 1.0, "{width}: row {n} reaches the right edge");
+            assert!(cards.iter().all(|c| c[2] == 200.0), "{width}: cards keep their width");
+        }
+    }
 }
 
 #[test]

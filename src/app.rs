@@ -45,8 +45,10 @@ const RESTART_AFTER: f64 = 3.0;
 pub const RECENT_ALBUMS_COUNT: usize = 20;
 /// How many songs Recently Played lists on the home page.
 pub const RECENT_SONGS_COUNT: usize = 10;
-/// How many albums Unlistened Releases lists on the home page.
-pub const UNLISTENED_COUNT: usize = 20;
+/// How many albums Unlistened Releases keeps, a pool the Discover grid takes whole rows from to
+/// fit the window. It doesn't depend on the window, so the list (and Random's order) stays put
+/// across resizes.
+pub const UNLISTENED_COUNT: usize = crate::discover::DISCOVER_COUNT;
 /// The queue panel's scroll view, and one row's height in it (its rows are a fixed height so the
 /// scroll offset is computable).
 pub const QUEUE_LIST_KEY: &str = "queue-list";
@@ -257,6 +259,8 @@ pub struct App {
     pub home_strip: Live<[f32; 2]>,
     /// The Home strip's viewport width, kept current while it shows.
     pub home_viewport: Live<f32>,
+    /// The Discover block's width, kept current while it shows; 0 before its first layout.
+    pub discover_width: Live<f32>,
     /// The order of Unlistened Releases, kept in the preferences.
     pub unlistened_order: UnlistenedOrder,
     /// The seed of Unlistened Releases' Random order; a re-roll sets a new one.
@@ -499,6 +503,7 @@ impl App {
             home_scroll_saved: [0.0, 0.0],
             home_strip: Live::new([0.0; 2]),
             home_viewport: Live::new(0.0),
+            discover_width: Live::new(0.0),
             unlistened_order,
             unlistened_seed,
             top_window,
