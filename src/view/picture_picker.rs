@@ -78,6 +78,8 @@ fn tile(n: usize, c: &Candidate, thumb: Option<Option<rune::Image>>, p: &Palette
         .help(format!("{}\n{}", c.attribution.line(), c.attribution.page))
         .on_press(move |s: &mut App| s.pick_artist_picture(&file))
         .child(picture)
-        .child(text(from).key("origin").font(SMALL).color(p.tx2))
-        .child(text(credit).key("credit").font(SMALL).color(p.tx3).wrap().max_lines(2))
+        .child(text(from).key("origin").font(SMALL).color(p.tx2).w(TILE).truncate())
+        // One line, cut with an ellipsis: credits are often long unbroken file names. The
+        // tile's tooltip has it whole.
+        .child(text(credit).key("credit").font(SMALL).color(p.tx3).w(TILE).truncate())
 }

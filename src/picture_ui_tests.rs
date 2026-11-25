@@ -437,6 +437,20 @@ fn the_picker_offers_every_wikimedia_picture_and_the_pick_is_kept_with_its_credi
         assert!(rt.find(&format!("picker-{n}")).is_some() || n >= 8, "tile {n}");
     }
     assert!(rt.state.pictures.picker().unwrap().thumb(&found[0].file).is_some_and(|t| t.is_some()), "thumbnails download");
+    // Each tile's lines stay one line inside it, however long the credit: cut with an
+    // ellipsis, the tile's tooltip holding it whole.
+    let elements = rt.elements();
+    let rect = |path: &str| elements.iter().find(|e| e.path.ends_with(path)).map(|e| e.rect).unwrap_or_else(|| panic!("no {path}"));
+    for n in [2, 3] {
+        let tile = rect(&format!("picker-{n}"));
+        for line in ["origin", "credit"] {
+            let r = rect(&format!("picker-{n}/{line}"));
+            assert!(r[0] >= tile[0] - 0.5 && r[0] + r[2] <= tile[0] + tile[2] + 0.5, "picker-{n}'s {line} {r:?} spills out of {tile:?}");
+            assert!(r[3] < 20.0, "picker-{n}'s {line} is one line: {r:?}");
+        }
+    }
+    let long = elements.iter().find(|e| e.path.ends_with("picker-2")).unwrap();
+    assert!(long.help.as_deref().is_some_and(|h| h.contains("a_very_long_username_and_more")), "the full credit is the tooltip: {:?}", long.help);
     assert!(!rt.state.pictures.has(&names(&["Somebody"])), "nothing is kept by looking");
 
     // Pick the second: MusicBrainz's band photo.

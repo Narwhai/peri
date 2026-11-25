@@ -409,10 +409,15 @@ pub(crate) mod tests {
 
     fn page(file: &str, mime: &str, w: u32, h: u32) -> String {
         let slug = file.replace(' ', "_");
+        // Credits can be long unbroken names, as a derivative work's often is.
+        let author = match file {
+            "Somebody concert 01.jpg" => "Somebody_Coachella_2012_derivative_work_by_a_very_long_username_and_more".to_string(),
+            _ => format!("Author of {file}"),
+        };
         format!(
             r#""{slug}":{{"title":"File:{file}","imageinfo":[{{"thumburl":"https://upload.wikimedia.org/thumb/{slug}/320px-{slug}","url":"https://upload.wikimedia.org/{slug}",
             "descriptionurl":"https://commons.wikimedia.org/wiki/File:{slug}","mime":"{mime}","width":{w},"height":{h},
-            "extmetadata":{{"Artist":{{"value":"Author of {file}"}},"LicenseShortName":{{"value":"CC BY 4.0"}}}}}}]}}"#
+            "extmetadata":{{"Artist":{{"value":"{author}"}},"LicenseShortName":{{"value":"CC BY 4.0"}}}}}}]}}"#
         )
     }
 
@@ -509,7 +514,7 @@ pub(crate) mod tests {
         assert_eq!(category.len(), CATEGORY_MAX, "at most a dozen from the category");
         assert_eq!(category[0], "Somebody concert 01.jpg");
         assert!(!category.iter().any(|f| f.contains("poster") || f.contains("icon") || f.contains("panorama") || f.contains("live")), "{category:?}");
-        assert_eq!(found[2].attribution.line(), "Photo: Author of Somebody concert 01.jpg · CC BY 4.0 · Wikimedia Commons");
+        assert_eq!(found[3].attribution.line(), "Photo: Author of Somebody concert 02.jpg · CC BY 4.0 · Wikimedia Commons");
         assert!(found.iter().all(|c| c.thumb.contains("320px")));
         assert_eq!(asked.lock().unwrap().len(), 4, "artist, item, the named files at once, the category");
     }
