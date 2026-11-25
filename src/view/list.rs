@@ -89,7 +89,8 @@ pub(super) fn list(s: &App, p: &Palette, cx: &mut Cx<App>) -> El {
                     let playing = current && s.playing;
                     let number = number_in(s, track, section);
                     let view = s.views.active();
-                    let columns = table::Columns { shown: &view.columns, widths: &view.widths, pills: &[], covers: view.covers };
+                    let fits = s.list_fits();
+                    let columns = table::Columns { shown: &view.columns, widths: &view.widths, fits: &fits, pills: &[], covers: view.covers };
                     let covers = if view.covers { s.covers.as_ref().map_or(0, |c| c.generation()) } else { 0 };
                     memo(row_key(track, section), (s.list_version, number, selected, current, playing, p.dark, columns.version(), covers), || {
                         let cover = view.covers.then(|| song_cover(s, format!("cover{track}"), track, table::COVER_W, &p));
@@ -126,7 +127,8 @@ pub(super) fn list(s: &App, p: &Palette, cx: &mut Cx<App>) -> El {
     // Songs: a table as wide as its columns need, scrolling sideways when the window is
     // narrower. The column header sits above the viewport and follows its sideways scroll.
     let view = s.views.active();
-    let columns = table::Columns { shown: &view.columns, widths: &view.widths, pills: &[], covers: view.covers };
+    let fits = s.list_fits();
+    let columns = table::Columns { shown: &view.columns, widths: &view.widths, fits: &fits, pills: &[], covers: view.covers };
     // A viewport scrolling both ways lays its content out at its natural width, so the table
     // fills the viewport itself, and is wider when its columns need it.
     let min_w = table::min_width(columns, LIST_PX).max(width + 2.0 * pad);

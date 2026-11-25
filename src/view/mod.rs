@@ -33,6 +33,7 @@ use crate::library::Track;
 use crate::palette::Palette;
 
 pub use albums::columns_for;
+pub use table::fits as column_fits;
 
 const ROW_H: f32 = 44.0;
 /// The header's tabs: as tall as the header's bottom edge they stand on, so their bottoms line up with it.
@@ -105,6 +106,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     picture_picker::picture_picker(s, &p, &kit, &mut layer);
     queue::replace_dialog(s, &p, &kit, &mut layer);
     song_menu::song_menu(s, &kit, zoom, &mut layer);
+    table::column_menu(s, &kit, zoom, &mut layer);
     layer.extend(zoom_toast(s, zoom, &p));
     let root = zoomed(window, zoom, &p, rune_kit::root(body, layer));
     // Ctrl+V on an artist page, outside a field, pastes their picture.
@@ -572,12 +574,6 @@ impl Borders for El {
     fn border_bottom(self, p: &Palette) -> El {
         self.child(el().pin(Some(0.0), None, Some(0.0), Some(0.0)).h(1.0).fill(p.ui.alpha(0.7)))
     }
-}
-
-/// A column's default width, for tests.
-#[cfg(test)]
-pub fn table_width(c: crate::query::property::Property) -> f32 {
-    table::width(c)
 }
 
 pub fn clock(seconds: f64) -> String {

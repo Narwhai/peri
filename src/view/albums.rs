@@ -11,6 +11,8 @@ use crate::icons;
 use crate::library::Track;
 use crate::palette::Palette;
 use std::collections::HashSet;
+use crate::query::property::Property;
+use crate::query::view::Widths;
 
 pub(super) const CARD_GAP: f32 = 18.0;
 /// Card height below the cover: title, meta and artist lines.
@@ -184,17 +186,22 @@ pub(super) fn list_card(s: &App, a: usize, section: Option<usize>, p: &Palette) 
         .fill(p.bg2)
         .gap(14.0)
         .child(row().gap(18.0).items_start().child(art).child(head))
-        .child(track_table(s, a, table::Columns { shown: &s.views.active().columns, widths: &s.views.active().widths, pills: &[], covers: false }, s.view_matches.as_ref(), &s.search_words, p));
+        .child(track_table(s, a, &format!("album{a}"), &s.views.active().columns, &s.views.active().widths, s.view_matches.as_ref(), &s.search_words, p));
     // Padding, not margin: virtual rows size each row by its box, so the gap sits inside it.
     col().w_full().pb(16.0).child(card)
 }
 
-/// The album's songs as a table with the page columns. Double-click plays the album from
-/// that song. Album cards in list views use the view's columns instead, and list only the
-/// songs in `matches` when it's given, with `words` highlighted.
-fn track_table(s: &App, a: usize, columns: table::Columns, matches: Option<&HashSet<usize>>, words: &[String], p: &Palette) -> El {
+/// The album's songs as a table with the page columns, its columns sized to its songs (`table`
+/// keys what they measure to). Double-click plays the album from that song. Album cards in
+/// list views use the view's columns instead, and list only the songs in `matches` when it's
+/// given, with `words` highlighted.
+#[allow(clippy::too_many_arguments)]
+fn track_table(s: &App, a: usize, table: &str, shown: &[Property], widths: &Widths, matches: Option<&HashSet<usize>>, words: &[String], p: &Palette) -> El {
     let album = &s.albums()[a];
     let keep = |i: usize| matches.is_none_or(|m| m.contains(&i));
+    let listed: Vec<usize> = album.tracks.iter().copied().filter(|&i| keep(i)).collect();
+    let fits = s.column_fits(table, &listed, shown);
+    let columns = table::Columns { shown, widths, fits: &fits, pills: &[], covers: false };
     let discs = album.discs(s.tracks(), keep);
     let mut rows = col().w_full();
     let mut disc = None;
@@ -402,7 +409,7 @@ pub(super) fn album_page(s: &App, a: usize, p: &Palette) -> El {
         .gap(22.0)
         .child(back)
         .child(top)
-        .child(track_table(s, a, table::Columns { shown: &s.views.page_columns, widths: &s.views.page_widths, pills: &[], covers: false }, None, &[], p))
+        .child(track_table(s, a, "album-page", &s.views.page_columns, &s.views.page_widths, None, &[], p))
         .children(album.label.as_deref().map(|label| release_line(album.year, label, p)));
     let more = more_by(s, a, p);
     if let Some(more) = more {

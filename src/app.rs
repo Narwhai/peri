@@ -204,6 +204,15 @@ pub enum ArtistTab {
     Songs,
 }
 
+/// The open column menu: the header's column it opened on, what each column of its table
+/// needs to show its rows whole, and where it opened.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ColumnMenu {
+    pub column: Property,
+    pub fits: Widths,
+    pub at: PointerPress,
+}
+
 /// What a song menu acts on: one song or one album.
 #[derive(Clone, Debug, PartialEq)]
 pub enum SongMenuTarget {
@@ -322,6 +331,11 @@ pub struct App {
     pub view_matches: Option<HashSet<usize>>,
     /// Each column's width as last laid out on screen, where a resize drag starts from.
     pub laid_out_widths: std::collections::HashMap<Property, f32>,
+    /// What each table's columns need to show its rows whole, by table key, with a hash of
+    /// what they were measured from. Views only have `&App`, so it sits behind a `RefCell`.
+    column_fits: std::cell::RefCell<HashMap<String, (u64, Rc<Widths>)>>,
+    /// The open right-click menu on a table header.
+    pub column_menu: Option<ColumnMenu>,
     /// Index into `tracks` of the highlighted row.
     pub selected: Option<usize>,
     /// Index into `tracks` of the loaded track.
@@ -522,6 +536,8 @@ impl App {
             search_words: Vec::new(),
             view_matches: None,
             laid_out_widths: Default::default(),
+            column_fits: Default::default(),
+            column_menu: None,
             selected: None,
             current: None,
             queue: None,
@@ -1060,6 +1076,59 @@ impl App {
             Page::Library => &mut self.views.active_mut().widths,
             Page::Album(_) | Page::Artist(_) | Page::Label(_) | Page::Collab(_) | Page::Search | Page::Settings | Page::Graph | Page::Home => &mut self.views.page_widths,
         }
+    }
+
+    /// What the title and each of `shown` need to show the songs `rows` whole, in the table
+    /// keyed `table`: measured once for each set of rows and columns.
+    pub fn column_fits(&self, table: &str, rows: &[usize], shown: &[Property]) -> Rc<Widths> {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        rows.hash(&mut h);
+        self.fits_with(table, h.finish(), shown, || rows.to_vec())
+    }
+
+    /// What the active view's columns need to show the library's songs whole: measured over
+    /// the whole library, so the columns hold still while a search or filter narrows the list.
+    pub fn list_fits(&self) -> Rc<Widths> {
+        let view = self.views.active();
+        self.fits_with("list", 0, &view.columns, || (0..self.tracks.len()).collect())
+    }
+
+    /// The fits kept for `table` when `stamp`, the library and `shown` are as they were, else
+    /// measured anew over the songs `rows` gives.
+    fn fits_with(&self, table: &str, stamp: u64, shown: &[Property], rows: impl FnOnce() -> Vec<usize>) -> Rc<Widths> {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (stamp, self.data_version, shown).hash(&mut h);
+        let key = h.finish();
+        if let Some((kept, fits)) = self.column_fits.borrow().get(table)
+            && *kept == key
+        {
+            return fits.clone();
+        }
+        let fits = Rc::new(crate::view::column_fits(&self.tracks, &rows(), shown));
+        self.column_fits.borrow_mut().insert(table.to_string(), (key, fits.clone()));
+        fits
+    }
+
+    /// What the shown page's song table needs for each column, when one table holds its songs:
+    /// the view's, or the album page's tracklist.
+    pub fn shown_fits(&self) -> Option<Rc<Widths>> {
+        match &self.page {
+            Page::Library if self.mode() == Mode::Songs => Some(self.list_fits()),
+            Page::Album(_) => self.open_album().map(|a| self.column_fits("album-page", &self.albums[a].tracks, &self.views.page_columns)),
+            _ => None,
+        }
+    }
+
+    /// Sets the shown tables' columns, `only` that one when given, to what `fits` says they
+    /// need, then saves the views.
+    pub fn fit_column_widths(&mut self, fits: &Widths, only: Option<Property>) {
+        let widths = self.shown_widths_mut();
+        for (&c, &w) in fits.iter().filter(|&(c, _)| only.is_none_or(|o| o == *c)) {
+            widths.insert(c, w);
+        }
+        self.views_changed();
     }
 
     /// The artist shown on the artist page.

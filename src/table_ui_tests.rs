@@ -262,6 +262,15 @@ fn drag_held(rt: &mut Runtime<App>, key: &str, dy: f32) -> (f32, f32) {
     (x, y + dy)
 }
 
+fn double_click(rt: &mut Runtime<App>, key: &str) {
+    let (x, y) = rt.find(key).unwrap_or_else(|| panic!("no element {key}"));
+    for _ in 0..2 {
+        rt.pointer_down(x, y);
+        rt.pointer_up(x, y);
+    }
+    settle(rt);
+}
+
 fn drag(rt: &mut Runtime<App>, key: &str, dx: f32) {
     let (x, y) = rt.find(key).unwrap_or_else(|| panic!("no element {key}"));
     rt.pointer_down(x, y);
@@ -274,11 +283,12 @@ fn drag(rt: &mut Runtime<App>, key: &str, dx: f32) {
 }
 
 #[test]
-fn dragging_a_header_edge_resizes_the_column_and_double_click_or_reset_restores_it() {
+fn dragging_a_header_edge_resizes_the_column_and_double_click_fits_or_restores_it() {
     let mut rt = runtime();
     let album = "table-header-col-album";
     let grown = width_of(&rt, album);
-    assert!(grown > crate::view::table_width(Property::Album), "album names grow with spare room, got {grown}");
+    let fit = rt.state.list_fits()[&Property::Album];
+    assert!((grown - fit).abs() <= 1.0, "with room to spare, album names are as wide as they need: {grown} ≠ {fit}");
     drag(&mut rt, &format!("{album}-resize"), 60.0);
     let set = rt.state.views.active().widths.get(&Property::Album).copied().expect("dragging sets a width");
     assert!((set - (grown + 60.0)).abs() <= 1.0, "the drag starts from the width on screen: {grown} + 60 ≠ {set}");
@@ -287,13 +297,11 @@ fn dragging_a_header_edge_resizes_the_column_and_double_click_or_reset_restores_
     // Never narrower than the minimum.
     drag(&mut rt, &format!("{album}-resize"), -1000.0);
     assert_eq!(rt.state.views.active().widths.get(&Property::Album).copied(), Some(40.0));
-    // Double-click lets it size itself again.
-    let (x, y) = rt.find(&format!("{album}-resize")).expect("handle");
-    for _ in 0..2 {
-        rt.pointer_down(x, y);
-        rt.pointer_up(x, y);
-    }
-    settle(&mut rt);
+    // Double-click fits it to its content; again, it sizes itself again.
+    double_click(&mut rt, &format!("{album}-resize"));
+    assert_eq!(rt.state.views.active().widths.get(&Property::Album).copied(), Some(fit));
+    assert!((width_of(&rt, album) - fit).abs() <= 1.0);
+    double_click(&mut rt, &format!("{album}-resize"));
     assert!(rt.state.views.active().widths.is_empty());
     // Reset widths in the Columns popover clears every dragged width.
     drag(&mut rt, "table-header-col-duration-resize", 30.0);
@@ -312,4 +320,109 @@ fn page_tables_keep_their_own_widths() {
     drag(&mut rt, "credits-header-col-artist-resize", 50.0);
     assert!(rt.state.views.page_widths.contains_key(&Property::Artist));
     assert!(rt.state.views.active().widths.is_empty(), "the view's widths are its own");
+}
+
+/// An album page whose song titles run long and whose credits are cramped by default.
+fn long_titles_runtime() -> Runtime<App> {
+    let mut rt = runtime();
+    rt.update(|s, _| {
+        s.views.page_columns = vec![Property::Artist, Property::Producer, Property::Duration];
+        s.views_changed();
+    });
+    let a = rt.state.albums().iter().position(|a| a.title == "Day of Radiance").expect("album");
+    rt.update(|s, tx| s.show_album(a, tx));
+    settle(&mut rt);
+    rt
+}
+
+#[test]
+fn the_title_column_sizes_to_its_songs_and_resizes_like_the_others() {
+    let mut rt = long_titles_runtime();
+    let title = width_of(&rt, "tracks-header-col-title");
+    let fit = rt.state.column_fits("album-page", &rt.state.albums()[rt.state.open_album().unwrap()].tracks.clone(), &rt.state.views.page_columns)[&Property::Title];
+    // The other columns show their content whole before the title takes the room left.
+    let fits = rt.state.column_fits("album-page", &rt.state.albums()[rt.state.open_album().unwrap()].tracks.clone(), &rt.state.views.page_columns);
+    for (c, key) in [(Property::Artist, "artist"), (Property::Producer, "producer"), (Property::Duration, "duration")] {
+        let w = width_of(&rt, &format!("tracks-header-col-{key}"));
+        assert!((w - fits[&c]).abs() <= 1.0, "{c:?} is as wide as its content: {w} ≠ {}", fits[&c]);
+    }
+    assert!(title >= fit - 1.0, "the title never truncates when there's room: {title} < {fit}");
+    assert!(title <= 421.0, "short titles don't take the whole row: {title}");
+    // Dragging its edge sets its width, kept with the page widths.
+    drag(&mut rt, "tracks-header-col-title-resize", 80.0);
+    let set = rt.state.views.page_widths.get(&Property::Title).copied().expect("dragging the title sets a width");
+    assert!((width_of(&rt, "tracks-header-col-title") - set).abs() <= 1.0);
+    assert!((set - (title + 80.0)).abs() <= 1.0, "the drag starts from the width on screen: {title} + 80 ≠ {set}");
+    assert!(rt.state.views.active().widths.is_empty(), "the view's widths are its own");
+    // Double-click fits it to its content.
+    double_click(&mut rt, "tracks-header-col-title-resize");
+    assert_eq!(rt.state.views.page_widths.get(&Property::Title).copied(), Some(fit));
+}
+
+#[test]
+fn columns_share_the_spare_width_by_what_they_need() {
+    let mut rt = runtime();
+    // A song whose artist line runs long: the artist column takes more than the album's.
+    rt.update(|s, _| {
+        let i = s.tracks().iter().position(|t| t.title == "Super Shy").unwrap();
+        s.edit_track(i, |t| t.credit = Some("NewJeans feat. A Very Long List Of Guest Artists And Friends".into()));
+    });
+    settle(&mut rt);
+    let artist = width_of(&rt, "table-header-col-artist");
+    let album = width_of(&rt, "table-header-col-album");
+    let duration = width_of(&rt, "table-header-col-duration");
+    assert!(artist > album, "the longer content gets more room: artist {artist}, album {album}");
+    let fits = rt.state.list_fits();
+    assert!((duration - fits[&Property::Duration]).abs() <= 1.0, "numbers keep to their content: {duration}");
+    assert!(artist >= fits[&Property::Artist] - 1.0, "nothing truncates when the window has room");
+}
+
+#[test]
+fn the_header_menu_fits_and_resets_one_or_all_columns() {
+    let mut rt = long_titles_runtime();
+    right_click(&mut rt, "tracks-header-col-artist");
+    assert_eq!(rt.state.column_menu.as_ref().map(|m| m.column), Some(Property::Artist));
+    choose(&mut rt, "Fit all columns to content");
+    assert!(rt.state.column_menu.is_none());
+    let widths = rt.state.views.page_widths.clone();
+    for c in [Property::Title, Property::Artist, Property::Producer, Property::Duration] {
+        assert!(widths.contains_key(&c), "{c:?} is fitted: {widths:?}");
+    }
+    assert!((width_of(&rt, "tracks-header-col-producer") - widths[&Property::Producer]).abs() <= 1.0);
+    // Resetting one column lets it size itself again; resetting all clears them.
+    right_click(&mut rt, "tracks-header-col-artist");
+    choose(&mut rt, "Reset Artist width");
+    assert!(!rt.state.views.page_widths.contains_key(&Property::Artist));
+    assert!(rt.state.views.page_widths.contains_key(&Property::Title));
+    right_click(&mut rt, "tracks-header-col-artist");
+    choose(&mut rt, "Reset all column widths");
+    assert!(rt.state.views.page_widths.is_empty());
+}
+
+#[test]
+fn the_columns_popover_fits_every_width() {
+    let mut rt = runtime();
+    click(&mut rt, "columns");
+    click(&mut rt, "columns-fit-widths");
+    let fits = rt.state.list_fits();
+    assert_eq!(&rt.state.views.active().widths, &*fits);
+    assert!(rt.state.views.active().widths.contains_key(&Property::Title));
+}
+
+fn right_click(rt: &mut Runtime<App>, key: &str) {
+    let (x, y) = rt.find(key).unwrap_or_else(|| panic!("no element {key}"));
+    rt.secondary_down(x, y);
+    rt.secondary_up(x, y);
+    settle(rt);
+}
+
+/// Presses the open menu's item labelled `label`.
+fn choose(rt: &mut Runtime<App>, label: &str) {
+    let key = rt
+        .elements()
+        .into_iter()
+        .find(|e| e.key.as_deref().is_some_and(|k| k.starts_with("column-menu-item")) && e.label.as_deref() == Some(label))
+        .and_then(|e| e.key.clone())
+        .unwrap_or_else(|| panic!("no menu item {label}"));
+    click(rt, &key);
 }

@@ -315,7 +315,8 @@ fn recent_songs(s: &App, p: &Palette) -> El {
     if list.is_empty() {
         return section_empty("recent-songs", "Recently Played", "Nothing played yet.", p);
     }
-    let columns = table::Columns { shown: &RECENT_COLUMNS, widths: &s.views.page_widths, pills: &[], covers: true };
+    let fits = s.column_fits("recent-songs", &list, &RECENT_COLUMNS);
+    let columns = table::Columns { shown: &RECENT_COLUMNS, widths: &s.views.page_widths, fits: &fits, pills: &[], covers: true };
     let mut body = col().child(table::header("recent-songs-header", "", columns, 8.0, p));
     for (n, &i) in list.iter().enumerate() {
         body = body.child(song_line(s, i, &list, !n.is_multiple_of(2), columns, p));

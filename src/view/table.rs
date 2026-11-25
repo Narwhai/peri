@@ -1,13 +1,20 @@
 //! Song tables: a header and rows with the title and the view's columns. The song list, album
 //! track tables and the artist page share them. Names in list columns (artists, credits) open
 //! the artist's page, and each row has a details button that opens the song details dialog.
-//! Dragging a header's right edge sets that column's width; double-clicking it lets the
-//! column size itself again.
+//! Columns size themselves to their content: each table measures what its rows show (see
+//! [`fits`]). Columns of names share the room in proportion to it, up to what they need, and
+//! the title takes the rest up to a cap. Dragging a header's right edge, the title's too, sets
+//! that column's width; double-clicking it fits the column to its content, and again lets it
+//! size itself. Right-clicking a header fits or resets one column or all of them.
 
-use rune::{Align, Color, Cursor, Drag, El, Phase, Tx, col, el, icon, row, text};
+use std::cmp::Reverse;
+
+use rune::{Align, Color, Cursor, Drag, El, Phase, TextStyle, Tx, col, el, icon, row, text};
+use rune_kit::{Kit, MenuItem, context_menu};
 
 use super::*;
 use crate::query::property::{Kind, Property, Value};
+use crate::app::ColumnMenu;
 use crate::query::view::Widths;
 use crate::icons;
 use crate::library::Track;
@@ -17,9 +24,10 @@ use crate::palette::Palette;
 pub const LEAD_W: f32 = 28.0;
 /// The album cover after the lead, when the table shows covers.
 pub const COVER_W: f32 = 32.0;
-/// The title column takes the room left, but never less than this.
-pub const TITLE_MIN: f32 = 220.0;
 const DETAILS_W: f32 = 28.0;
+/// The details button's column takes the room no column takes: only when every column has a
+/// set width, as its share beside a growing column is next to nothing.
+const TAIL_GROW: f32 = 0.01;
 pub const GAP: f32 = 12.0;
 /// A dragged column is never narrower than this.
 const MIN_W: f32 = 40.0;
@@ -28,11 +36,17 @@ const HANDLE_W: f32 = 8.0;
 /// The column names: semi-bold, so the header stands apart from the rows.
 const HEADER: TextStyle = TextStyle::new(11.5, 600.0);
 
+/// Widths by their bits, for memo versions.
+pub type WidthBits = Vec<(Property, u32)>;
+
 /// A table's columns after the title, and the widths the user dragged some of them to.
 #[derive(Clone, Copy)]
 pub struct Columns<'a> {
     pub shown: &'a [Property],
     pub widths: &'a Widths,
+    /// What each column, the title's too, needs to show its rows whole (see [`fits`]); a
+    /// column missing here takes its default [`width`].
+    pub fits: &'a Widths,
     /// The widths of the pill slots in a Roles column after the title; none, no such column.
     pub pills: &'a [f32],
     /// Whether rows show their album's cover between the lead and the title.
@@ -41,17 +55,36 @@ pub struct Columns<'a> {
 
 impl<'a> Columns<'a> {
     /// What changes a row's look, for memo versions.
-    pub fn version(&self) -> (Vec<Property>, Vec<(Property, u32)>, bool) {
-        (self.shown.to_vec(), self.widths.iter().map(|(&c, w)| (c, w.to_bits())).collect(), self.covers)
+    pub fn version(&self) -> (Vec<Property>, WidthBits, WidthBits, bool) {
+        let bits = |w: &Widths| w.iter().map(|(&c, w)| (c, w.to_bits())).collect();
+        (self.shown.to_vec(), bits(self.widths), bits(self.fits), self.covers)
+    }
+
+    /// What column `c` needs to show its rows whole.
+    fn fit(&self, c: Property) -> f32 {
+        self.fits.get(&c).copied().unwrap_or_else(|| width(c))
+    }
+
+    /// The narrowest column `c` gets before the table scrolls sideways: its set width, else
+    /// what it needs, but a growing column truncates below its default width rather than make
+    /// the table scroll.
+    fn floor(&self, c: Property) -> f32 {
+        match self.widths.get(&c) {
+            Some(&w) => w,
+            None if grows(c) => self.fit(c).min(width(c)),
+            None => self.fit(c),
+        }
+    }
+
+    /// The title, then the shown columns.
+    fn all(&self) -> impl Iterator<Item = Property> + '_ {
+        std::iter::once(Property::Title).chain(self.shown.iter().copied())
     }
 }
 
-/// A column's width: as dragged, else its default.
-fn width_in(widths: &Widths, c: Property) -> f32 {
-    widths.get(&c).copied().unwrap_or_else(|| width(c))
-}
 
 /// A column's default width, after the property's kind: short for numbers, wide for names.
+/// Growing columns shrink to it (or to their content, when narrower) before the table scrolls.
 pub fn width(p: Property) -> f32 {
     match p {
         Property::Track | Property::Disc => 44.0,
@@ -60,38 +93,97 @@ pub fn width(p: Property) -> f32 {
         Property::Added | Property::LastPlayed | Property::ReleaseType => 96.0,
         Property::Folder => 260.0,
         Property::Album | Property::Label | Property::Genre => 180.0,
-        Property::Title => TITLE_MIN,
+        Property::Title => 200.0,
         _ => 170.0,
     }
 }
 
-/// How much of the spare width a column takes beside the title (which takes 1), until it's
-/// dragged to a width: artist lines and album and label names run long, so they grow with
-/// the window.
-fn grow(p: Property) -> f32 {
+/// Whether a column takes a share of the spare width, until it's dragged to a width: text
+/// runs long (titles, names, folders), so those columns grow with the window, each in
+/// proportion to what its rows need. Numbers, dates and short labels keep to their content.
+fn grows(p: Property) -> bool {
+    matches!(p.kind(), Kind::Text | Kind::List) && !matches!(p, Property::Format | Property::ReleaseType)
+}
+
+/// The most a column measures to: one long title or credit list doesn't take the table.
+fn cap(p: Property) -> f32 {
     match p {
-        Property::Artist | Property::AlbumArtist => 0.8,
-        Property::Album | Property::Label => 0.6,
-        _ => 0.0,
+        Property::Title | Property::Folder => 420.0,
+        p if grows(p) => 320.0,
+        _ => 200.0,
     }
 }
 
-/// Sizes a header or row cell for column `c`: its dragged width, else its default growing
-/// with the spare room.
-fn sized(e: El, c: Property, widths: &Widths) -> El {
-    match widths.get(&c) {
+/// Room past the widest text, so it doesn't truncate on rounding.
+const FIT_PAD: f32 = 4.0;
+/// How many of a column's longest texts (by characters) are measured: shaping is the cost,
+/// and the longest few stand for the rest.
+const FIT_SAMPLE: usize = 24;
+/// How many rows a column's texts are read from, at most.
+const FIT_ROWS: usize = 4000;
+
+/// What the title and each of `shown` need to show the songs `rows` of `tracks` whole, and
+/// their names: the widest text, capped (see [`cap`]), never under the drag minimum.
+pub fn fits(tracks: &[Track], rows: &[usize], shown: &[Property]) -> Widths {
+    std::iter::once(Property::Title).chain(shown.iter().copied()).map(|c| (c, fit(tracks, rows, c))).collect()
+}
+
+fn fit(tracks: &[Track], rows: &[usize], c: Property) -> f32 {
+    // A long list stands for itself by an even sample.
+    let step = rows.len().div_ceil(FIT_ROWS).max(1);
+    let mut texts: Vec<String> = rows.iter().step_by(step).filter_map(|&i| tracks.get(i)).map(|t| shown_text(t, c)).filter(|s| !s.is_empty()).collect();
+    if texts.len() > FIT_SAMPLE {
+        texts.select_nth_unstable_by_key(FIT_SAMPLE - 1, |s| Reverse(s.chars().count()));
+        texts.truncate(FIT_SAMPLE);
+    }
+    let style = cell_style(c);
+    let content = texts.iter().map(|s| rune::text::measure(s, &[], style, None).0).fold(0.0, f32::max);
+    let name = rune::text::measure(c.label(), &[], HEADER, None).0;
+    (content.max(name) + FIT_PAD).ceil().clamp(MIN_W, cap(c))
+}
+
+/// The text a row's cell for `c` shows, as [`cell`] sets it.
+fn shown_text(t: &Track, c: Property) -> String {
+    match c {
+        Property::Title => t.title.clone(),
+        Property::Artist => t.artist().unwrap_or_default(),
+        Property::AlbumArtist => t.album_artist.clone().unwrap_or_else(|| t.album_artists.join(", ")),
+        _ => match c.value(t) {
+            Value::None => String::new(),
+            Value::Text(f) if c == Property::Format => f.to_uppercase(),
+            v => c.display(&v),
+        },
+    }
+}
+
+/// The font a row's cell for `c` is set in.
+fn cell_style(c: Property) -> TextStyle {
+    match c {
+        Property::Format => SMALL,
+        c if numeric(c) => NUM,
+        _ => BODY,
+    }
+}
+
+/// Sizes a header or row cell for column `c`: its dragged width; else, growing, at least its
+/// floor and a share of the room in proportion to what it needs, up to that (the title up to
+/// its cap, past what it needs); else what it needs. So no column is wider than its content
+/// while another is cut short, and room past that falls to the end of the row.
+fn sized(e: El, c: Property, columns: &Columns) -> El {
+    match columns.widths.get(&c) {
         Some(&w) => e.w(w),
-        None if grow(c) > 0.0 => e.w(width(c)).grow(grow(c)),
-        None => e.w(width(c)),
+        None if c == Property::Title => e.min_w(columns.floor(c)).max_w(cap(c).max(columns.fit(c))).grow(columns.fit(c)),
+        None if grows(c) => e.min_w(columns.floor(c)).max_w(columns.fit(c)).grow(columns.fit(c)),
+        None => e.w(columns.fit(c)),
     }
 }
 
 /// How wide a table with `columns` must be before it scrolls sideways.
 pub fn min_width(columns: Columns, px: f32) -> f32 {
-    let cells: f32 = columns.shown.iter().map(|&c| width_in(columns.widths, c) + GAP).sum();
+    let cells: f32 = columns.all().map(|c| columns.floor(c) + GAP).sum();
     let pills = if columns.pills.is_empty() { 0.0 } else { pills_width(columns.pills) + GAP };
     let covers = if columns.covers { COVER_W + GAP } else { 0.0 };
-    2.0 * px + LEAD_W + GAP + covers + TITLE_MIN + pills + cells + GAP + DETAILS_W
+    2.0 * px + LEAD_W + GAP + covers + cells + pills + DETAILS_W
 }
 
 /// The Roles column's width: its slots side by side.
@@ -114,32 +206,40 @@ pub fn scrolling(key: String, columns: Columns, px: f32, body: El, p: &Palette) 
 }
 
 /// The header row: "#", "Title" and each column's name, with a resize handle at each
-/// column's right edge. `lead` heads the lead column: "#" over numbers, "" over covers.
+/// column's right edge, and a menu on right-click to fit or reset the widths. `lead` heads the
+/// lead column: "#" over numbers, "" over covers.
 pub fn header(key: &str, lead: &str, columns: Columns, px: f32, p: &Palette) -> El {
     let mut r = row().key(key.to_string()).w_full().h(32.0).px(px).gap(GAP).center_y().fill(p.ui.alpha(0.4));
     r = r.child(text(lead.to_string()).font(HEADER).color(p.tx2).w(LEAD_W).align(Align::End));
     if columns.covers {
         r = r.child(el().w(COVER_W));
     }
-    r = r.child(text("Title").font(HEADER).color(p.tx2).grow(1.0).min_w(TITLE_MIN).shrink());
+    r = r.child(header_cell(key, Property::Title, columns, p));
     if !columns.pills.is_empty() {
         r = r.child(text("Roles").key(format!("{key}-col-roles")).font(HEADER).color(p.tx2).w(pills_width(columns.pills)));
     }
     for &c in columns.shown {
-        let label = text(c.label()).font(HEADER).color(p.tx2).truncate().w_full();
-        let cell = el()
-            .key(format!("{key}-{}", column_key(c)))
-            .h_full()
-            .center_y()
-            .on_layout_tx(move |s: &mut App, r, tx| {
-                s.laid_out_widths.insert(c, r[2]);
-                tx.live_only();
-            })
-            .child(if numeric(c) { label.align(Align::End) } else { label })
-            .child(resize_handle(format!("{key}-{}-resize", column_key(c)), c, p));
-        r = r.child(sized(cell, c, columns.widths));
+        r = r.child(header_cell(key, c, columns, p));
     }
-    r.child(el().w(DETAILS_W))
+    r.child(el().min_w(DETAILS_W).grow(TAIL_GROW))
+}
+
+/// Column `c`'s name, with its resize handle, and the column menu on right-click.
+fn header_cell(key: &str, c: Property, columns: Columns, p: &Palette) -> El {
+    let label = text(c.label()).font(HEADER).color(p.tx2).truncate().w_full();
+    let fits = columns.fits.clone();
+    let cell = el()
+        .key(format!("{key}-{}", column_key(c)))
+        .h_full()
+        .center_y()
+        .on_layout_tx(move |s: &mut App, r, tx| {
+            s.laid_out_widths.insert(c, r[2]);
+            tx.live_only();
+        })
+        .on_secondary_press(move |s: &mut App, at, _tx| s.column_menu = Some(ColumnMenu { column: c, fits: fits.clone(), at }))
+        .child(if numeric(c) { label.align(Align::End) } else { label })
+        .child(resize_handle(format!("{key}-{}-resize", column_key(c)), c, columns.fit(c), p));
+    sized(cell, c, &columns)
 }
 
 /// "col-album-artist": a column's key part.
@@ -147,8 +247,9 @@ fn column_key(c: Property) -> String {
     format!("col-{}", c.label().to_lowercase().replace(' ', "-"))
 }
 
-/// Drag to set column `c`'s width; double-click to let it size itself again.
-fn resize_handle(key: String, c: Property, p: &Palette) -> El {
+/// Drag to set column `c`'s width; double-click to fit it to its content, `fit` wide, or, when
+/// it already is, to let it size itself again.
+fn resize_handle(key: String, c: Property, fit: f32, p: &Palette) -> El {
     el().key(key)
         .pin(None, Some(0.0), Some(-(GAP + HANDLE_W) / 2.0), Some(0.0))
         .w(HANDLE_W)
@@ -156,12 +257,17 @@ fn resize_handle(key: String, c: Property, p: &Palette) -> El {
         .cursor(Cursor::ResizeColumn)
         .role("separator")
         .label(format!("Resize {}", c.label()))
-        .help("Drag to resize; double-click to reset")
+        .help("Drag to resize; double-click to fit to content, again to reset")
         .child(el().w(1.0).h(14.0).radius(0.5).fill(p.ui.alpha(0.9)).group_opacity(0.0, 1.0))
         .hover_group()
         .on_drag(move |s: &mut App, d: &mut Drag, _tx: &mut Tx| match d.phase {
-            Phase::Down if d.clicks >= 2 => {
-                s.shown_widths_mut().remove(&c);
+            Phase::Down if d.clicks >= 2 && d.clicks.is_multiple_of(2) => {
+                let widths = s.shown_widths_mut();
+                if widths.get(&c) == Some(&fit) {
+                    widths.remove(&c);
+                } else {
+                    widths.insert(c, fit);
+                }
                 d.data = f32::NAN;
             }
             Phase::Down => {
@@ -180,6 +286,39 @@ fn resize_handle(key: String, c: Property, p: &Palette) -> El {
                 s.views_changed();
             }
         })
+}
+
+/// The header's right-click menu, when open: fit or reset its column, or every column of its
+/// table. Mounted once, from the window, under the pointer at any `zoom`.
+pub(super) fn column_menu(s: &App, kit: &Kit, zoom: f32, layer: &mut Vec<El>) {
+    let Some(menu) = s.column_menu.clone() else { return };
+    let c = menu.column;
+    let set = s.shown_widths().contains_key(&c);
+    let fits = menu.fits.clone();
+    let all = menu.fits.clone();
+    context_menu("column-menu", el().size(0.0, 0.0), Some(unzoomed(menu.at, zoom)))
+        .group_label(c.label())
+        .item(MenuItem::new(format!("Fit {} to content", c.label())).on_select(move |s: &mut App| {
+            s.column_menu = None;
+            s.fit_column_widths(&fits, Some(c));
+        }))
+        .item(MenuItem::new(format!("Reset {} width", c.label())).disabled(!set).on_select(move |s: &mut App| {
+            s.column_menu = None;
+            s.shown_widths_mut().remove(&c);
+            s.views_changed();
+        }))
+        .separator()
+        .item(MenuItem::new("Fit all columns to content").on_select(move |s: &mut App| {
+            s.column_menu = None;
+            s.fit_column_widths(&all, None);
+        }))
+        .item(MenuItem::new("Reset all column widths").disabled(s.shown_widths().is_empty()).on_select(|s: &mut App| {
+            s.column_menu = None;
+            s.shown_widths_mut().clear();
+            s.views_changed();
+        }))
+        .on_close(|s: &mut App| s.column_menu = None)
+        .build(kit, layer);
 }
 
 /// The lines between rows and around the table.
@@ -229,7 +368,7 @@ pub fn song_row(t: &Track, i: usize, columns: Columns, look: RowLook, words: &[S
     if let Some(cover) = look.cover {
         r = r.child(cover);
     }
-    r = r.child(row().grow(1.0).min_w(TITLE_MIN).shrink().gap(8.0).center_y().child(title.shrink()));
+    r = r.child(sized(row().gap(8.0).center_y().child(title.shrink()), Property::Title, &columns));
     if !columns.pills.is_empty() {
         let mut slots = row().key("roles").w(pills_width(columns.pills)).gap(PILL_GAP).center_y();
         for (k, &w) in columns.pills.iter().enumerate() {
@@ -242,9 +381,9 @@ pub fn song_row(t: &Track, i: usize, columns: Columns, look: RowLook, words: &[S
         r = r.child(slots);
     }
     for &c in columns.shown {
-        r = r.child(sized(cell(t, i, c, words, p), c, columns.widths).key(column_key(c)));
+        r = r.child(sized(cell(t, i, c, words, p), c, &columns).key(column_key(c)));
     }
-    r.child(details_button(i, p))
+    r.child(row().min_w(DETAILS_W).grow(TAIL_GROW).justify_end().child(details_button(i, p)))
 }
 
 /// A small coloured label in the Roles column: "Producer", "Performer · vocals".
